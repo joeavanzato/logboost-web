@@ -97,40 +97,40 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| CNTR-01 | TBD | Pending |
-| CNTR-02 | TBD | Pending |
-| CNTR-03 | TBD | Pending |
-| CNTR-04 | TBD | Pending |
-| WSGI-01 | TBD | Pending |
-| WSGI-02 | TBD | Pending |
-| WSGI-03 | TBD | Pending |
-| WSGI-04 | TBD | Pending |
-| ENV-01 | TBD | Pending |
-| ENV-02 | TBD | Pending |
-| ENV-03 | TBD | Pending |
-| ENV-04 | TBD | Pending |
-| HLTH-01 | TBD | Pending |
-| HLTH-02 | TBD | Pending |
-| HLTH-03 | TBD | Pending |
-| VOL-01 | TBD | Pending |
-| VOL-02 | TBD | Pending |
-| VOL-03 | TBD | Pending |
-| VOL-04 | TBD | Pending |
-| VOL-05 | TBD | Pending |
-| VOL-06 | TBD | Pending |
-| SSL-01 | TBD | Pending |
-| SSL-02 | TBD | Pending |
-| SSL-03 | TBD | Pending |
-| DOC-01 | TBD | Pending |
-| DOC-02 | TBD | Pending |
-| DOC-03 | TBD | Pending |
-| DOC-04 | TBD | Pending |
+| CNTR-01 | Phase 1 | Pending |
+| CNTR-02 | Phase 1 | Pending |
+| CNTR-03 | Phase 1 | Pending |
+| CNTR-04 | Phase 1 | Pending |
+| WSGI-01 | Phase 1 | Pending |
+| WSGI-02 | Phase 1 | Pending |
+| WSGI-03 | Phase 1 | Pending |
+| WSGI-04 | Phase 1 | Pending |
+| ENV-01 | Phase 1 | Pending |
+| ENV-02 | Phase 1 | Pending |
+| ENV-03 | Phase 1 | Pending |
+| ENV-04 | Phase 1 | Pending |
+| HLTH-01 | Phase 1 | Pending |
+| HLTH-02 | Phase 1 | Pending |
+| HLTH-03 | Phase 1 | Pending |
+| VOL-01 | Phase 2 | Pending |
+| VOL-02 | Phase 2 | Pending |
+| VOL-03 | Phase 2 | Pending |
+| VOL-04 | Phase 2 | Pending |
+| VOL-05 | Phase 2 | Pending |
+| VOL-06 | Phase 2 | Pending |
+| SSL-01 | Phase 3 | Pending |
+| SSL-02 | Phase 3 | Pending |
+| SSL-03 | Phase 3 | Pending |
+| DOC-01 | Phase 3 | Pending |
+| DOC-02 | Phase 3 | Pending |
+| DOC-03 | Phase 3 | Pending |
+| DOC-04 | Phase 3 | Pending |
 
 **Coverage:**
 - v1 requirements: 28 total
-- Mapped to phases: 0
-- Unmapped: 28 ⚠️
+- Mapped to phases: 28
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-02-25*
-*Last updated: 2026-02-25 after initial definition*
+*Last updated: 2026-02-25 after roadmap creation*
