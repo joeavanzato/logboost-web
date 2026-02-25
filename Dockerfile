@@ -41,7 +41,9 @@ RUN mkdir -p /app/uploads /app/output && chown -R logboost:logboost /app/uploads
 # Pre-create the admin database file so health check passes on first boot
 # sqlite3.connect() auto-creates the file; this ensures it exists before container starts
 # The DB path must match the LOGBOOST_DB_PATH default below
-RUN python -c "from admin import get_db; get_db().close()"
+# chown required because this runs as root after the earlier chown -R
+RUN python -c "from admin import get_db; get_db().close()" \
+    && chown logboost:logboost /app/logboost_admin.db
 
 # Default environment variables — all have sensible defaults per user's locked decision
 # Container works out of the box; override via env vars or .env file
