@@ -1,0 +1,22 @@
+# Allowlist .dockerignore — exclude everything, explicitly include only needed files
+# Prevents secrets, databases, large binaries from entering build context
+
+# Step 1: Exclude everything
+*
+
+# Step 2: Include application source
+!app.py
+!admin.py
+!auth.py
+!security.py
+!requirements.txt
+!gunicorn.conf.py
+
+# Step 3: Include application directories
+!routes/
+!templates/
+!static/
+
+# Step 4: Exclude nested unwanted files from included directories
+**/__pycache__/
+**/*.pyc
