@@ -32,11 +32,11 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. The container runs as a non-root user (verified via `docker exec whoami`)
   4. `docker logs` shows Gunicorn access and error output (no log files inside container)
   5. The Docker health status transitions to `healthy` within 60 seconds of start
-**Plans**: TBD
+**Plans**: 2 plans
 
 Plans:
-- [ ] 01-01: Dockerfile + .dockerignore + gunicorn.conf.py
-- [ ] 01-02: Environment variable wiring + .env.example + health check validation
+- [ ] 01-01-PLAN.md — Dockerfile + .dockerignore + gunicorn.conf.py (Wave 1)
+- [ ] 01-02-PLAN.md — Health check enhancement + .env.example + end-to-end validation (Wave 2)
 
 ### Phase 2: Volume Mount Validation
 **Goal**: A running container has full access to all host-managed backend files; LogBoost enrichment completes successfully end-to-end
@@ -74,6 +74,6 @@ Phases execute in numeric order: 1 → 2 → 3
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Core Container | 0/2 | Not started | - |
+| 1. Core Container | 0/2 | Planned | - |
 | 2. Volume Mount Validation | 0/1 | Not started | - |
 | 3. SSL + Documentation | 0/2 | Not started | - |
