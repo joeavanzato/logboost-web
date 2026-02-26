@@ -16,8 +16,9 @@ termination and the documentation an operator needs to deploy from scratch.
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 1: Core Container** - Buildable, runnable image with correct security defaults and WSGI config
-- [ ] **Phase 2: Volume Mount Validation** - All host files wired in; enrichment works end-to-end
+- [x] **Phase 1: Core Container** - Buildable, runnable image with correct security defaults and WSGI config
+- [x] **Phase 2: Volume Mount Validation** - All host files wired in; enrichment works end-to-end
+- [ ] **Phase 2.1: Bundle LogBoost Binary** - (INSERTED) Bundle Linux binary in Docker, update Setup page for Docker mode
 - [ ] **Phase 3: SSL + Documentation** - HTTPS-secured container with complete operator runbook
 
 ## Phase Details
@@ -50,8 +51,23 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 02-01-PLAN.md — entrypoint.sh + Dockerfile /data dirs + docker-compose.yml + .env.example (Wave 1)
-- [ ] 02-02-PLAN.md — /health mount status fields + end-to-end verification (Wave 2)
+- [x] 02-01-PLAN.md — entrypoint.sh + Dockerfile /data dirs + docker-compose.yml + .env.example (Wave 1)
+- [x] 02-02-PLAN.md — /health mount status fields + end-to-end verification (Wave 2)
+
+### Phase 2.1: Bundle LogBoost Binary (INSERTED)
+**Goal**: Docker image includes bundled LogBoost Linux binary; Setup page detects Docker mode and offers "Check for Updates" instead of download
+**Depends on**: Phase 2
+**Requirements**: None (urgent insertion)
+**Success Criteria** (what must be TRUE):
+  1. Docker image includes pre-installed LogBoost Linux binary at `/usr/local/bin/logboost`
+  2. `/health` endpoint returns `logboost_available: true` immediately after container start (no mount needed)
+  3. Admin Setup page detects Docker mode and shows "LogBoost bundled" status
+  4. "Check for Updates" button compares bundled version with GitHub releases and shows notification if update available
+**Plans**: 2 plans
+
+Plans:
+- [ ] 02.1-01-PLAN.md — Dockerfile binary bundling + docker-compose.yml cleanup (Wave 1)
+- [ ] 02.1-02-PLAN.md — Admin backend + Setup page rewrite for Docker mode (Wave 2)
 
 ### Phase 3: SSL + Documentation
 **Goal**: The container serves HTTPS and an operator can deploy from scratch using only the README
@@ -75,6 +91,7 @@ Phases execute in numeric order: 1 → 2 → 3
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Core Container | 0/2 | Planned | - |
-| 2. Volume Mount Validation | 0/2 | Planned | - |
+| 1. Core Container | 2/2 | Complete | 2026-02-25 |
+| 2. Volume Mount Validation | 2/2 | Complete | 2026-02-26 |
+| 2.1 Bundle LogBoost Binary | 0/2 | Planned | - |
 | 3. SSL + Documentation | 0/2 | Not started | - |
