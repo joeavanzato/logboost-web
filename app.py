@@ -663,6 +663,14 @@ def health():
         if db is not None:
             db.close()
 
+    # Check MaxMind databases present
+    maxmind_path = Path(MAXMIND_DIR)
+    maxmind_available = bool(list(maxmind_path.glob('*.mmdb'))) if maxmind_path.exists() else False
+
+    # Check uploads and output directories are writable
+    uploads_writable = UPLOAD_FOLDER.exists() and os.access(str(UPLOAD_FOLDER), os.W_OK)
+    output_writable = OUTPUT_FOLDER.exists() and os.access(str(OUTPUT_FOLDER), os.W_OK)
+
     # Health logic: only mark unhealthy if database is down
     # Flask being up is implicit (we're responding to this request)
     # LogBoost binary missing = degraded, NOT unhealthy
@@ -681,7 +689,10 @@ def health():
         'logboost_available': logboost_available,
         'logboost_path': LOGBOOST_BINARY,
         'maxmind_dir': MAXMIND_DIR,
-        'threat_db_dir': THREAT_DB_DIR
+        'maxmind_available': maxmind_available,
+        'threat_db_dir': THREAT_DB_DIR,
+        'uploads_writable': uploads_writable,
+        'output_writable': output_writable,
     }), status_code
 
 
