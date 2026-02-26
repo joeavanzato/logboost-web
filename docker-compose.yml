@@ -12,22 +12,25 @@ services:
     ports:
       - "${LOGBOOST_PORT:-5000}:5000"
     volumes:
-      # All mounts are read-write (user's locked decision — app updates these at runtime)
-      # Binary is now bundled in the image — no host mount needed
-      # MaxMind GeoIP databases (rw — app downloads/updates them)
-      - /opt/logboost/maxmind:/data/maxmind
-      # Threat intelligence (rw — binary creates threats.db)
-      - /opt/logboost/intel:/data/intel
-      # Cache files (rw — binary reads/writes dns.cache, idb.cache, whois.cache)
-      - /opt/logboost/cache:/data/cache
-      # Config files (rw — feed_config.json, mm_api.txt)
-      - /opt/logboost/config:/data/config
-      # Admin SQLite database (rw — persistent across rebuilds)
-      - /opt/logboost/db:/data/db
-      # Session uploads (rw — persistent, hardcoded to /app/uploads in app.py)
-      - /opt/logboost/uploads:/app/uploads
-      # Session output (rw — persistent, hardcoded to /app/output in app.py)
-      - /opt/logboost/output:/app/output
+      # Named volumes — Docker-managed, no host setup required, works on Windows
+      # Data persists across container rebuilds
+      - logboost-maxmind:/data/maxmind      # MaxMind GeoIP databases
+      - logboost-intel:/data/intel          # Threat intelligence (threats.db)
+      - logboost-cache:/data/cache          # Cache files (dns, idb, whois)
+      - logboost-config:/data/config        # Config (feed_config.json, mm_api.txt)
+      - logboost-db:/data/db                # Admin SQLite database
+      - logboost-uploads:/app/uploads       # Session uploads
+      - logboost-output:/app/output         # Session output
+
+# Named volumes — Docker manages these automatically
+volumes:
+  logboost-maxmind:
+  logboost-intel:
+  logboost-cache:
+  logboost-config:
+  logboost-db:
+  logboost-uploads:
+  logboost-output:
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
