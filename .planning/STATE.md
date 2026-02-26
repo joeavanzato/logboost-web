@@ -5,34 +5,36 @@
 See: .planning/PROJECT.md (updated 2026-02-25)
 
 **Core value:** Flask frontend runs reliably in a production-ready Docker container with proper WSGI server, SSL support, and health monitoring
-**Current focus:** Phase 2 - Volume Mount Validation
+**Current focus:** Phase 3 - SSL Config (not yet planned)
 
 ## Current Position
 
-Phase: 2 of 3 (Volume Mount Validation) — In progress
-Plan: 1 of 2 in phase 2 (02-01 just completed)
-Status: In progress — ready for 02-02 (health endpoint mount status fields + end-to-end verification)
-Last activity: 2026-02-25 — Completed 02-01-PLAN.md (entrypoint.sh + /data dirs + docker-compose.yml + .env.example)
+Phase: 2 of 3 (Volume Mount Validation) — COMPLETE
+Plan: 2 of 2 in phase 2 (02-02 just completed)
+Status: Phase 2 complete — ready for Phase 3 (SSL Config)
+Last activity: 2026-02-26 — Completed 02-02-PLAN.md (mount status fields + end-to-end Docker verify)
 
-Progress: [███░░░░░░░] 50% (3 of 6 total plans)
+Progress: [████████░░] 67% (4 of 6 total plans)
+
+_Note: Phase 3 plans not yet created; 6 total estimated from ROADMAP._
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 3
-- Average duration: 6 min
-- Total execution time: 16 min
+- Total plans completed: 4
+- Average duration: 5 min
+- Total execution time: ~21 min
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 01-core-container | 2/2 complete | 14 min | 7 min |
-| 02-volume-mount-validation | 1/2 complete | 2 min | 2 min |
+| 02-volume-mount-validation | 2/2 complete | ~7 min | ~3.5 min |
 
 **Recent Trend:**
-- Last 5 plans: 01-01 (4 min), 01-02 (10 min), 02-01 (2 min)
-- Trend: accelerating (cached layers, simpler tasks)
+- Last 5 plans: 01-01 (4 min), 01-02 (10 min), 02-01 (2 min), 02-02 (~5 min incl. verify)
+- Trend: fast and stable
 
 *Updated after each plan completion*
 
@@ -43,7 +45,11 @@ Progress: [███░░░░░░░] 50% (3 of 6 total plans)
 Decisions are logged in PROJECT.md Key Decisions table.
 Recent decisions affecting current work:
 
-- Pending: SSL Option A (Gunicorn certfile/keyfile) vs Option B (Nginx reverse proxy) — must resolve before Phase 3. Driver: does Nginx already run on host?
+- **PENDING:** SSL Option A (Gunicorn certfile/keyfile) vs Option B (Nginx reverse proxy) — must resolve before Phase 3. Driver: does Nginx already run on host?
+- **02-02:** maxmind_available uses Path.glob('*.mmdb') — no new imports needed; Path already imported
+- **02-02:** uploads_writable/output_writable use os.access(W_OK) — accurate for non-root container process
+- **02-02:** New /health fields are strictly informational — do not affect 503/200 health logic
+- **02-02:** .env created from .env.example (docker compose requires it); .env added to .gitignore
 - **02-01:** entrypoint.sh uses /bin/sh not /bin/bash — bash unavailable in python:3.12-slim
 - **02-01:** Hard fail on /data not writable; warn-only for missing binary/MaxMind — user's locked decisions
 - **02-01:** All 8 volume mounts are read-write — user's locked decision; no :ro flags in docker-compose.yml
@@ -69,12 +75,13 @@ Recent decisions affecting current work:
 
 ### Blockers/Concerns
 
-- Phase 3: SSL option (A vs B) still unresolved — must be decided before Phase 3 plans execute
-- Phase 3: ProxyFix middleware absent from app.py — required if SSL Option B (Nginx) is chosen
-- 02-02: /health endpoint needs mount status fields (logboost_available, maxmind_available) — planned for next step
+- **Phase 3 blocker:** SSL option (A vs B) still unresolved — must be decided before Phase 3 plans execute
+  - Option A: Gunicorn `certfile`/`keyfile` args — simpler, no Nginx
+  - Option B: Nginx reverse proxy — requires Nginx on host; adds ProxyFix middleware to app.py
+- **Phase 3 concern:** ProxyFix middleware absent from app.py — required if Option B (Nginx) chosen
 
 ## Session Continuity
 
-Last session: 2026-02-26T02:20:31Z
-Stopped at: Completed 02-01-PLAN.md — entrypoint.sh, /data dirs, docker-compose.yml, .env.example
-Resume file: .planning/phases/02-volume-mount-validation/02-02-PLAN.md
+Last session: 2026-02-26T02:28:00Z
+Stopped at: Completed 02-02-PLAN.md — /health mount status fields + Phase 2 end-to-end verification
+Resume file: None — Phase 3 plans not yet created
