@@ -9,12 +9,12 @@ See: .planning/PROJECT.md (updated 2026-02-25)
 
 ## Current Position
 
-Phase: 2.1 of 4 (Bundle LogBoost Binary) — IN PROGRESS
-Plan: 1 of 2 in phase 2.1
-Status: In progress — 02.1-01 complete, 02.1-02 pending
-Last activity: 2026-02-26 — Completed 02.1-01-PLAN.md (binary bundled in Dockerfile)
+Phase: 2.1 of 4 (Bundle LogBoost Binary) — PHASE COMPLETE (awaiting human verify checkpoint)
+Plan: 2 of 2 in phase 2.1
+Status: Tasks complete — awaiting human-verify checkpoint approval for 02.1-02
+Last activity: 2026-02-26 — Completed 02.1-02-PLAN.md tasks (Docker-mode Setup page, binary path resolution)
 
-Progress: [█████████░] 71% (5 of 7 total plans)
+Progress: [█████████░] 86% (6 of 7 total plans, pending checkpoint approval)
 
 _Note: Phase 3 plans not yet created; 7 total estimated (6 original + Phase 2.1 inserted with 2 plans)._
 
@@ -50,6 +50,10 @@ Recent decisions affecting current work:
 - **02.1-01:** Binary at /usr/local/bin/logboost root-owned 0755; /data/bin added for runtime-updated binaries (logboost UID 1000 can write)
 - **02.1-01:** Binary volume mount removed entirely from docker-compose.yml — 7 mounts remain (all data directories)
 - **02.1-01:** unzip installed and purged in same RUN layer as binary download (matches build-essential pattern from 01-01)
+- **02.1-02:** get_effective_logboost_path() called at request time (not import time) -- DB not ready at module load
+- **02.1-02:** install_logboost_update CSRF-exempt via csrf.exempt() in init_admin() -- cleaner than global _csrf pattern
+- **02.1-02:** get_feed_config_path() simplified to one-liner /data/config/feed_config.json -- no DB lookup needed
+- **02.1-02:** threat_intel() "logboost not configured" guard removed -- Docker mode always has binary
 - **PENDING:** SSL Option A (Gunicorn certfile/keyfile) vs Option B (Nginx reverse proxy) — must resolve before Phase 3. Driver: does Nginx already run on host?
 - **02-02:** maxmind_available uses Path.glob('*.mmdb') — no new imports needed; Path already imported
 - **02-02:** uploads_writable/output_writable use os.access(W_OK) — accurate for non-root container process
@@ -94,6 +98,6 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-02-26
-Stopped at: Completed 02.1-01-PLAN.md — binary bundled in Dockerfile, compose updated
-Resume file: .planning/phases/02.1-bundle-logboost-binary/02.1-02-PLAN.md
+Last session: 2026-02-26T13:35:50Z
+Stopped at: Completed 02.1-02-PLAN.md tasks — awaiting human-verify checkpoint
+Resume file: None (waiting for human checkpoint approval)
