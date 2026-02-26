@@ -25,6 +25,20 @@ RUN python -c "import tldextract; tldextract.extract('example.com')"
 # UID 1000 per user's locked decision
 RUN useradd --no-log-init --create-home --uid 1000 logboost
 
+# Download and install LogBoost Linux binary at build time
+# Must run as root (before USER logboost) to write to /usr/local/bin
+# Single RUN layer: install unzip, download, extract, install binary, clean up
+ARG LOGBOOST_VERSION=prod_1_5_0
+RUN apt-get update && apt-get install -y --no-install-recommends unzip \
+    && curl -fsSL "https://github.com/joeavanzato/LogBoost/releases/download/${LOGBOOST_VERSION}/logboost_linux_amd64.zip" -o /tmp/logboost.zip \
+    && unzip /tmp/logboost.zip -d /tmp/logboost_extracted \
+    && find /tmp/logboost_extracted -type f \( -name "logboost" -o -name "LogBoost" \) -exec install -m 0755 {} /usr/local/bin/logboost \; \
+    && rm -rf /tmp/logboost.zip /tmp/logboost_extracted \
+    && apt-get purge -y --auto-remove unzip && rm -rf /var/lib/apt/lists/*
+
+# Verify binary was installed correctly — build fails loudly if missing or non-executable
+RUN test -f /usr/local/bin/logboost && test -x /usr/local/bin/logboost
+
 # Working directory
 WORKDIR /app
 
@@ -57,7 +71,7 @@ ENV LOGBOOST_DB_PATH=/app/logboost_admin.db
 
 # Create /data directory tree for volume mount points
 # If no volume is mounted, these are writable empty directories inside the image
-RUN mkdir -p /data/maxmind /data/intel /data/cache /data/config /data/db \
+RUN mkdir -p /data/maxmind /data/intel /data/cache /data/config /data/db /data/bin \
     && chown -R logboost:logboost /data
 
 # Copy and enable entrypoint validation script
