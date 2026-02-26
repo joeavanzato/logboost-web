@@ -47,10 +47,11 @@ Plans:
   2. GeoIP lookups return enriched data (not blank), confirming `.mmdb` mounts are accessible
   3. Admin login persists across container restarts (confirms `logboost_admin.db` mount survives)
   4. Session file uploads and output files are writable inside the container by the non-root user
-**Plans**: TBD
+**Plans**: 2 plans
 
 Plans:
-- [ ] 02-01: Volume mount strategy + docker-run.sh with all -v flags
+- [ ] 02-01-PLAN.md — entrypoint.sh + Dockerfile /data dirs + docker-compose.yml + .env.example (Wave 1)
+- [ ] 02-02-PLAN.md — /health mount status fields + end-to-end verification (Wave 2)
 
 ### Phase 3: SSL + Documentation
 **Goal**: The container serves HTTPS and an operator can deploy from scratch using only the README
@@ -75,5 +76,5 @@ Phases execute in numeric order: 1 → 2 → 3
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Core Container | 0/2 | Planned | - |
-| 2. Volume Mount Validation | 0/1 | Not started | - |
+| 2. Volume Mount Validation | 0/2 | Planned | - |
 | 3. SSL + Documentation | 0/2 | Not started | - |
