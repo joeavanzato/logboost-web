@@ -16,10 +16,17 @@ echo "  [OK] /data is writable"
 # This handles the case where docker-compose overrides to /data/db/logboost_admin.db
 # but the host volume is empty (first run or fresh host directory)
 DB_FILE="${LOGBOOST_DB_PATH:-/app/logboost_admin.db}"
+DB_DIR="$(dirname "$DB_FILE")"
+
+# Check if DB directory is writable (may be a separate bind mount)
+if [ ! -w "$DB_DIR" ]; then
+    echo "ERROR: Database directory $DB_DIR is not writable by container user (UID 1000)."
+    echo "Fix on host: sudo chown -R 1000:1000 /opt/logboost/db"
+    exit 1
+fi
+
 if [ ! -f "$DB_FILE" ]; then
     echo "  [INFO] Creating database at $DB_FILE"
-    # Ensure parent directory exists
-    mkdir -p "$(dirname "$DB_FILE")"
     # Initialize with schema via Python
     python -c "from admin import get_db; get_db().close()"
     echo "  [OK] Database initialized"
