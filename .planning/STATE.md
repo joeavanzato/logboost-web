@@ -5,25 +5,25 @@
 See: .planning/PROJECT.md (updated 2026-02-25)
 
 **Core value:** Flask frontend runs reliably in a production-ready Docker container with proper WSGI server, SSL support, and health monitoring
-**Current focus:** Phase 3 - SSL Config (not yet planned)
+**Current focus:** Phase 2.1 - Bundle LogBoost Binary (Plan 1 complete, Plan 2 pending)
 
 ## Current Position
 
-Phase: 2 of 3 (Volume Mount Validation) — COMPLETE
-Plan: 2 of 2 in phase 2 (02-02 just completed)
-Status: Phase 2 complete — ready for Phase 3 (SSL Config)
-Last activity: 2026-02-26 — Completed 02-02-PLAN.md (mount status fields + end-to-end Docker verify)
+Phase: 2.1 of 4 (Bundle LogBoost Binary) — IN PROGRESS
+Plan: 1 of 2 in phase 2.1
+Status: In progress — 02.1-01 complete, 02.1-02 pending
+Last activity: 2026-02-26 — Completed 02.1-01-PLAN.md (binary bundled in Dockerfile)
 
-Progress: [████████░░] 67% (4 of 6 total plans)
+Progress: [█████████░] 71% (5 of 7 total plans)
 
-_Note: Phase 3 plans not yet created; 6 total estimated from ROADMAP._
+_Note: Phase 3 plans not yet created; 7 total estimated (6 original + Phase 2.1 inserted with 2 plans)._
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 4
-- Average duration: 5 min
-- Total execution time: ~21 min
+- Total plans completed: 5
+- Average duration: 4 min
+- Total execution time: ~23 min
 
 **By Phase:**
 
@@ -31,9 +31,10 @@ _Note: Phase 3 plans not yet created; 6 total estimated from ROADMAP._
 |-------|-------|-------|----------|
 | 01-core-container | 2/2 complete | 14 min | 7 min |
 | 02-volume-mount-validation | 2/2 complete | ~7 min | ~3.5 min |
+| 02.1-bundle-logboost-binary | 1/2 complete | 2 min | 2 min |
 
 **Recent Trend:**
-- Last 5 plans: 01-01 (4 min), 01-02 (10 min), 02-01 (2 min), 02-02 (~5 min incl. verify)
+- Last 5 plans: 01-02 (10 min), 02-01 (2 min), 02-02 (~5 min), 02.1-01 (2 min)
 - Trend: fast and stable
 
 *Updated after each plan completion*
@@ -45,6 +46,10 @@ _Note: Phase 3 plans not yet created; 6 total estimated from ROADMAP._
 Decisions are logged in PROJECT.md Key Decisions table.
 Recent decisions affecting current work:
 
+- **02.1-01:** LOGBOOST_VERSION pinned to prod_1_5_0 via ARG — user's locked decision; override with --build-arg for updates
+- **02.1-01:** Binary at /usr/local/bin/logboost root-owned 0755; /data/bin added for runtime-updated binaries (logboost UID 1000 can write)
+- **02.1-01:** Binary volume mount removed entirely from docker-compose.yml — 7 mounts remain (all data directories)
+- **02.1-01:** unzip installed and purged in same RUN layer as binary download (matches build-essential pattern from 01-01)
 - **PENDING:** SSL Option A (Gunicorn certfile/keyfile) vs Option B (Nginx reverse proxy) — must resolve before Phase 3. Driver: does Nginx already run on host?
 - **02-02:** maxmind_available uses Path.glob('*.mmdb') — no new imports needed; Path already imported
 - **02-02:** uploads_writable/output_writable use os.access(W_OK) — accurate for non-root container process
@@ -52,7 +57,7 @@ Recent decisions affecting current work:
 - **02-02:** .env created from .env.example (docker compose requires it); .env added to .gitignore
 - **02-01:** entrypoint.sh uses /bin/sh not /bin/bash — bash unavailable in python:3.12-slim
 - **02-01:** Hard fail on /data not writable; warn-only for missing binary/MaxMind — user's locked decisions
-- **02-01:** All 8 volume mounts are read-write — user's locked decision; no :ro flags in docker-compose.yml
+- **02-01:** All 7 volume mounts are read-write — no :ro flags in docker-compose.yml (binary mount removed in 02.1-01)
 - **02-01:** LOGBOOST_DB_PATH overridden in compose environment to /data/db/logboost_admin.db — Dockerfile default lost on rebuild
 - **02-01:** /data mkdir + entrypoint COPY placed before USER logboost — root required for /data creation and chmod
 - **01-02:** Health unhealthy threshold = DB inaccessible only. Binary absence and external API failures produce 200 degraded, not 503.
@@ -71,7 +76,14 @@ Recent decisions affecting current work:
   sudo mkdir -p /opt/logboost/{maxmind,intel,cache,config,db,uploads,output}
   sudo chown -R 1000:1000 /opt/logboost
   ```
-  (documented in .env.example)
+  Note: `/opt/logboost/logboost` host path no longer needed (binary bundled in image)
+  (documented in .env.example — cleanup of binary line is Plan 02 work)
+
+### Roadmap Evolution
+
+- **Phase 2.1 inserted** after Phase 2: Bundle LogBoost binary in Docker image (URGENT)
+  - Reason: Docker image should include pre-bundled binary instead of requiring download
+  - Setup page should detect Docker mode and show "Check for Updates" instead of "Download from GitHub"
 
 ### Blockers/Concerns
 
@@ -82,6 +94,6 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-02-26T02:28:00Z
-Stopped at: Completed 02-02-PLAN.md — /health mount status fields + Phase 2 end-to-end verification
-Resume file: None — Phase 3 plans not yet created
+Last session: 2026-02-26
+Stopped at: Completed 02.1-01-PLAN.md — binary bundled in Dockerfile, compose updated
+Resume file: .planning/phases/02.1-bundle-logboost-binary/02.1-02-PLAN.md
