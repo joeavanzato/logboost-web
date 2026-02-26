@@ -5,6 +5,7 @@
 *
 
 # Step 2: Include application source
+!entrypoint.sh
 !app.py
 !admin.py
 !auth.py

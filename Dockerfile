@@ -55,6 +55,15 @@ ENV THREAT_DB_DIR=/data/intel
 ENV LOGBOOST_LOG_LEVEL=info
 ENV LOGBOOST_DB_PATH=/app/logboost_admin.db
 
+# Create /data directory tree for volume mount points
+# If no volume is mounted, these are writable empty directories inside the image
+RUN mkdir -p /data/maxmind /data/intel /data/cache /data/config /data/db \
+    && chown -R logboost:logboost /data
+
+# Copy and enable entrypoint validation script
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
 # Switch to non-root user (after all root-required operations)
 USER logboost
 
@@ -68,6 +77,8 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
 
 # Document the exposed port (still need -p in docker run)
 EXPOSE 5000
+
+ENTRYPOINT ["/entrypoint.sh"]
 
 # Run gunicorn with config file (NEVER python app.py — that uses Flask dev server with debug=True)
 CMD ["gunicorn", "--config", "gunicorn.conf.py", "app:app"]
