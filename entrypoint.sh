@@ -12,6 +12,19 @@ if [ ! -w /data ]; then
 fi
 echo "  [OK] /data is writable"
 
+# Initialize database if it doesn't exist at LOGBOOST_DB_PATH
+# This handles the case where docker-compose overrides to /data/db/logboost_admin.db
+# but the host volume is empty (first run or fresh host directory)
+DB_FILE="${LOGBOOST_DB_PATH:-/app/logboost_admin.db}"
+if [ ! -f "$DB_FILE" ]; then
+    echo "  [INFO] Creating database at $DB_FILE"
+    # Ensure parent directory exists
+    mkdir -p "$(dirname "$DB_FILE")"
+    # Initialize with schema via Python
+    python -c "from admin import get_db; get_db().close()"
+    echo "  [OK] Database initialized"
+fi
+
 # WARN ONLY: Binary is optional on startup — app handles missing binary gracefully
 if [ ! -f "${LOGBOOST_PATH:-/usr/local/bin/logboost}" ]; then
     echo "  [WARN] LogBoost binary not found at ${LOGBOOST_PATH:-/usr/local/bin/logboost}"
