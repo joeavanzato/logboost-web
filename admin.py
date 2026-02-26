@@ -4,6 +4,7 @@ Handles authentication, scheduled tasks, and settings management
 """
 
 import os
+import io
 import json
 import sqlite3
 import hashlib
@@ -12,6 +13,8 @@ import subprocess
 import threading
 import time
 import logging
+import zipfile
+import requests
 from datetime import datetime, timedelta
 from pathlib import Path
 from functools import wraps
@@ -32,6 +35,10 @@ DEFAULT_ADMIN_PASS = 'changeme'
 
 # LogBoost binary path
 LOGBOOST_BINARY = os.environ.get('LOGBOOST_PATH', 'LogBoost')
+
+# Bundled LogBoost version (matches Dockerfile ARG LOGBOOST_VERSION)
+BUNDLED_LOGBOOST_VERSION = "prod_1_5_0"
+GITHUB_RELEASES_API = "https://api.github.com/repos/joeavanzato/LogBoost/releases/latest"
 
 # User roles
 ROLE_USER = 'user'
@@ -3021,17 +3028,9 @@ def set_setting(key, value):
     conn.close()
 
 
-def get_logboost_path():
-    """Get the configured LogBoost directory path."""
-    return get_setting('logboost_path', '')
-
-
 def get_feed_config_path():
-    """Get the path to feed_config.json based on LogBoost path."""
-    logboost_path = get_logboost_path()
-    if logboost_path:
-        return os.path.join(logboost_path, 'feed_config.json')
-    return None
+    """Get the path to feed_config.json -- Docker volume path."""
+    return '/data/config/feed_config.json'
 
 
 # ============================================
@@ -3088,178 +3087,156 @@ def get_max_url_fetch_size_mb():
 
 
 # ============================================
+# LogBoost Docker-mode Helpers
+# ============================================
+
+def _parse_logboost_tag(tag: str) -> tuple:
+    """Parse 'prod_1_5_0' -> (1, 5, 0). Returns (0,) on parse failure."""
+    try:
+        parts = tag.replace('prod_', '').split('_')
+        return tuple(int(p) for p in parts)
+    except (ValueError, AttributeError):
+        return (0,)
+
+
+def _is_newer_logboost_tag(latest: str, current: str) -> bool:
+    """Compare prod_X_Y_Z tags. Returns True if latest > current."""
+    return _parse_logboost_tag(latest) > _parse_logboost_tag(current)
+
+
+def get_effective_logboost_path() -> str:
+    """Get the effective LogBoost binary path, preferring override if it exists.
+
+    Priority:
+    1. /data/bin/logboost if logboost_override_path setting exists AND file exists
+    2. LOGBOOST_PATH env var (default: /usr/local/bin/logboost, the bundled binary)
+    """
+    try:
+        override_path = get_setting('logboost_override_path')
+        if override_path and Path(override_path).exists():
+            return override_path
+    except Exception:
+        pass  # DB not ready yet at startup -- fall through to env var
+    return os.environ.get('LOGBOOST_PATH', '/usr/local/bin/logboost')
+
+
+# ============================================
 # LogBoost Setup Routes
 # ============================================
 
 @admin_bp.route('/setup')
 @admin_required
 def setup():
-    """LogBoost Setup page."""
-    logboost_path = get_logboost_path()
-    
-    # Get directory options
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    parent_dir = os.path.dirname(current_dir)
-    home_dir = os.path.expanduser('~')
-    
-    # Check if LogBoost is configured and exists
-    status = {
-        'configured': bool(logboost_path),
-        'path': logboost_path,
-        'exists': False,
-        'binary_exists': False,
-        'feed_config_exists': False
-    }
-    
-    if logboost_path:
-        status['exists'] = os.path.isdir(logboost_path)
-        if status['exists']:
-            # Check for LogBoost binary (try both Windows and Linux names)
-            for binary_name in ['LogBoost.exe', 'LogBoost', 'logboost', 'logboost.exe']:
-                binary_path = os.path.join(logboost_path, binary_name)
-                if os.path.isfile(binary_path):
-                    status['binary_exists'] = True
-                    status['binary_name'] = binary_name
-                    break
-            
-            # Check for feed_config.json
-            feed_config_path = os.path.join(logboost_path, 'feed_config.json')
-            status['feed_config_exists'] = os.path.isfile(feed_config_path)
-    
-    return render_template('admin/setup.html', 
-                           status=status,
-                           current_dir=current_dir,
-                           parent_dir=parent_dir,
-                           home_dir=home_dir)
+    """LogBoost Setup page -- Docker mode."""
+    binary_path = get_effective_logboost_path()
+    binary_exists = Path(binary_path).exists()
+    override_path = get_setting('logboost_override_path')
+    override_active = bool(override_path and Path(override_path).exists())
+    installed_version = get_setting('logboost_installed_version', BUNDLED_LOGBOOST_VERSION)
+    last_checked = get_setting('github_latest_checked', None)
+    cached_latest = get_setting('github_latest_version', None)
 
-
-@admin_bp.route('/api/setup/path', methods=['POST'])
-@admin_required
-def set_logboost_path():
-    """Set the LogBoost directory path."""
-    data = request.get_json()
-    path = data.get('path', '').strip()
-    
-    if not path:
-        return jsonify({'error': 'Path is required'}), 400
-    
-    # Normalize path
-    path = os.path.abspath(os.path.expanduser(path))
-    
-    # Check if path exists
-    if not os.path.isdir(path):
-        return jsonify({'error': f'Directory does not exist: {path}'}), 400
-    
-    set_setting('logboost_path', path)
-    
-    # Update the global LOGBOOST_BINARY path
-    global LOGBOOST_BINARY
-    for binary_name in ['LogBoost.exe', 'LogBoost', 'logboost', 'logboost.exe']:
-        binary_path = os.path.join(path, binary_name)
-        if os.path.isfile(binary_path):
-            LOGBOOST_BINARY = binary_path
-            break
-    
-    return jsonify({'success': True, 'path': path})
-
-
-@admin_bp.route('/api/setup/download', methods=['POST'])
-@admin_required
-def download_logboost():
-    """Download and extract LogBoost from GitHub."""
-    import urllib.request
-    import zipfile
-    import io
-    
-    data = request.get_json()
-    target_path = data.get('path', '').strip()
-    
-    if not target_path:
-        # Default to current directory
-        target_path = os.path.dirname(os.path.abspath(__file__))
-    else:
-        target_path = os.path.abspath(os.path.expanduser(target_path))
-    
-    # Create directory if it doesn't exist
-    os.makedirs(target_path, exist_ok=True)
-    
-    try:
-        # Download the latest release from GitHub
-        repo_url = 'https://github.com/joeavanzato/LogBoost/archive/refs/heads/main.zip'
-        
-        with urllib.request.urlopen(repo_url, timeout=60) as response:
-            zip_data = response.read()
-        
-        # Extract the zip file
-        with zipfile.ZipFile(io.BytesIO(zip_data)) as zf:
-            # Get the root folder name in the zip (usually 'LogBoost-main')
-            root_folder = zf.namelist()[0].split('/')[0]
-            
-            # Extract all files
-            for member in zf.namelist():
-                if member.startswith(root_folder + '/'):
-                    # Remove the root folder prefix
-                    target_file = os.path.join(target_path, member[len(root_folder)+1:])
-                    
-                    if member.endswith('/'):
-                        os.makedirs(target_file, exist_ok=True)
-                    else:
-                        os.makedirs(os.path.dirname(target_file), exist_ok=True)
-                        with open(target_file, 'wb') as f:
-                            f.write(zf.read(member))
-        
-        # Set the LogBoost path
-        set_setting('logboost_path', target_path)
-        
-        return jsonify({'success': True, 'path': target_path})
-        
-    except Exception as e:
-        return jsonify({'error': f'Download failed: {str(e)}'}), 500
-
-
-@admin_bp.route('/api/setup/paths')
-@admin_required
-def get_setup_paths():
-    """Get available path options for setup."""
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    parent_dir = os.path.dirname(current_dir)
-    home_dir = os.path.expanduser('~')
-    
-    return jsonify({
-        'current': current_dir,
-        'parent': parent_dir,
-        'home': home_dir
-    })
+    return render_template('admin/setup.html',
+        bundled_version=BUNDLED_LOGBOOST_VERSION,
+        binary_path=binary_path,
+        binary_exists=binary_exists,
+        override_active=override_active,
+        installed_version=installed_version,
+        last_checked=last_checked,
+        cached_latest=cached_latest)
 
 
 @admin_bp.route('/api/setup/status')
 @admin_required
 def get_setup_status():
-    """Get current LogBoost setup status."""
-    logboost_path = get_logboost_path()
-    
-    status = {
-        'configured': bool(logboost_path),
-        'path': logboost_path,
-        'exists': False,
-        'binary_exists': False,
-        'feed_config_exists': False
-    }
-    
-    if logboost_path and os.path.isdir(logboost_path):
-        status['exists'] = True
-        
-        for binary_name in ['LogBoost.exe', 'LogBoost', 'logboost', 'logboost.exe']:
-            binary_path = os.path.join(logboost_path, binary_name)
-            if os.path.isfile(binary_path):
-                status['binary_exists'] = True
-                status['binary_name'] = binary_name
-                break
-        
-        feed_config_path = os.path.join(logboost_path, 'feed_config.json')
-        status['feed_config_exists'] = os.path.isfile(feed_config_path)
-    
-    return jsonify(status)
+    """Get current LogBoost setup status -- Docker mode."""
+    binary_path = get_effective_logboost_path()
+    override_setting = get_setting('logboost_override_path')
+    return jsonify({
+        'binary_path': binary_path,
+        'binary_exists': Path(binary_path).exists(),
+        'bundled_version': BUNDLED_LOGBOOST_VERSION,
+        'installed_version': get_setting('logboost_installed_version', BUNDLED_LOGBOOST_VERSION),
+        'override_active': bool(override_setting and Path(override_setting).exists()),
+        'last_checked': get_setting('github_latest_checked', None),
+        'cached_latest': get_setting('github_latest_version', None)
+    })
+
+
+@admin_bp.route('/api/setup/check-update')
+@admin_required
+def check_logboost_update():
+    """Check GitHub releases API for a newer LogBoost version."""
+    try:
+        resp = requests.get(
+            GITHUB_RELEASES_API,
+            timeout=10,
+            headers={'Accept': 'application/vnd.github+json'}
+        )
+        if resp.status_code == 403:
+            return jsonify({'error': 'GitHub API rate limited. Try again later.'}), 429
+        resp.raise_for_status()
+        data = resp.json()
+        tag_name = data.get('tag_name', '')
+
+        # Cache result
+        checked_at = datetime.now().isoformat()
+        set_setting('github_latest_version', tag_name)
+        set_setting('github_latest_checked', checked_at)
+
+        installed_version = get_setting('logboost_installed_version', BUNDLED_LOGBOOST_VERSION)
+        update_available = _is_newer_logboost_tag(tag_name, installed_version)
+
+        return jsonify({
+            'latest_tag': tag_name,
+            'installed_version': installed_version,
+            'update_available': update_available,
+            'release_url': data.get('html_url', ''),
+            'checked_at': checked_at
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@admin_bp.route('/api/setup/install-update', methods=['POST'])
+@admin_required
+def install_logboost_update():
+    """Download and install the latest LogBoost binary from GitHub."""
+    latest_tag = get_setting('github_latest_version')
+    if not latest_tag:
+        return jsonify({'error': 'Run Check for Updates first'}), 400
+
+    download_url = f'https://github.com/joeavanzato/LogBoost/releases/download/{latest_tag}/logboost_linux_amd64.zip'
+    try:
+        resp = requests.get(download_url, timeout=120)
+        resp.raise_for_status()
+
+        with zipfile.ZipFile(io.BytesIO(resp.content)) as zf:
+            # Find the binary inside the zip (not a directory entry)
+            binary_name = next(
+                (n for n in zf.namelist()
+                 if not zf.getinfo(n).is_dir() and n.lower().rstrip('/').endswith('logboost')),
+                None
+            )
+            if not binary_name:
+                return jsonify({'error': 'Could not find logboost binary in downloaded zip'}), 500
+
+            os.makedirs('/data/bin', exist_ok=True)
+            dest_path = '/data/bin/logboost'
+            with open(dest_path, 'wb') as f:
+                f.write(zf.read(binary_name))
+
+        os.chmod(dest_path, 0o755)
+
+        # Update module global and settings
+        global LOGBOOST_BINARY
+        LOGBOOST_BINARY = dest_path
+        set_setting('logboost_override_path', dest_path)
+        set_setting('logboost_installed_version', latest_tag)
+
+        return jsonify({'success': True, 'path': dest_path, 'version': latest_tag})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 
 # ============================================
@@ -3270,16 +3247,13 @@ def get_setup_status():
 @admin_required
 def threat_intel():
     """Threat Intel feeds management page."""
-    logboost_path = get_logboost_path()
     feed_config_path = get_feed_config_path()
-    
+
     feeds = []
     error = None
-    
-    if not logboost_path:
-        error = 'LogBoost path not configured. Please set it up first.'
-    elif not feed_config_path or not os.path.isfile(feed_config_path):
-        error = 'feed_config.json not found. Please ensure LogBoost is properly installed.'
+
+    if not os.path.isfile(feed_config_path):
+        error = 'feed_config.json not found at /data/config/feed_config.json. It will be created when you add your first feed.'
     else:
         try:
             with open(feed_config_path, 'r') as f:
@@ -3289,18 +3263,18 @@ def threat_intel():
             error = f'Invalid JSON in feed_config.json: {str(e)}'
         except Exception as e:
             error = f'Error reading feed_config.json: {str(e)}'
-    
+
     # Get unique tags for suggestion
     all_tags = set()
     for feed in feeds:
         for tag in feed.get('type', []):
             all_tags.add(tag)
-    
-    return render_template('admin/threat_intel.html', 
-                           feeds=feeds, 
-                           error=error, 
+
+    return render_template('admin/threat_intel.html',
+                           feeds=feeds,
+                           error=error,
                            all_tags=sorted(all_tags),
-                           logboost_path=logboost_path)
+                           logboost_path=get_effective_logboost_path())
 
 
 @admin_bp.route('/api/threat-intel/feeds', methods=['GET'])
@@ -3465,16 +3439,30 @@ def add_feed():
 
 def init_admin(app, csrf=None):
     """Initialize admin module with Flask app.
-    
+
     Args:
         app: Flask application
         csrf: CSRFProtect instance (optional, kept for backwards compatibility)
     """
     # Initialize database
     init_db()
-    
+
+    # Resolve LogBoost binary override from settings (after DB is ready)
+    global LOGBOOST_BINARY
+    try:
+        override_path = get_setting('logboost_override_path')
+        if override_path and Path(override_path).exists():
+            LOGBOOST_BINARY = override_path
+            logger.info(f"LogBoost binary override active: {override_path}")
+    except Exception:
+        pass  # DB not ready or setting absent -- use env var default
+
     # Register blueprint
     app.register_blueprint(admin_bp)
-    
+
+    # Exempt install-update from CSRF (fetch POST without token)
+    if csrf is not None:
+        csrf.exempt(install_logboost_update)
+
     # Start scheduler
     scheduler.start()

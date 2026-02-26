@@ -80,7 +80,7 @@ logging.basicConfig(
 app.logger.setLevel(getattr(logging, LOG_LEVEL, logging.WARNING))
 
 # Import admin functions (but initialize after CSRF setup)
-from admin import init_admin, get_db, verify_password, ROLE_ADMIN, log_audit
+from admin import init_admin, get_db, verify_password, ROLE_ADMIN, log_audit, get_effective_logboost_path
 
 # ============================================
 # CSRF Configuration
@@ -173,7 +173,7 @@ def build_logboost_command(
     options: dict
 ) -> list[str]:
     """Build the LogBoost command with all options."""
-    cmd = [LOGBOOST_BINARY]
+    cmd = [get_effective_logboost_path()]
     
     # Required directories
     cmd.extend(['-logdir', input_dir])
@@ -258,7 +258,7 @@ def run_logboost(cmd: list[str]) -> tuple[bool, str, str]:
     except subprocess.TimeoutExpired:
         return False, '', 'LogBoost execution timed out after 5 minutes'
     except FileNotFoundError:
-        return False, '', f'LogBoost binary not found at: {LOGBOOST_BINARY}'
+        return False, '', f'LogBoost binary not found at: {get_effective_logboost_path()}'
     except Exception as e:
         return False, '', str(e)
 
@@ -645,10 +645,11 @@ def health():
     """
     # Check if LogBoost binary exists
     # Handle both absolute paths and PATH lookups
-    if os.path.isabs(LOGBOOST_BINARY):
-        logboost_available = Path(LOGBOOST_BINARY).exists()
+    effective_binary = get_effective_logboost_path()
+    if os.path.isabs(effective_binary):
+        logboost_available = Path(effective_binary).exists()
     else:
-        logboost_available = shutil.which(LOGBOOST_BINARY) is not None
+        logboost_available = shutil.which(effective_binary) is not None
 
     # Check database accessibility — use try/finally to prevent connection leak
     db_accessible = False
@@ -687,7 +688,7 @@ def health():
         'status': status_text,
         'db_accessible': db_accessible,
         'logboost_available': logboost_available,
-        'logboost_path': LOGBOOST_BINARY,
+        'logboost_path': get_effective_logboost_path(),
         'maxmind_dir': MAXMIND_DIR,
         'maxmind_available': maxmind_available,
         'threat_db_dir': THREAT_DB_DIR,
