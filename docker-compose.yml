@@ -21,6 +21,13 @@ services:
       - logboost-db:/data/db                # Admin SQLite database
       - logboost-uploads:/app/uploads       # Session uploads
       - logboost-output:/app/output         # Session output
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
 
 # Named volumes — Docker manages these automatically
 volumes:
@@ -31,10 +38,3 @@ volumes:
   logboost-db:
   logboost-uploads:
   logboost-output:
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
-      interval: 30s
-      timeout: 10s
-      start_period: 30s
-      retries: 3
