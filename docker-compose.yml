@@ -8,8 +8,12 @@ services:
       MAXMIND_DIR: /data/maxmind
       THREAT_DB_DIR: /data/intel
       LOGBOOST_DB_PATH: /data/db/logboost_admin.db
+      # SSL configuration
+      SSL_PORT: ${SSL_PORT:-8443}
+      SSL_COMMON_NAME: ${SSL_COMMON_NAME:-localhost}
     ports:
       - "${LOGBOOST_PORT:-5000}:5000"
+      - "${SSL_PORT:-8443}:${SSL_PORT:-8443}"
     volumes:
       # Named volumes — Docker-managed, no host setup required, works on Windows
       # Data persists across container rebuilds
@@ -20,6 +24,7 @@ services:
       - logboost-db:/data/db                # Admin SQLite database
       - logboost-uploads:/app/uploads       # Session uploads
       - logboost-output:/app/output         # Session output
+      - logboost-ssl:/data/ssl              # SSL certificates (auto-generated or mounted)
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
@@ -37,3 +42,4 @@ volumes:
   logboost-db:
   logboost-uploads:
   logboost-output:
+  logboost-ssl:
