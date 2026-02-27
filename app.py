@@ -199,6 +199,19 @@ IP_PATTERN = re.compile(
 # Helper Functions
 # ============================================
 
+def _assert_within(path: Path, base: Path) -> Path:
+    """Resolve path and assert containment within base. Raises ValueError if not."""
+    resolved = path.resolve()
+    base_resolved = base.resolve()
+    try:
+        resolved.relative_to(base_resolved)
+    except ValueError:
+        raise ValueError(
+            f"Security: path {resolved!r} resolves outside of {base_resolved!r}"
+        )
+    return resolved
+
+
 def extract_ips(text: str) -> list[str]:
     """Extract all unique IP addresses from text, including defanged IPs."""
     # Use the IOC extraction function which handles defanged IPs and validates public IPs
@@ -402,6 +415,8 @@ def get_session_dir(session_id: str) -> Path:
     """Get or create session-specific directories."""
     session_upload = UPLOAD_FOLDER / session_id
     session_output = OUTPUT_FOLDER / session_id
+    _assert_within(session_upload, UPLOAD_FOLDER)
+    _assert_within(session_output, OUTPUT_FOLDER)
     session_upload.mkdir(exist_ok=True)
     session_output.mkdir(exist_ok=True)
     return session_upload, session_output
@@ -411,6 +426,8 @@ def cleanup_session(session_id: str) -> None:
     """Clean up session directories."""
     session_upload = UPLOAD_FOLDER / session_id
     session_output = OUTPUT_FOLDER / session_id
+    _assert_within(session_upload, UPLOAD_FOLDER)
+    _assert_within(session_output, OUTPUT_FOLDER)
     if session_upload.exists():
         shutil.rmtree(session_upload)
     if session_output.exists():
@@ -663,13 +680,18 @@ def results_page():
     output_file = session.get('current_output')
     if not output_file or not Path(output_file).exists():
         return render_template('partials/error.html', error='No results available')
-    
+
+    try:
+        output_path = _assert_within(Path(output_file), OUTPUT_FOLDER)
+    except ValueError:
+        return render_template('partials/error.html', error='Invalid results path'), 400
+
     page = int(request.args.get('page', 1))
     page_size = int(request.args.get('page_size', 50))
-    
-    data = read_csv_paginated(Path(output_file), page=page, page_size=page_size)
-    data['filename'] = Path(output_file).name
-    
+
+    data = read_csv_paginated(output_path, page=page, page_size=page_size)
+    data['filename'] = output_path.name
+
     return render_template('partials/results_table.html', **data)
 
 
@@ -680,11 +702,16 @@ def download():
     output_file = session.get('current_output')
     if not output_file or not Path(output_file).exists():
         return 'No file available', 404
-    
+
+    try:
+        output_path = _assert_within(Path(output_file), OUTPUT_FOLDER)
+    except ValueError:
+        return 'Invalid file path', 400
+
     return send_file(
-        output_file,
+        output_path,
         as_attachment=True,
-        download_name=Path(output_file).name
+        download_name=output_path.name
     )
 
 
