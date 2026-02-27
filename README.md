@@ -398,53 +398,184 @@ docker compose up --build
 
 ## Troubleshooting
 
-### "Setup Required" Screen
+### 1. Container Won't Start
 
-MaxMind databases are missing. Either:
+**Symptoms:** Container exits immediately or shows errors in `docker compose logs logboost-web`
 
-- Upload .mmdb files via the setup page
-- Configure MaxMind API key in Admin Settings and run "Update Geolocation"
-
-### "MaxMind API Key Required" Error
-
-You clicked "Update Geolocation" but no API key is configured. Go to Admin Settings first.
-
-### Permission Errors
-
-The container runs as UID 1000. If using bind mounts instead of named volumes:
-
-```bash
-sudo chown -R 1000:1000 /path/to/your/data
-```
-
-### Container Won't Start
-
-Check logs:
-
+**Check logs first:**
 ```bash
 docker compose logs logboost-web
 ```
 
-Common issues:
+**Common causes and solutions:**
 
-- Port 5000 already in use
-- Volume mount permissions
+| Error Message | Cause | Solution |
+|--------------|-------|----------|
+| `ERROR: /data is not writable` | Volume permissions | `docker volume rm logboost-db` and restart (data lost), or fix host permissions for bind mounts |
+| `ERROR: Database directory ... not writable` | DB path permission | Check that `LOGBOOST_DB_PATH` directory exists and is writable by UID 1000 |
+| `ERROR: SSL certificate and key do not match` | Custom cert mismatch | Verify cert/key pair with `openssl x509 -noout -modulus -in cert.pem` vs `openssl rsa -noout -modulus -in key.pem` |
+| `SECRET_KEY is required` | Missing env var | Set `SECRET_KEY` in `.env` file or docker-compose.yml |
 
-### Enrichment Feature Not Appearing
+### 2. Port Already in Use
 
-Some features only display in the UI when the corresponding API key is configured. If Chaos, ViewDNS, HackerTarget, or CIRCL options are missing from the enrichment panel, check **Admin Panel -> Settings** and confirm the relevant API key is saved.
+**Symptoms:** `Error starting userland proxy: listen tcp4 0.0.0.0:8443: bind: address already in use`
+
+**Solution:** Change the host port mapping:
+```yaml
+ports:
+  - "9443:8443"   # Use 9443 on host instead
+  - "5001:5000"   # Use 5001 on host instead
+```
+
+Or stop the conflicting service:
+```bash
+sudo lsof -i :8443  # Find what's using the port
+```
+
+### 3. Browser Certificate Warnings
+
+**Symptoms:** Browser shows "Your connection is not private" or "NET::ERR_CERT_AUTHORITY_INVALID"
+
+**Cause:** The container uses a self-signed certificate by default.
+
+**Solutions:**
+
+1. **Development:** Click "Advanced" > "Proceed to localhost (unsafe)"
+2. **Production:** Mount your own trusted certificate (see [SSL Configuration](#sslhttps-configuration))
+3. **Set correct hostname:** If accessing via IP or custom hostname, set `SSL_COMMON_NAME` to match:
+   ```yaml
+   environment:
+     SSL_COMMON_NAME: "logboost.example.com"
+   ```
+   Then recreate the certificate by removing the SSL volume: `docker volume rm logboost-ssl`
+
+### 4. "Setup Required" Screen
+
+**Symptoms:** Main page redirects to setup wizard asking for MaxMind databases
+
+**Cause:** GeoLite2 MMDB files are missing from `/data/maxmind`
+
+**Solutions:**
+
+1. **Upload manually:** Use the setup page to upload all three files:
+   - GeoLite2-ASN.mmdb
+   - GeoLite2-Country.mmdb
+   - GeoLite2-City.mmdb
+
+2. **Use MaxMind API:** Log into Admin Panel, go to Settings, enter your MaxMind API key, then click "Update Geolocation" on the Dashboard
+
+3. **Pre-populate volume:** Copy MMDB files to Docker volume:
+   ```bash
+   docker cp GeoLite2-City.mmdb logboost-web:/data/maxmind/
+   docker cp GeoLite2-Country.mmdb logboost-web:/data/maxmind/
+   docker cp GeoLite2-ASN.mmdb logboost-web:/data/maxmind/
+   ```
+
+### 5. Health Check Failing
+
+**Symptoms:** Docker shows container as `unhealthy`, or `curl http://localhost:5000/health` returns 503
+
+**Check health status:**
+```bash
+curl -s http://localhost:5000/health | python -m json.tool
+```
+
+**Common health failures:**
+
+| Field | Issue | Solution |
+|-------|-------|----------|
+| `db_accessible: false` | SQLite DB corrupted or locked | Check DB path permissions; restart container |
+| `logboost_available: false` | Binary missing | This is a warning only, not a failure |
+| `maxmind_available: false` | MMDB files missing | Upload databases (see #4 above) |
+
+### 6. SSL Not Working
+
+**Symptoms:** HTTPS connection refused, or HTTP works but HTTPS doesn't
+
+**Verify SSL is listening:**
+```bash
+docker compose exec logboost-web ss -tlnp | grep 8443
+```
+
+**Check certificate exists:**
+```bash
+docker compose exec logboost-web ls -la /data/ssl/
+```
+
+**Common fixes:**
+
+1. **Port not exposed:** Ensure docker-compose.yml has `- "8443:8443"` in ports
+2. **Certificate generation failed:** Check container logs for SSL errors
+3. **Wrong SSL_PORT:** If you changed `SSL_PORT`, ensure port mapping matches
+
+### 7. Enrichment Features Missing
+
+**Symptoms:** CIRCL, ViewDNS, Chaos, or HackerTarget options don't appear in enrichment panel
+
+**Cause:** These features only display when the API key is configured.
+
+**Solution:** Go to **Admin Panel -> Settings** and enter the relevant API key. The option will appear immediately after saving.
+
+### 8. Database Errors After Update
+
+**Symptoms:** `sqlite3.OperationalError: no such table` or `database is locked`
+
+**Solutions:**
+
+1. **Schema migration:** The app handles migrations automatically, but if errors persist:
+   ```bash
+   # Backup existing database
+   docker compose exec logboost-web cp /data/db/logboost_admin.db /data/db/logboost_admin.db.backup
+   # Remove and let container recreate
+   docker compose exec logboost-web rm /data/db/logboost_admin.db
+   docker compose restart logboost-web
+   ```
+
+2. **Database locked:** Restart the container. SQLite can lock if the container was killed mid-write.
+
+### 9. Permission Errors on File Upload
+
+**Symptoms:** File upload fails with "Permission denied" or similar error
+
+**Cause:** The container runs as UID 1000 and needs write access to upload/output directories.
+
+**Solutions:**
+
+1. **Named volumes (recommended):** Docker manages permissions automatically
+2. **Bind mounts:** Fix host permissions:
+   ```bash
+   sudo chown -R 1000:1000 /path/to/uploads /path/to/output
+   ```
+
+### 10. LogBoost Binary Update Fails
+
+**Symptoms:** "Check for Updates" shows an error or doesn't complete
+
+**Common causes:**
+
+1. **Network connectivity:** Container needs outbound HTTPS access to GitHub
+2. **Write permission:** `/data/bin` must be writable (auto-created on named volumes)
+3. **Download timeout:** Large binary downloads may time out on slow connections
+
+**Check current binary:**
+```bash
+docker compose exec logboost-web /app/logboost --version
+```
 
 ---
 
 ## Security Considerations
 
 - **Use a strong admin password** during first-time setup
-- **Set a strong SECRET_KEY** in production
-- **Use HTTPS** in production (reverse proxy recommended)
+- **Set a strong SECRET_KEY** in production (required - no default)
+- **HTTPS enabled by default** on port 8443 with auto-generated certificate
+- **Use trusted certificates** for production (see [SSL Configuration](#sslhttps-configuration))
 - **Restrict network access** to the admin panel if possible
 - API keys are stored encrypted in the database
 - The container runs as a non-root user (UID 1000)
 - Session cookies use HttpOnly and SameSite=Lax flags
+- Path traversal protection on all file operations
+- CSRF protection on all form submissions
 
 ---
 
