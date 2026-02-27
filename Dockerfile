@@ -83,7 +83,7 @@ ENV SSL_COMMON_NAME=localhost
 
 # Create /data directory tree for volume mount points
 # If no volume is mounted, these are writable empty directories inside the image
-RUN mkdir -p /data/maxmind /data/intel /data/cache /data/config /data/db /data/bin \
+RUN mkdir -p /data/maxmind /data/intel /data/cache /data/config /data/db /data/bin /data/ssl \
     && chown -R logboost:logboost /data
 
 # Copy and enable entrypoint validation script
@@ -93,18 +93,17 @@ RUN chmod +x /entrypoint.sh
 # Switch to non-root user (after all root-required operations)
 USER logboost
 
-# Health check — curl hits /health endpoint
+# Health check — curl hits /health endpoint over HTTPS
 # --interval=30s: per user's locked decision (30-second interval)
 # --timeout=10s: health response should be fast
-# --start-period=30s: gunicorn + Flask import warmup time
+# --start-period=30s: gunicorn + Flask import warmup time + SSL cert generation
 # --retries=3: mark unhealthy after 3 consecutive failures (90s sustained)
+# -k: skip certificate verification for self-signed certs
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
-    CMD curl -f http://localhost:5000/health || exit 1
+    CMD curl -fk https://localhost:${SSL_PORT:-8443}/health || exit 1
 
-# Document the exposed ports (still need -p in docker run)
-# 5000: HTTP (health checks, internal access)
+# Document the exposed port (still need -p in docker run)
 # 8443: HTTPS (secure access with auto-generated or mounted SSL cert)
-EXPOSE 5000
 EXPOSE 8443
 
 ENTRYPOINT ["/entrypoint.sh"]

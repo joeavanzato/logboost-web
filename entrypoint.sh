@@ -118,8 +118,7 @@ if [ ! -f /data/ssl/cert.pem ]; then
         -days 3650 \
         -subj "/CN=$SSL_CN" \
         -keyout /data/ssl/key.pem \
-        -out /data/ssl/cert.pem \
-        >/dev/null 2>&1
+        -out /data/ssl/cert.pem
 
     # Set secure permissions on private key
     chmod 600 /data/ssl/key.pem
