@@ -101,15 +101,18 @@ services:
   logboost-web:
     image: ghcr.io/joeavanzato/logboost-web:latest
     ports:
-      - "5000:5000"
+      - "8443:8443"   # HTTPS (primary access)
+      - "5000:5000"   # HTTP (health checks)
     environment:
       SECRET_KEY: "generate-a-secure-key-here"
       FLASK_ENV: production
+      SSL_COMMON_NAME: "localhost"  # Set to your hostname for valid cert
     volumes:
       - logboost-db:/data/db
       - logboost-maxmind:/data/maxmind
       - logboost-intel:/data/intel
       - logboost-config:/data/config
+      - logboost-ssl:/data/ssl      # SSL certificates
     restart: unless-stopped
 
 volumes:
@@ -117,6 +120,7 @@ volumes:
   logboost-maxmind:
   logboost-intel:
   logboost-config:
+  logboost-ssl:
 ```
 
 ### 2. Start the Container
@@ -127,8 +131,11 @@ docker compose up -d
 
 ### 3. Access the Application
 
-- **Main UI:** http://localhost:5000
-- **Admin Panel:** http://localhost:5000/admin
+- **Main UI:** https://localhost:8443
+- **Admin Panel:** https://localhost:8443/admin
+- **Health Check:** http://localhost:5000/health
+
+> **Note:** On first run, the container generates a self-signed SSL certificate. Your browser will show a certificate warning - this is expected for self-signed certs. Click "Advanced" and proceed to the site. For production deployments, see the [SSL Configuration](#sslhttps-configuration) section for using custom certificates.
 
 ### 4. Initial Setup
 
