@@ -59,8 +59,11 @@ def setup():
 @auth_routes_bp.route('/login', methods=['GET', 'POST'])
 def login():
     """Main login page."""
-    # Redirect to setup if no admin exists
+    # Redirect to setup if no admin exists.
+    # Clear any stale session first - the DB may have been wiped.
     if needs_setup():
+        if session.get('logged_in'):
+            session.clear()
         return redirect(url_for('auth_routes.setup'))
 
     if session.get('logged_in'):
