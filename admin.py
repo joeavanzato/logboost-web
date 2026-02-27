@@ -554,7 +554,7 @@ def get_audit_logs(limit=100, offset=0, action_filter=None, user_filter=None, st
         if log.get('details'):
             try:
                 log['details'] = json.loads(log['details'])
-            except:
+            except (json.JSONDecodeError, TypeError):
                 pass
     
     return logs, total_count
@@ -1076,7 +1076,7 @@ def upload_mmdb():
         for fname in saved_files:
             try:
                 (maxmind_path / fname).unlink()
-            except:
+            except OSError:
                 pass
         return jsonify({'error': f'Upload failed: {str(e)}'}), 500
 

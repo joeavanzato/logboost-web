@@ -85,7 +85,7 @@ def get_max_url_fetch_size():
         size_mb = get_setting('max_url_fetch_size_mb')
         if size_mb:
             return int(size_mb) * 1024 * 1024
-    except:
+    except (ValueError, TypeError):
         pass
     return DEFAULT_MAX_URL_FETCH_SIZE
 

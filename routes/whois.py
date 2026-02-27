@@ -88,7 +88,7 @@ def api_whois_resolve():
             if val:
                 try:
                     return val.strftime('%Y-%m-%d') if hasattr(val, 'strftime') else str(val)
-                except:
+                except (AttributeError, ValueError):
                     return str(val)
             return None
         
@@ -239,7 +239,7 @@ def api_whois_resolve_bulk():
                 if val:
                     try:
                         return val.strftime('%Y-%m-%d') if hasattr(val, 'strftime') else str(val)
-                    except:
+                    except (AttributeError, ValueError):
                         return str(val)
                 return None
             
