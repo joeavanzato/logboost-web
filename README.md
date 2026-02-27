@@ -140,7 +140,7 @@ Upload your existing GeoLite2-ASN.mmdb, GeoLite2-Country.mmdb, and GeoLite2-City
 
 **Option B: Configure API Key**
 
-1. Log into Admin Panel (default: `admin` / `changeme`)
+1. Log into Admin Panel (create admin account on first visit)
 2. Go to Settings, enter your MaxMind API Key
 3. Return to Dashboard, click "Update Geolocation"
 
@@ -211,12 +211,9 @@ All cache TTLs are configurable in **Admin Panel -> Settings**:
 
 ## Admin Panel
 
-### Default Credentials
+### First-Time Setup
 
-- **Username:** `admin`
-- **Password:** `changeme`
-
-**Change the default password immediately after first login.**
+On first launch, you'll be prompted to create an admin account. There are no default credentials - you choose your own username and password during setup.
 
 ### Quick Actions
 
@@ -365,7 +362,7 @@ Some features only display in the UI when the corresponding API key is configure
 
 ## Security Considerations
 
-- **Change default admin password** immediately after first login
+- **Use a strong admin password** during first-time setup
 - **Set a strong SECRET_KEY** in production
 - **Use HTTPS** in production (reverse proxy recommended)
 - **Restrict network access** to the admin panel if possible
