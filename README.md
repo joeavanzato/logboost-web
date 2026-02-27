@@ -101,8 +101,7 @@ services:
   logboost-web:
     image: ghcr.io/joeavanzato/logboost-web:latest
     ports:
-      - "8443:8443"   # HTTPS (primary access)
-      - "5000:5000"   # HTTP (health checks)
+      - "8443:8443"   # HTTPS
     environment:
       SECRET_KEY: "generate-a-secure-key-here"
       FLASK_ENV: production
@@ -133,7 +132,7 @@ docker compose up -d
 
 - **Main UI:** https://localhost:8443
 - **Admin Panel:** https://localhost:8443/admin
-- **Health Check:** http://localhost:5000/health
+- **Health Check:** https://localhost:8443/health (use `curl -k` for self-signed certs)
 
 > **Note:** On first run, the container generates a self-signed SSL certificate. Your browser will show a certificate warning - this is expected for self-signed certs. Click "Advanced" and proceed to the site. For production deployments, see the [SSL Configuration](#sslhttps-configuration) section for using custom certificates.
 
@@ -218,15 +217,11 @@ The container validates that the certificate and key match on startup. If they d
 | `SSL_PORT` | `8443` | Port for HTTPS access |
 | `SSL_COMMON_NAME` | `localhost` | CN for auto-generated certificate |
 
-### HTTP Access
+### HTTPS-Only Mode
 
-HTTP remains available on port 5000 for:
+LogBoost Web serves HTTPS only. HTTP is not available. The health check endpoint (`/health`) is accessible via HTTPS.
 
-- Health checks (`/health` endpoint)
-- Internal load balancer probes
-- Development/testing
-
-For production, consider using a reverse proxy (nginx, Traefik) if you need:
+For production deployments requiring advanced features, consider using a reverse proxy (nginx, Traefik) for:
 - Automatic certificate renewal (Let's Encrypt)
 - HTTP to HTTPS redirect
 - Custom TLS configuration
@@ -243,7 +238,6 @@ For production, consider using a reverse proxy (nginx, Traefik) if you need:
 | `FLASK_ENV` | `production` | No | `production` enables secure cookies; `development` allows HTTP cookies |
 | `SSL_PORT` | `8443` | No | HTTPS port for secure access |
 | `SSL_COMMON_NAME` | `localhost` | No | Common Name (CN) for auto-generated self-signed certificate |
-| `LOGBOOST_PORT` | `5000` | No | HTTP port (used for health checks) |
 | `LOGBOOST_PATH` | `/app/logboost` | No | Path to LogBoost binary inside container |
 | `MAXMIND_DIR` | `/data/maxmind` | No | Directory for MaxMind .mmdb files |
 | `THREAT_DB_DIR` | `/data/intel` | No | Directory for threat intelligence database |
@@ -424,7 +418,6 @@ docker compose logs logboost-web
 ```yaml
 ports:
   - "9443:8443"   # Use 9443 on host instead
-  - "5001:5000"   # Use 5001 on host instead
 ```
 
 Or stop the conflicting service:
@@ -473,11 +466,11 @@ sudo lsof -i :8443  # Find what's using the port
 
 ### 5. Health Check Failing
 
-**Symptoms:** Docker shows container as `unhealthy`, or `curl http://localhost:5000/health` returns 503
+**Symptoms:** Docker shows container as `unhealthy`, or `curl -k https://localhost:8443/health` returns 503
 
 **Check health status:**
 ```bash
-curl -s http://localhost:5000/health | python -m json.tool
+curl -sk https://localhost:8443/health | python -m json.tool
 ```
 
 **Common health failures:**
