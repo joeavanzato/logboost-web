@@ -14,6 +14,10 @@ import pytest
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# Set SECRET_KEY before app import — the startup validation runs at module load time
+# and will sys.exit(1) if SECRET_KEY is absent or weak.
+os.environ.setdefault('SECRET_KEY', 'test-secret-key-for-pytest-minimum-32-chars')
+
 
 @pytest.fixture(scope='function')
 def test_db(tmp_path, monkeypatch):
@@ -49,7 +53,7 @@ def app(test_db, monkeypatch):
     # Configure for testing
     flask_app.config.update({
         'TESTING': True,
-        'SECRET_KEY': 'test-secret-key-12345',
+        'SECRET_KEY': 'test-secret-key-for-pytest-minimum-32-chars',
         'WTF_CSRF_ENABLED': False,
     })
     

@@ -6,6 +6,7 @@ import os
 import re
 import csv
 import json
+import sys
 import uuid
 import subprocess
 import tempfile
@@ -48,8 +49,27 @@ from security import (
 # Import auth module
 from auth import login_required
 
+# SECRET_KEY startup validation - fail fast on weak/missing keys
+_raw_key = os.environ.get('SECRET_KEY', '')
+_KNOWN_WEAK_KEYS = {
+    '',
+    'dev-placeholder-change-me-in-production',
+    'changeme',
+    'secret',
+    'development',
+    'flask-secret-key',
+}
+if not _raw_key or _raw_key.lower() in {k.lower() for k in _KNOWN_WEAK_KEYS} or len(_raw_key) < 32:
+    print(
+        "FATAL: SECRET_KEY is unset, matches a known weak default, or is shorter than "
+        "32 characters. The application cannot start.\n"
+        "Generate a key: python -c \"import secrets; print(secrets.token_hex(32))\"",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
 app = Flask(__name__)
-app.secret_key = os.environ.get('SECRET_KEY', os.urandom(24))
+app.secret_key = _raw_key
 
 # ============================================
 # Security Configuration

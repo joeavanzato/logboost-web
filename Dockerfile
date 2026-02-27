@@ -69,7 +69,9 @@ RUN python -c "from admin import get_db; get_db().close()" \
 
 # Default environment variables — all have sensible defaults per user's locked decision
 # Container works out of the box; override via env vars or .env file
-ENV SECRET_KEY=dev-placeholder-change-me-in-production
+# NOTE: SECRET_KEY has no default — it MUST be set via environment variable or .env file.
+# The application will exit with FATAL error if SECRET_KEY is missing, weak, or < 32 chars.
+# Generate a key: python -c "import secrets; print(secrets.token_hex(32))"
 ENV FLASK_ENV=production
 ENV LOGBOOST_PATH=/app/logboost
 ENV MAXMIND_DIR=/data/maxmind
