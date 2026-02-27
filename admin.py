@@ -2930,26 +2930,20 @@ def save_graph(graph_id, name, data, user_id=None):
     return True
 
 
-def load_graph(graph_id):
-    """Load a graph by ID. Anyone with the ID can load it."""
-    import json
+def load_graph(graph_id, user_id=None):
+    """Load a graph by ID. Requires ownership unless user_id is None (admin path)."""
     conn = get_db()
     cursor = conn.cursor()
-    
-    cursor.execute('SELECT * FROM saved_graphs WHERE id = ?', (graph_id,))
+    if user_id is not None:
+        cursor.execute(
+            'SELECT * FROM saved_graphs WHERE id = ? AND user_id = ?',
+            (graph_id, user_id)
+        )
+    else:
+        cursor.execute('SELECT * FROM saved_graphs WHERE id = ?', (graph_id,))
     row = cursor.fetchone()
     conn.close()
-    
-    if row:
-        return {
-            'id': row['id'],
-            'name': row['name'],
-            'data': json.loads(row['data']),
-            'user_id': row['user_id'],
-            'created_at': row['created_at'],
-            'updated_at': row['updated_at']
-        }
-    return None
+    return dict(row) if row else None
 
 
 def list_graphs(user_id=None):

@@ -2233,11 +2233,11 @@ def api_graph_save():
 @app.route('/api/graph/<graph_id>', methods=['GET'])
 @login_required
 def api_graph_load(graph_id):
-    """Load a graph by ID. Anyone with the ID can load it."""
-    graph = load_graph(graph_id)
+    """Load a graph by ID. Only the owning user may load it."""
+    user_id = session.get('user_id')
+    graph = load_graph(graph_id, user_id=user_id)
     if graph:
-        user_id = session.get('user_id')
-        graph['is_owner'] = (graph.get('user_id') == user_id) or (graph.get('user_id') is None)
+        graph['is_owner'] = True
         return jsonify(graph)
     return jsonify({'error': 'Graph not found'}), 404
 
@@ -2265,8 +2265,9 @@ def api_graph_list():
 @app.route('/api/graph/export/<graph_id>', methods=['GET'])
 @login_required
 def api_graph_export(graph_id):
-    """Export graph as JSON."""
-    graph = load_graph(graph_id)
+    """Export graph as JSON. Only the owning user may export it."""
+    user_id = session.get('user_id')
+    graph = load_graph(graph_id, user_id=user_id)
     if not graph:
         return jsonify({'error': 'Graph not found'}), 404
     
