@@ -168,19 +168,87 @@ Configure all integrations in **Admin Panel -> Settings**. All API keys are stor
 
 ---
 
+## SSL/HTTPS Configuration
+
+LogBoost Web serves HTTPS on port 8443 by default. SSL certificates are managed automatically.
+
+### Zero Configuration (Default)
+
+On first startup, the container generates a self-signed SSL certificate:
+
+- **Certificate location:** `/data/ssl/cert.pem` and `/data/ssl/key.pem`
+- **Validity:** 10 years from generation
+- **Common Name:** Value of `SSL_COMMON_NAME` env var (default: `localhost`)
+
+The certificate is stored in the `logboost-ssl` volume and persists across container restarts.
+
+### Using Custom Certificates
+
+For production deployments, mount your own certificates:
+
+**Option 1: Bind mount individual files**
+
+```yaml
+services:
+  logboost-web:
+    volumes:
+      - /etc/ssl/certs/logboost.crt:/data/ssl/cert.pem:ro
+      - /etc/ssl/private/logboost.key:/data/ssl/key.pem:ro
+```
+
+**Option 2: Mount certificate directory**
+
+```yaml
+services:
+  logboost-web:
+    volumes:
+      - /etc/ssl/logboost:/data/ssl:ro
+```
+
+Your certificate directory must contain:
+- `cert.pem` - PEM-encoded X.509 certificate
+- `key.pem` - PEM-encoded private key (must match certificate)
+
+The container validates that the certificate and key match on startup. If they don't match, the container fails with an error message.
+
+### SSL Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SSL_PORT` | `8443` | Port for HTTPS access |
+| `SSL_COMMON_NAME` | `localhost` | CN for auto-generated certificate |
+
+### HTTP Access
+
+HTTP remains available on port 5000 for:
+
+- Health checks (`/health` endpoint)
+- Internal load balancer probes
+- Development/testing
+
+For production, consider using a reverse proxy (nginx, Traefik) if you need:
+- Automatic certificate renewal (Let's Encrypt)
+- HTTP to HTTPS redirect
+- Custom TLS configuration
+
+---
+
 ## Configuration
 
 ### Environment Variables
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `SECRET_KEY` | `dev-placeholder...` | Flask session signing key (**change in production**) |
-| `FLASK_ENV` | `production` | `production` or `development` |
-| `LOGBOOST_PATH` | `/usr/local/bin/logboost` | Path to LogBoost binary |
-| `MAXMIND_DIR` | `/data/maxmind` | Directory for .mmdb files |
-| `THREAT_DB_DIR` | `/data/intel` | Directory for threats.db |
-| `LOGBOOST_DB_PATH` | `/data/db/logboost_admin.db` | Admin database path |
-| `LOGBOOST_LOG_LEVEL` | `WARNING` | Logging verbosity (`DEBUG`, `INFO`, `WARNING`, `ERROR`) |
+| Variable | Default | Required | Description |
+|----------|---------|----------|-------------|
+| `SECRET_KEY` | (none) | **Yes** | Flask session signing key. Generate with `secrets.token_hex(32)` |
+| `FLASK_ENV` | `production` | No | `production` enables secure cookies; `development` allows HTTP cookies |
+| `SSL_PORT` | `8443` | No | HTTPS port for secure access |
+| `SSL_COMMON_NAME` | `localhost` | No | Common Name (CN) for auto-generated self-signed certificate |
+| `LOGBOOST_PORT` | `5000` | No | HTTP port (used for health checks) |
+| `LOGBOOST_PATH` | `/app/logboost` | No | Path to LogBoost binary inside container |
+| `MAXMIND_DIR` | `/data/maxmind` | No | Directory for MaxMind .mmdb files |
+| `THREAT_DB_DIR` | `/data/intel` | No | Directory for threat intelligence database |
+| `LOGBOOST_DB_PATH` | `/data/db/logboost_admin.db` | No | Path to admin SQLite database |
+| `LOGBOOST_LOG_LEVEL` | `info` | No | Logging verbosity (`debug`, `info`, `warning`, `error`) |
 
 ### Generating a Secure Secret Key
 
@@ -197,8 +265,9 @@ python -c "import secrets; print(secrets.token_hex(32))"
 | `/data/intel` | Threat intelligence database |
 | `/data/config` | Feed configuration (feed_config.json) |
 | `/data/cache` | DNS, WHOIS, and enrichment caches |
-| `/data/uploads` | Temporary file upload storage |
-| `/data/output` | Processed output files |
+| `/data/ssl` | SSL certificates (auto-generated or custom) |
+| `/app/uploads` | Temporary file upload storage |
+| `/app/output` | Processed output files |
 
 ### Cache Settings
 
