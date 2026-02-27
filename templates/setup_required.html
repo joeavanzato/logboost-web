@@ -48,6 +48,13 @@
             max-width: 600px;
             width: 100%;
             text-align: center;
+            position: relative;
+        }
+
+        .logout-section {
+            position: absolute;
+            top: 20px;
+            right: 20px;
         }
 
         .setup-icon {
@@ -295,6 +302,20 @@
 </head>
 <body>
     <div class="setup-container">
+        <div class="logout-section">
+            <form action="{{ url_for('auth_routes.logout') }}" method="POST" style="display: inline;">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn btn-secondary" title="Logout">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 16px; height: 16px;">
+                        <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/>
+                        <polyline points="16 17 21 12 16 7"/>
+                        <line x1="21" y1="12" x2="9" y2="12"/>
+                    </svg>
+                    Logout
+                </button>
+            </form>
+        </div>
+
         <svg class="setup-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
             <circle cx="12" cy="12" r="10"/>
             <line x1="12" y1="8" x2="12" y2="12"/>
@@ -319,6 +340,7 @@
             </ul>
         </div>
 
+        {% if is_admin %}
         <div class="options-section">
             <h2>Choose Setup Method</h2>
 
@@ -375,9 +397,24 @@
                 <div class="upload-status" id="upload-status" style="display: none;"></div>
             </div>
         </div>
+        {% else %}
+        <div class="options-section">
+            <div class="option-card" style="text-align: center;">
+                <h3 style="color: var(--warning);">Admin Access Required</h3>
+                <p>
+                    Only administrators can configure MaxMind database settings.
+                    Please contact your administrator to complete the setup.
+                </p>
+            </div>
+        </div>
+        {% endif %}
 
         <div class="admin-link">
+            {% if is_admin %}
             <p>Already configured? <a href="{{ url_for('index') }}">Refresh this page</a> to check again.</p>
+            {% else %}
+            <p>Logged in as <strong>{{ session.get('username', 'User') }}</strong> (non-admin). Use the logout button above to switch accounts.</p>
+            {% endif %}
         </div>
     </div>
 
