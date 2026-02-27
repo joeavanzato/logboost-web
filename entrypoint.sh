@@ -100,6 +100,44 @@ else
     echo "  [WARN] MaxMind databases not found in /data/maxmind"
 fi
 
+# ============================================
+# SSL Certificate Setup
+# ============================================
+
+# Create SSL directory if it doesn't exist
+mkdir -p /data/ssl
+
+# Check if SSL certificate exists
+if [ ! -f /data/ssl/cert.pem ]; then
+    # Generate self-signed certificate
+    SSL_CN="${SSL_COMMON_NAME:-localhost}"
+    EXPIRY_DATE=$(date -d "+3650 days" +"%Y-%m-%d")
+
+    echo "  [INFO] Generating self-signed SSL certificate (CN=$SSL_CN)"
+    openssl req -x509 -newkey rsa:2048 -nodes \
+        -days 3650 \
+        -subj "/CN=$SSL_CN" \
+        -keyout /data/ssl/key.pem \
+        -out /data/ssl/cert.pem \
+        >/dev/null 2>&1
+
+    # Set secure permissions on private key
+    chmod 600 /data/ssl/key.pem
+
+    echo "  [OK] Generated self-signed certificate valid until $EXPIRY_DATE"
+else
+    # Validate that mounted cert and key match
+    CERT_MOD=$(openssl x509 -noout -modulus -in /data/ssl/cert.pem 2>/dev/null | openssl md5)
+    KEY_MOD=$(openssl rsa -noout -modulus -in /data/ssl/key.pem 2>/dev/null | openssl md5)
+
+    if [ "$CERT_MOD" != "$KEY_MOD" ]; then
+        echo "ERROR: SSL certificate and key do not match"
+        exit 1
+    fi
+
+    echo "  [OK] Using mounted SSL certificate"
+fi
+
 echo "==> Starting gunicorn"
 
 exec "$@"
