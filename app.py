@@ -414,7 +414,8 @@ def index():
         return render_template('setup_required.html',
                                missing_files=missing_files,
                                required_files=REQUIRED_MMDB_FILES,
-                               maxmind_dir=MAXMIND_DIR)
+                               maxmind_dir=MAXMIND_DIR,
+                               is_admin=session.get('user_role') == ROLE_ADMIN)
 
     # Check if threat database exists
     threat_db_missing = not check_threat_db_exists()
