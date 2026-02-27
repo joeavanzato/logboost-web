@@ -78,6 +78,8 @@ ENV MAXMIND_DIR=/data/maxmind
 ENV THREAT_DB_DIR=/data/intel
 ENV LOGBOOST_LOG_LEVEL=info
 ENV LOGBOOST_DB_PATH=/app/logboost_admin.db
+ENV SSL_PORT=8443
+ENV SSL_COMMON_NAME=localhost
 
 # Create /data directory tree for volume mount points
 # If no volume is mounted, these are writable empty directories inside the image
@@ -99,8 +101,11 @@ USER logboost
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
     CMD curl -f http://localhost:5000/health || exit 1
 
-# Document the exposed port (still need -p in docker run)
+# Document the exposed ports (still need -p in docker run)
+# 5000: HTTP (health checks, internal access)
+# 8443: HTTPS (secure access with auto-generated or mounted SSL cert)
 EXPOSE 5000
+EXPOSE 8443
 
 ENTRYPOINT ["/entrypoint.sh"]
 
