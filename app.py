@@ -112,6 +112,15 @@ def handle_csrf_error(e):
     return jsonify({'error': 'CSRF token missing or invalid'}), 400
 
 
+@app.after_request
+def add_security_headers(response):
+    """Add security headers to every response."""
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['X-Frame-Options'] = 'SAMEORIGIN'
+    response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+    return response
+
+
 # Initialize admin module (with CSRF-enabled blueprint)
 init_admin(app, csrf)
 

@@ -3507,9 +3507,5 @@ def init_admin(app, csrf=None):
     # Register blueprint
     app.register_blueprint(admin_bp)
 
-    # Exempt install-update from CSRF (fetch POST without token)
-    if csrf is not None:
-        csrf.exempt(install_logboost_update)
-
     # Start scheduler
     scheduler.start()

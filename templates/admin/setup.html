@@ -375,7 +375,7 @@ function installUpdate() {
     installBtn.disabled = true;
     progress.style.display = 'flex';
 
-    fetch('/admin/api/setup/install-update', { method: 'POST' })
+    csrfFetch('/admin/api/setup/install-update', { method: 'POST' })
         .then(res => res.json())
         .then(data => {
             progress.style.display = 'none';
