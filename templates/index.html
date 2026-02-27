@@ -34,6 +34,17 @@
 </head>
 <body>
     <div class="app-container">
+        {% if threat_db_missing %}
+        <div class="warning-banner">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"/>
+                <line x1="12" y1="8" x2="12" y2="12"/>
+                <line x1="12" y1="16" x2="12.01" y2="16"/>
+            </svg>
+            <span>Threat Database not yet initialized - admins must run <strong>'Update Threat Intel'</strong> in the <a href="{{ url_for('admin.dashboard') }}">Admin Dashboard</a></span>
+        </div>
+        {% endif %}
+
         <!-- Header -->
         <header class="header">
             <div class="logo">
@@ -184,10 +195,10 @@
                                 <span class="checkbox-custom"></span>
                                 <span class="checkbox-text">Shodan InternetDB</span>
                             </label>
-                            <label class="checkbox-label" title="Match against threat intelligence feeds">
-                                <input type="checkbox" name="useti">
+                            <label class="checkbox-label {% if threat_db_missing %}disabled{% endif %}" title="{% if threat_db_missing %}Threat database not initialized - run 'Update Threat Intel' in Admin Dashboard{% else %}Match against threat intelligence feeds{% endif %}">
+                                <input type="checkbox" name="useti" {% if threat_db_missing %}disabled{% endif %}>
                                 <span class="checkbox-custom"></span>
-                                <span class="checkbox-text">Threat Intelligence</span>
+                                <span class="checkbox-text">Threat Intelligence{% if threat_db_missing %} (Not Initialized){% endif %}</span>
                             </label>
                         </div>
                     </div>
@@ -294,10 +305,10 @@
                                 <span class="checkbox-custom"></span>
                                 <span class="checkbox-text">Shodan InternetDB</span>
                             </label>
-                            <label class="checkbox-label">
-                                <input type="checkbox" name="useti">
+                            <label class="checkbox-label {% if threat_db_missing %}disabled{% endif %}" title="{% if threat_db_missing %}Threat database not initialized - run 'Update Threat Intel' in Admin Dashboard{% else %}Match against threat intelligence feeds{% endif %}">
+                                <input type="checkbox" name="useti" {% if threat_db_missing %}disabled{% endif %}>
                                 <span class="checkbox-custom"></span>
-                                <span class="checkbox-text">Threat Intelligence</span>
+                                <span class="checkbox-text">Threat Intelligence{% if threat_db_missing %} (Not Initialized){% endif %}</span>
                             </label>
                         </div>
                     </div>

@@ -1,5 +1,30 @@
 /* LogBoost Admin Styles */
 
+/* Warning Banner */
+.warning-banner {
+    background: rgba(239, 68, 68, 0.15);
+    border: 1px solid #ef4444;
+    border-radius: 8px;
+    color: #fca5a5;
+    padding: 12px 16px;
+    margin-bottom: 20px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 14px;
+}
+
+.warning-banner svg {
+    width: 20px;
+    height: 20px;
+    flex-shrink: 0;
+    color: #ef4444;
+}
+
+.warning-banner strong {
+    color: #ef4444;
+}
+
 /* Admin Body */
 .admin-body {
     background: var(--bg-deepest);

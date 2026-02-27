@@ -607,15 +607,22 @@ def dashboard():
     # Get account count
     cursor.execute('SELECT COUNT(*) as count FROM users')
     account_count = cursor.fetchone()['count']
-    
+
     conn.close()
-    
-    return render_template('admin/dashboard.html', 
-                           tasks=tasks, 
+
+    # Check if threat database exists
+    threat_db_path = Path('/app/threats.db')
+    if not threat_db_path.exists():
+        threat_db_path = Path(os.environ.get('THREAT_DB_DIR', '.')) / 'threats.db'
+    threat_db_missing = not threat_db_path.exists()
+
+    return render_template('admin/dashboard.html',
+                           tasks=tasks,
                            recent_logs=recent_logs,
                            maxmind_key_set=maxmind_key_set,
                            shodan_key_set=shodan_key_set,
-                           account_count=account_count)
+                           account_count=account_count,
+                           threat_db_missing=threat_db_missing)
 
 
 # ============================================

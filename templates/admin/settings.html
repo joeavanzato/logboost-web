@@ -915,25 +915,30 @@
 </div>
 
 <script>
+const csrfToken = '{{ csrf_token() }}';
+
 function testMaxMindKey() {
     const apiKey = document.getElementById('maxmind_api_key').value;
     const resultDiv = document.getElementById('maxmind-test-result');
     const testBtn = event.target.closest('.test-btn');
-    
+
     if (!apiKey) {
         resultDiv.className = 'test-result error';
         resultDiv.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg> Please enter an API key first';
         return;
     }
-    
+
     testBtn.disabled = true;
     testBtn.innerHTML = '<svg class="spinning" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/></svg> Testing...';
     resultDiv.className = 'test-result';
     resultDiv.innerHTML = 'Testing connection...';
-    
+
     fetch('{{ url_for("admin.test_maxmind_key") }}', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'X-CSRFToken': csrfToken
+        },
         body: 'api_key=' + encodeURIComponent(apiKey)
     })
     .then(response => response.json())
@@ -974,7 +979,10 @@ function testShodanKey() {
     
     fetch('{{ url_for("admin.test_shodan_key") }}', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'X-CSRFToken': csrfToken
+        },
         body: 'api_key=' + encodeURIComponent(apiKey)
     })
     .then(response => response.json())

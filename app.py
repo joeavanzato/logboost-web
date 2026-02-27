@@ -121,7 +121,18 @@ def check_mmdb_files_exist():
             missing.append(mmdb_file)
 
     return len(missing) == 0, missing
+
 THREAT_DB_DIR = os.environ.get('THREAT_DB_DIR', '.')
+
+
+def check_threat_db_exists():
+    """Check if threats.db exists."""
+    # Check both /app/threats.db (symlink) and THREAT_DB_DIR/threats.db
+    threat_db_path = Path('/app/threats.db')
+    if threat_db_path.exists():
+        return True
+    threat_db_path = Path(THREAT_DB_DIR) / 'threats.db'
+    return threat_db_path.exists()
 
 UPLOAD_FOLDER.mkdir(exist_ok=True)
 OUTPUT_FOLDER.mkdir(exist_ok=True)
@@ -405,13 +416,16 @@ def index():
                                required_files=REQUIRED_MMDB_FILES,
                                maxmind_dir=MAXMIND_DIR)
 
+    # Check if threat database exists
+    threat_db_missing = not check_threat_db_exists()
+
     # Check for shared results
     shared_id = request.args.get('shared')
     if shared_id:
         shared = get_shared_results(shared_id)
         if shared:
-            return render_template('index.html', shared_results=shared_id)
-    return render_template('index.html')
+            return render_template('index.html', shared_results=shared_id, threat_db_missing=threat_db_missing)
+    return render_template('index.html', threat_db_missing=threat_db_missing)
 
 
 @app.route('/enrich/text', methods=['POST'])

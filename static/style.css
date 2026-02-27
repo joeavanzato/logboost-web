@@ -69,6 +69,34 @@ body {
     min-height: 100vh;
 }
 
+/* Warning Banner */
+.warning-banner {
+    background: rgba(239, 68, 68, 0.15);
+    border: 1px solid #ef4444;
+    color: #fca5a5;
+    padding: 12px 20px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 14px;
+}
+
+.warning-banner svg {
+    width: 20px;
+    height: 20px;
+    flex-shrink: 0;
+    color: #ef4444;
+}
+
+.warning-banner a {
+    color: #ef4444;
+    font-weight: 500;
+}
+
+.warning-banner a:hover {
+    text-decoration: underline;
+}
+
 /* App Container */
 .app-container {
     display: flex;
@@ -513,6 +541,16 @@ body {
     background: var(--cyber-green-dim);
     border-color: var(--cyber-green-dim);
     opacity: 0.6;
+}
+
+.checkbox-label.disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.checkbox-label.disabled:hover {
+    background: transparent;
+    border-color: var(--border-muted);
 }
 
 .checkbox-text {
