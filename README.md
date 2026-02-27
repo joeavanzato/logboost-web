@@ -9,38 +9,90 @@ A web-based interface for [LogBoost](https://github.com/joeavanzato/LogBoost) - 
 ## Features
 
 ### Core Enrichment
-- **Ad-hoc IP Enrichment** - Paste any text, automatically extract and enrich all IP addresses
-- **File Upload Processing** - Upload logs (CSV, JSON, TXT, LOG, GZ, CEF, Syslog) for batch processing
-- **Geolocation & ASN** - MaxMind GeoLite2 integration for IP geolocation
-- **Threat Intelligence** - Match IPs against configurable threat feeds
+
+- **Ad-hoc IP Enrichment** - Paste any text (logs, firewall output, SIEM exports), automatically extract and enrich all IP addresses
+- **File Upload Processing** - Upload logs (CSV, JSON, TXT, LOG, GZ, CEF, Syslog) for batch processing with regex IP detection, full parse mode, and raw text fallback
+- **MaxMind GeoLite2 Geolocation** - Country, city, and ASN data for every IP (upload MMDB files manually or auto-update via API key)
+- **Threat Intelligence Matching** - Match IPs against configurable feeds; built-in feed list included, custom feeds supported
+
+### DNS Enrichment (No API Key Required)
+
+- **Reverse DNS (PTR)** - Resolve IP addresses to hostnames
+- **Forward DNS Resolution** - A, AAAA, CNAME, MX, NS, TXT, SOA record types
+- **Bulk Concurrent Resolution** - Configurable concurrency for large datasets
+- **Configurable DNS Servers** - Use any resolver; cache TTL configurable per Admin Settings
+
+### WHOIS Lookups (No API Key Required)
+
+- **Domain Registration Data** - Registrant name, email, organization
+- **Registrar Information** - Registrar name and dates
+- **Creation and Expiration Dates** - Parsed and normalized
+- **Name Servers** - Full NS list
+- **Bulk Concurrent Lookups** - Up to 100 domains per request with result caching
+
+### Shodan InternetDB (No API Key Required)
+
+- **Open Ports and Services** - What's listening on an IP
+- **Host Tags** - Cloud provider, VPN, proxy, Tor exit, honeypot labels
+- **CPEs** - Common Platform Enumeration identifiers
+- **Known Vulnerabilities (CVEs)** - Publicly disclosed issues for the host
 
 ### Optional API Integrations
-- **DNS Reverse Lookups** - Resolve IP addresses to hostnames
-- **WHOIS Lookups** - Domain and IP registration data
-- **Shodan InternetDB** - Open ports, services, vulnerabilities
-- **CIRCL Passive DNS** - Passive-DNS Domain/IP Associations
-- **Chaos Project DB** - Bug bounty program data
+
+- **Full Shodan API** - Search queries, IP pivots, account info (requires paid API key)
+- **CIRCL Passive DNS** - Historical DNS associations for IPs and domains (free, registration required)
+- **ViewDNS** - Reverse MX, Reverse NS, Reverse WHOIS pivoting (paid)
+- **HackerTarget** - Shared nameserver discovery (free limited tier or paid)
+- **Chaos (ProjectDiscovery)** - Subdomain enumeration from bug bounty program datasets (free API key)
 
 ### Admin Dashboard
-- **Scheduled Tasks** - Auto-update GeoIP databases and threat intel feeds
+
+- **Scheduled Tasks** - Auto-update GeoIP databases and threat intel feeds on configurable intervals
 - **User Management** - Multi-user support with audit logging
-- **API Key Management** - Configure MaxMind, Shodan, and other API keys
+- **API Key Management** - Configure all integration credentials in one place
 - **Task Logs** - Full execution history with error tracking
 
 ### User Experience
-- **Drag & Drop Upload** - Easy file upload interface
+
+- **Drag and Drop Upload** - Easy file upload interface
 - **Paginated Results** - Handle large datasets in-browser
 - **CSV Export** - Download enriched results
-- **Shareable Links** - Share results with expiring links
+- **Shareable Links** - Share results with expiring links (configurable TTL)
 - **Dark Theme** - Security-focused aesthetic
+
+---
+
+## What Works Without API Keys
+
+If you upload the three MaxMind MMDB files (or use a MaxMind API key to download them), the following features work with no other configuration:
+
+- All IP geolocation and ASN lookups (MaxMind GeoLite2)
+- Threat intelligence matching (after running Update Threat Intel at least once)
+- Shodan InternetDB enrichment (open ports, tags, CVEs) - uses the free public API
+- DNS resolution and reverse DNS lookups
+- WHOIS domain lookups
+- File upload and batch processing
+- Result sharing with expiring links
+
+**API keys unlock additional capabilities:**
+
+| Capability | Requires |
+|-----------|---------|
+| Automatic MaxMind database updates | MaxMind API key (free) |
+| Full Shodan search and pivot queries | Shodan paid API key |
+| Passive DNS history (domain/IP associations) | CIRCL account (free) |
+| Reverse MX / Reverse NS / Reverse WHOIS | ViewDNS paid API key |
+| Shared nameserver discovery | HackerTarget API key (free tier available) |
+| Subdomain enumeration | Chaos API key (free) |
 
 ---
 
 ## Quick Start
 
 ### Prerequisites
+
 - Docker and Docker Compose
-- MaxMind GeoLite2 databases OR MaxMind API key
+- MaxMind GeoLite2 databases OR a MaxMind account (free)
 
 ### 1. Create docker-compose.yml
 
@@ -80,15 +132,32 @@ docker compose up -d
 
 ### 4. Initial Setup
 
-On first launch, you'll see a setup screen prompting you to configure MaxMind databases:
+On first launch you will see a setup screen prompting you to configure MaxMind databases:
 
 **Option A: Upload MMDB Files**
-- Upload your existing GeoLite2-ASN.mmdb, GeoLite2-Country.mmdb, and GeoLite2-City.mmdb files
+
+Upload your existing GeoLite2-ASN.mmdb, GeoLite2-Country.mmdb, and GeoLite2-City.mmdb files directly from the setup page.
 
 **Option B: Configure API Key**
+
 1. Log into Admin Panel (default: `admin` / `changeme`)
-2. Go to Settings → Enter MaxMind API Key
-3. Dashboard → Click "Update Geolocation"
+2. Go to Settings, enter your MaxMind API Key
+3. Return to Dashboard, click "Update Geolocation"
+
+---
+
+## API Integrations
+
+Configure all integrations in **Admin Panel -> Settings**. All API keys are stored encrypted in the database.
+
+| Service | Purpose | API Key Required | Tier | Get Access |
+|---------|---------|-----------------|------|-----------|
+| **MaxMind** | Auto-download GeoLite2 database updates | Required for auto-update | Free | [Sign up](https://www.maxmind.com/en/geolite2/signup) |
+| **Shodan** | Full Shodan API queries, search, pivots | Optional (InternetDB is free) | Paid | [shodan.io](https://www.shodan.io/) |
+| **CIRCL** | Passive DNS historical records (username + password) | Required | Free (registration) | [circl.lu](https://www.circl.lu/services/passive-dns/) |
+| **ViewDNS** | Reverse MX, Reverse NS, Reverse WHOIS | Required | Paid | [viewdns.info/api](https://viewdns.info/api/) |
+| **HackerTarget** | Shared nameserver discovery | Optional (limited free tier) | Free/Paid | [hackertarget.com](https://hackertarget.com/ip-tools/) |
+| **Chaos** | Subdomain enumeration (ProjectDiscovery dataset) | Required | Free | [chaos.projectdiscovery.io](https://chaos.projectdiscovery.io/) |
 
 ---
 
@@ -100,10 +169,11 @@ On first launch, you'll see a setup screen prompting you to configure MaxMind da
 |----------|---------|-------------|
 | `SECRET_KEY` | `dev-placeholder...` | Flask session signing key (**change in production**) |
 | `FLASK_ENV` | `production` | `production` or `development` |
-| `LOGBOOST_PATH` | `/app/logboost` | Path to LogBoost binary |
+| `LOGBOOST_PATH` | `/usr/local/bin/logboost` | Path to LogBoost binary |
 | `MAXMIND_DIR` | `/data/maxmind` | Directory for .mmdb files |
 | `THREAT_DB_DIR` | `/data/intel` | Directory for threats.db |
 | `LOGBOOST_DB_PATH` | `/data/db/logboost_admin.db` | Admin database path |
+| `LOGBOOST_LOG_LEVEL` | `WARNING` | Logging verbosity (`DEBUG`, `INFO`, `WARNING`, `ERROR`) |
 
 ### Generating a Secure Secret Key
 
@@ -118,49 +188,56 @@ python -c "import secrets; print(secrets.token_hex(32))"
 | `/data/db` | Admin database (users, settings, audit logs) |
 | `/data/maxmind` | MaxMind GeoLite2 .mmdb files |
 | `/data/intel` | Threat intelligence database |
-| `/data/config` | Feed configuration |
+| `/data/config` | Feed configuration (feed_config.json) |
+| `/data/cache` | DNS, WHOIS, and enrichment caches |
+| `/data/uploads` | Temporary file upload storage |
+| `/data/output` | Processed output files |
 
----
+### Cache Settings
 
-## Optional API Keys
+All cache TTLs are configurable in **Admin Panel -> Settings**:
 
-Configure these in **Admin Panel → Settings** for enhanced enrichment:
-
-| Service | Purpose | Get Key |
-|---------|---------|---------|
-| **MaxMind** | Auto-download GeoLite2 updates | [maxmind.com](https://www.maxmind.com/en/geolite2/signup) (free) |
-| **Shodan** | Shodan Pivots/Queries | [shodan.io](https://www.shodan.io/) |
-| **CIRCL** | Passive DNS | [circl.lu](https://www.circl.lu/) |
-| **ViewDNS** | DNS/WHOIS lookups | [viewdns.info](https://viewdns.info/api/) |
-| **HackerTarget** | DNS/IP tools | [hackertarget.com](https://hackertarget.com/ip-tools/) |
-
-> **Note:** The app works without any API keys if you manually upload MMDB files. API keys enable automatic updates and additional enrichment sources.
+| Cache | Default TTL | Configurable |
+|-------|------------|-------------|
+| DNS cache TTL | 1 hour (3600s) | Yes |
+| WHOIS cache TTL | 24 hours (86400s) | Yes |
+| Shodan cache TTL | 1 hour (3600s) | Yes |
+| CIRCL PDNS cache TTL | 7 days (604800s) | Yes |
+| ViewDNS cache TTL | 24 hours (86400s) | Yes |
+| HackerTarget cache TTL | 24 hours (86400s) | Yes |
+| Chaos cache TTL | 24 hours (86400s) | Yes |
 
 ---
 
 ## Admin Panel
 
 ### Default Credentials
+
 - **Username:** `admin`
 - **Password:** `changeme`
 
 **Change the default password immediately after first login.**
 
 ### Quick Actions
-- **Update Geolocation** - Download latest MaxMind databases (requires API key)
-- **Update Threat Intel** - Refresh threat indicator feeds
-- **Upload MMDB Files** - Manually upload database files
+
+- **Update Geolocation** - Download latest MaxMind databases (requires MaxMind API key)
+- **Update Threat Intel** - Refresh all configured threat indicator feeds
+- **Upload MMDB Files** - Manually upload database files without an API key
+- **Check for Updates** - Check and install LogBoost binary updates (Docker mode)
 
 ### Scheduled Tasks
+
 Configure automatic updates:
+
 - Set update intervals (hours)
-- Enable/disable individual tasks
-- View execution history and logs
+- Enable or disable individual tasks
+- View full execution history and logs
 
 ### User Management
+
 - Create additional admin accounts
 - Change passwords
-- View audit logs
+- View audit logs for all user actions
 
 ---
 
@@ -169,7 +246,7 @@ Configure automatic updates:
 ### Ad-hoc IP Enrichment
 
 1. Navigate to main page
-2. Paste any text containing IP addresses (logs, firewall output, etc.)
+2. Paste any text containing IP addresses (logs, firewall output, SIEM exports, etc.)
 3. Select enrichment options:
    - DNS Lookups
    - WHOIS
@@ -180,31 +257,32 @@ Configure automatic updates:
 
 ### File Upload
 
-1. Click **File Upload** tab
-2. Drag & drop or select a file
+1. Click the **File Upload** tab
+2. Drag and drop or select a file
 3. Configure processing options:
-   - **Regex IP Detection** - Find IPs via regex
-   - **Full Parse** - Deep key detection for variable formats
-   - **Raw Text Fallback** - Process unknown formats as text
-4. Click **Process & Enrich File**
+   - **Regex IP Detection** - Find IPs via regex in any format
+   - **Full Parse** - Deep key detection for variable log formats
+   - **Raw Text Fallback** - Process unknown formats as plain text
+4. Click **Process and Enrich File**
 5. View paginated results and download
 
 ### Sharing Results
 
 1. After enrichment, click **Share Results**
 2. Link is copied to clipboard
-3. Links expire after configurable period (default: 7 days)
+3. Links expire after a configurable period (default: 7 days)
 
 ---
 
 ## Threat Intelligence
 
 ### Built-in Feeds
-The bundled `feed_config.json` includes common threat intel sources. View and manage feeds in **Admin Panel → Threat Intel**.
+
+The bundled `feed_config.json` includes common threat intel sources. View and manage feeds in **Admin Panel -> Threat Intel**.
 
 ### Adding Custom Feeds
 
-1. Go to Admin Panel → Threat Intel
+1. Go to Admin Panel -> Threat Intel
 2. Click "Add Feed"
 3. Configure:
    - Feed URL (plain text, one indicator per line)
@@ -213,8 +291,8 @@ The bundled `feed_config.json` includes common threat intel sources. View and ma
 
 ### Updating Feeds
 
-- **Manual:** Dashboard → Update Threat Intel
-- **Automatic:** Configure scheduled task interval
+- **Manual:** Dashboard -> Update Threat Intel
+- **Automatic:** Configure scheduled task interval in Admin Settings
 
 ---
 
@@ -225,6 +303,7 @@ curl http://localhost:5000/health
 ```
 
 Returns JSON with status of:
+
 - LogBoost binary availability
 - MaxMind database availability
 - Database connectivity
@@ -249,6 +328,7 @@ docker compose up --build
 ### "Setup Required" Screen
 
 MaxMind databases are missing. Either:
+
 - Upload .mmdb files via the setup page
 - Configure MaxMind API key in Admin Settings and run "Update Geolocation"
 
@@ -259,6 +339,7 @@ You clicked "Update Geolocation" but no API key is configured. Go to Admin Setti
 ### Permission Errors
 
 The container runs as UID 1000. If using bind mounts instead of named volumes:
+
 ```bash
 sudo chown -R 1000:1000 /path/to/your/data
 ```
@@ -266,23 +347,31 @@ sudo chown -R 1000:1000 /path/to/your/data
 ### Container Won't Start
 
 Check logs:
+
 ```bash
 docker compose logs logboost-web
 ```
 
 Common issues:
+
 - Port 5000 already in use
 - Volume mount permissions
+
+### Enrichment Feature Not Appearing
+
+Some features only display in the UI when the corresponding API key is configured. If Chaos, ViewDNS, HackerTarget, or CIRCL options are missing from the enrichment panel, check **Admin Panel -> Settings** and confirm the relevant API key is saved.
 
 ---
 
 ## Security Considerations
 
-- **Change default admin password** immediately
+- **Change default admin password** immediately after first login
 - **Set a strong SECRET_KEY** in production
 - **Use HTTPS** in production (reverse proxy recommended)
-- **Restrict network access** to admin panel if possible
+- **Restrict network access** to the admin panel if possible
 - API keys are stored encrypted in the database
+- The container runs as a non-root user (UID 1000)
+- Session cookies use HttpOnly and SameSite=Lax flags
 
 ---
 
