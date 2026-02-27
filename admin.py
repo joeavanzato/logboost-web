@@ -1024,6 +1024,56 @@ def save_maxmind_key():
     return redirect(url_for('admin.settings'))
 
 
+@admin_bp.route('/settings/upload-mmdb', methods=['POST'])
+@admin_required
+def upload_mmdb():
+    """Upload MaxMind database files."""
+    MAXMIND_DIR = os.environ.get('MAXMIND_DIR', '/data/maxmind')
+    REQUIRED_FILES = ['GeoLite2-ASN.mmdb', 'GeoLite2-Country.mmdb', 'GeoLite2-City.mmdb']
+
+    if 'mmdb_files' not in request.files:
+        return jsonify({'error': 'No files provided'}), 400
+
+    files = request.files.getlist('mmdb_files')
+    if not files:
+        return jsonify({'error': 'No files provided'}), 400
+
+    # Validate file names
+    uploaded_names = [f.filename for f in files if f.filename]
+    missing = [req for req in REQUIRED_FILES if req not in uploaded_names]
+    if missing:
+        return jsonify({'error': f'Missing required files: {", ".join(missing)}'}), 400
+
+    # Ensure MaxMind directory exists
+    maxmind_path = Path(MAXMIND_DIR)
+    maxmind_path.mkdir(parents=True, exist_ok=True)
+
+    # Save each file
+    saved_files = []
+    try:
+        for file in files:
+            if file.filename in REQUIRED_FILES:
+                dest_path = maxmind_path / file.filename
+                file.save(str(dest_path))
+                saved_files.append(file.filename)
+
+        log_audit('mmdb_files_uploaded', 'setting', 'maxmind', {'files': saved_files})
+        return jsonify({
+            'success': True,
+            'message': f'Successfully uploaded {len(saved_files)} database files',
+            'files': saved_files
+        })
+
+    except Exception as e:
+        # Clean up any partially saved files
+        for fname in saved_files:
+            try:
+                (maxmind_path / fname).unlink()
+            except:
+                pass
+        return jsonify({'error': f'Upload failed: {str(e)}'}), 500
+
+
 @admin_bp.route('/settings/shodan', methods=['POST'])
 @admin_required
 def save_shodan_key():
@@ -1946,20 +1996,34 @@ def execute_task(task_type: str):
             if api_key:
                 cmd.extend(['-api', api_key])
             cmd.append('-updategeo')
+            cmd.extend(['-dbdir', '/data/maxmind'])
         elif task_type == 'update_ti':
             cmd.append('-updateti')
+            cmd.extend(['-tidb', '/app/threats.db'])
         elif task_type == 'build_ti':
             cmd.append('-buildti')
+            cmd.extend(['-tidb', '/app/threats.db'])
         else:
             raise ValueError(f'Unknown task type: {task_type}')
-        
+
+        # Set working directory based on task type
+        # Threat intel tasks run in /app where feed_config.json and logboost binary live
+        if task_type in ('update_ti', 'build_ti'):
+            workdir = '/app'
+        else:
+            workdir = os.environ.get('LOGBOOST_WORKDIR', '.')
+
+        # Log command for debugging
+        cmd_str = ' '.join(cmd)
+        print(f"[DEBUG] Task {task_type}: {cmd_str} (cwd={workdir})", flush=True)
+
         # Execute command
         result = subprocess.run(
             cmd,
             capture_output=True,
             text=True,
             timeout=3600,  # 1 hour timeout
-            cwd=os.environ.get('LOGBOOST_WORKDIR', '.')
+            cwd=workdir
         )
         
         completed_at = datetime.now()
@@ -3029,8 +3093,8 @@ def set_setting(key, value):
 
 
 def get_feed_config_path():
-    """Get the path to feed_config.json -- Docker volume path."""
-    return '/data/config/feed_config.json'
+    """Get the path to feed_config.json -- lives in /app with binary."""
+    return '/app/feed_config.json'
 
 
 # ============================================

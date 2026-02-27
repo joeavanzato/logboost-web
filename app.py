@@ -104,6 +104,23 @@ UPLOAD_FOLDER = Path(__file__).parent / 'uploads'
 OUTPUT_FOLDER = Path(__file__).parent / 'output'
 LOGBOOST_BINARY = os.environ.get('LOGBOOST_PATH', 'LogBoost')
 MAXMIND_DIR = os.environ.get('MAXMIND_DIR', '.')
+
+# Required MaxMind database files
+REQUIRED_MMDB_FILES = ['GeoLite2-ASN.mmdb', 'GeoLite2-Country.mmdb', 'GeoLite2-City.mmdb']
+
+
+def check_mmdb_files_exist():
+    """Check if all required MaxMind database files exist."""
+    maxmind_path = Path(MAXMIND_DIR)
+    if not maxmind_path.exists():
+        return False, []
+
+    missing = []
+    for mmdb_file in REQUIRED_MMDB_FILES:
+        if not (maxmind_path / mmdb_file).exists():
+            missing.append(mmdb_file)
+
+    return len(missing) == 0, missing
 THREAT_DB_DIR = os.environ.get('THREAT_DB_DIR', '.')
 
 UPLOAD_FOLDER.mkdir(exist_ok=True)
@@ -183,7 +200,7 @@ def build_logboost_command(
     dbdir = options.get('dbdir', MAXMIND_DIR)
     if dbdir:
         cmd.extend(['-dbdir', dbdir])
-    
+
     # Enrichment options
     if options.get('dns'):
         cmd.append('-dns')
@@ -193,7 +210,8 @@ def build_logboost_command(
         cmd.append('-idb')
     if options.get('useti'):
         cmd.append('-useti')
-    
+        cmd.extend(['-tidb', '/app/threats.db'])
+
     # Processing options
     if options.get('regex'):
         cmd.append('-regex')
@@ -247,6 +265,11 @@ def build_logboost_command(
 
 def run_logboost(cmd: list[str]) -> tuple[bool, str, str]:
     """Execute LogBoost and return success status and output."""
+    # Log exact command line for debugging
+    cmd_str = ' '.join(cmd)
+    app.logger.info(f"LogBoost command: {cmd_str}")
+    print(f"[DEBUG] LogBoost command: {cmd_str}", flush=True)
+
     try:
         result = subprocess.run(
             cmd,
@@ -374,6 +397,14 @@ def ensure_session():
 @login_required
 def index():
     """Main page."""
+    # Check if required MMDB files exist
+    mmdb_available, missing_files = check_mmdb_files_exist()
+    if not mmdb_available:
+        return render_template('setup_required.html',
+                               missing_files=missing_files,
+                               required_files=REQUIRED_MMDB_FILES,
+                               maxmind_dir=MAXMIND_DIR)
+
     # Check for shared results
     shared_id = request.args.get('shared')
     if shared_id:

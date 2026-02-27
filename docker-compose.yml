@@ -3,9 +3,8 @@ services:
     build: .
     env_file: .env
     environment:
-      # Override Dockerfile defaults to use mounted data directories
-      # LOGBOOST_PATH uses bundled binary at /usr/local/bin/logboost (installed during build)
-      LOGBOOST_PATH: /usr/local/bin/logboost
+      # Binary in /app, data files in volumes (symlinked to /app for LogBoost)
+      LOGBOOST_PATH: /app/logboost
       MAXMIND_DIR: /data/maxmind
       THREAT_DB_DIR: /data/intel
       LOGBOOST_DB_PATH: /data/db/logboost_admin.db

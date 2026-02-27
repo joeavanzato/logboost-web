@@ -1,0 +1,54 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Edit Account{% endblock %}
+
+{% block content %}
+<div class="admin-page">
+    <div class="page-header">
+        <div>
+            <a href="{{ url_for('admin.accounts') }}" class="back-link">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="19" y1="12" x2="5" y2="12"/>
+                    <polyline points="12 19 5 12 12 5"/>
+                </svg>
+                Back to Accounts
+            </a>
+            <h1>Edit Account</h1>
+            <p>Update role for {{ account.username }}</p>
+        </div>
+    </div>
+    
+    <div class="form-card">
+        <form method="POST" class="admin-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="form-group">
+                <label>Username</label>
+                <input type="text" value="{{ account.username }}" disabled class="disabled-input">
+                <span class="form-hint">Username cannot be changed</span>
+            </div>
+            
+            <div class="form-group">
+                <label for="role">Role</label>
+                <select id="role" name="role" class="form-select">
+                    {% for role in roles %}
+                    <option value="{{ role }}" {% if role == account.role %}selected{% endif %}>{{ role|capitalize }}</option>
+                    {% endfor %}
+                </select>
+                <span class="form-hint">Admins can access the admin panel; Users can only use the main app</span>
+            </div>
+            
+            <div class="form-actions">
+                <a href="{{ url_for('admin.accounts') }}" class="btn secondary">Cancel</a>
+                <button type="submit" class="btn primary">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/>
+                        <polyline points="17 21 17 13 7 13 7 21"/>
+                        <polyline points="7 3 7 8 15 8"/>
+                    </svg>
+                    Save Changes
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

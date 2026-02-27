@@ -25,25 +25,33 @@ RUN python -c "import tldextract; tldextract.extract('example.com')"
 # UID 1000 per user's locked decision
 RUN useradd --no-log-init --create-home --uid 1000 logboost
 
-# Download and install LogBoost Linux binary at build time
-# Must run as root (before USER logboost) to write to /usr/local/bin
-# Single RUN layer: install unzip, download, extract, install binary, clean up
+# Download LogBoost Linux binary + config at build time
+# Binary goes to /app/logboost so threats.db is generated in /app when running from there
+# Single RUN layer: install unzip, download, extract, stage files for later copy, clean up
 ARG LOGBOOST_VERSION=prod_1_5_0
 RUN apt-get update && apt-get install -y --no-install-recommends unzip \
-    && curl -fsSL "https://github.com/joeavanzato/LogBoost/releases/download/${LOGBOOST_VERSION}/logboost_linux_amd64.zip" -o /tmp/logboost.zip \
+    && curl -fsSL "https://github.com/joeavanzato/LogBoost/releases/download/${LOGBOOST_VERSION}/logboost-linux-x64.zip" -o /tmp/logboost.zip \
     && unzip /tmp/logboost.zip -d /tmp/logboost_extracted \
-    && find /tmp/logboost_extracted -type f \( -name "logboost" -o -name "LogBoost" \) -exec install -m 0755 {} /usr/local/bin/logboost \; \
+    && find /tmp/logboost_extracted -type f \( -name "logboost" -o -name "LogBoost" \) -exec cp {} /tmp/logboost_binary \; \
+    && chmod 0755 /tmp/logboost_binary \
+    && find /tmp/logboost_extracted -name "feed_config.json" -exec cp {} /tmp/feed_config_from_zip.json \; \
     && rm -rf /tmp/logboost.zip /tmp/logboost_extracted \
     && apt-get purge -y --auto-remove unzip && rm -rf /var/lib/apt/lists/*
-
-# Verify binary was installed correctly — build fails loudly if missing or non-executable
-RUN test -f /usr/local/bin/logboost && test -x /usr/local/bin/logboost
 
 # Working directory
 WORKDIR /app
 
 # Copy application source (filtered by .dockerignore allowlist)
 COPY . .
+
+# Install LogBoost binary and config from staged files
+# Binary in /app so threats.db is generated here when running threat intel
+RUN cp /tmp/logboost_binary /app/logboost \
+    && if [ -f /tmp/feed_config_from_zip.json ]; then cp /tmp/feed_config_from_zip.json /app/feed_config.json; fi \
+    && rm -f /tmp/logboost_binary /tmp/feed_config_from_zip.json
+
+# Verify binary was installed correctly
+RUN test -f /app/logboost && test -x /app/logboost
 
 # Set ownership of app directory to non-root user
 RUN chown -R logboost:logboost /app
@@ -63,7 +71,7 @@ RUN python -c "from admin import get_db; get_db().close()" \
 # Container works out of the box; override via env vars or .env file
 ENV SECRET_KEY=dev-placeholder-change-me-in-production
 ENV FLASK_ENV=production
-ENV LOGBOOST_PATH=/usr/local/bin/logboost
+ENV LOGBOOST_PATH=/app/logboost
 ENV MAXMIND_DIR=/data/maxmind
 ENV THREAT_DB_DIR=/data/intel
 ENV LOGBOOST_LOG_LEVEL=info

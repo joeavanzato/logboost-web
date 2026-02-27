@@ -1,0 +1,651 @@
+<!-- Statistics Panel Content -->
+{% if stats.error %}
+<div class="error-container">
+    <svg class="error-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="10"/>
+        <line x1="15" y1="9" x2="9" y2="15"/>
+        <line x1="9" y1="9" x2="15" y2="15"/>
+    </svg>
+    <h3 class="error-title">Error Computing Statistics</h3>
+    <p class="error-message">{{ stats.error }}</p>
+</div>
+{% else %}
+<div class="stats-container">
+    <p class="stats-pivot-hint">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/>
+            <path d="M12 16v-4M12 8h.01"/>
+        </svg>
+        Click any value to filter results • Use <strong>↕</strong> to flip sort order • Use <strong>⤢</strong> to see all values
+    </p>
+
+    <!-- Overview Cards -->
+    <div class="stats-overview">
+        <div class="stat-card">
+            <div class="stat-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
+                    <path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/>
+                </svg>
+            </div>
+            <div class="stat-content">
+                <span class="stat-value">{{ stats.total_rows }}</span>
+                <span class="stat-label">Total Rows</span>
+            </div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                    <line x1="3" y1="9" x2="21" y2="9"/>
+                    <line x1="9" y1="3" x2="9" y2="21"/>
+                </svg>
+            </div>
+            <div class="stat-content">
+                <span class="stat-value">{{ stats.total_columns }}</span>
+                <span class="stat-label">Columns</span>
+            </div>
+        </div>
+        {% if stats.enrichment_summary.ips_with_threats is defined %}
+        <div class="stat-card threat">
+            <div class="stat-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
+                    <line x1="12" y1="9" x2="12" y2="13"/>
+                    <line x1="12" y1="17" x2="12.01" y2="17"/>
+                </svg>
+            </div>
+            <div class="stat-content">
+                <span class="stat-value">{{ stats.enrichment_summary.ips_with_threats }}</span>
+                <span class="stat-label">IPs with Threats</span>
+            </div>
+        </div>
+        <div class="stat-card success">
+            <div class="stat-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M22 11.08V12a10 10 0 11-5.93-9.14"/>
+                    <polyline points="22 4 12 14.01 9 11.01"/>
+                </svg>
+            </div>
+            <div class="stat-content">
+                <span class="stat-value">{{ stats.enrichment_summary.clean_ips }}</span>
+                <span class="stat-label">Clean IPs</span>
+            </div>
+        </div>
+        {% endif %}
+        {% if stats.shodan_summary.ips_with_data is defined %}
+        <div class="stat-card shodan">
+            <div class="stat-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="2" y="2" width="20" height="8" rx="2" ry="2"/>
+                    <rect x="2" y="14" width="20" height="8" rx="2" ry="2"/>
+                    <line x1="6" y1="6" x2="6.01" y2="6"/>
+                    <line x1="6" y1="18" x2="6.01" y2="18"/>
+                </svg>
+            </div>
+            <div class="stat-content">
+                <span class="stat-value">{{ stats.shodan_summary.ips_with_data }}</span>
+                <span class="stat-label">IPs with Shodan Data</span>
+            </div>
+        </div>
+        {% endif %}
+        {% if stats.dns_summary.ips_with_dns is defined %}
+        <div class="stat-card dns">
+            <div class="stat-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="10"/>
+                    <path d="M8 12h8M12 8v8"/>
+                </svg>
+            </div>
+            <div class="stat-content">
+                <span class="stat-value">{{ stats.dns_summary.ips_with_dns }}</span>
+                <span class="stat-label">IPs with DNS Data</span>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Macro for stat card with expand/flip controls -->
+    {% macro stat_card(title, data, column, all_data=none, card_class='', is_partial=false, bar_class='') %}
+    {% if data %}
+    <div class="stats-card {{ card_class }}" data-stat-card>
+        <div class="stats-card-header">
+            <h4 class="stats-card-title">{{ title }}</h4>
+            <div class="stats-card-controls">
+                <button class="stat-control-btn flip-btn" onclick="window.flipStatCard(this)" title="Toggle most/least common">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M7 16V4M7 4L3 8M7 4l4 4M17 8v12M17 20l4-4M17 20l-4-4"/>
+                    </svg>
+                </button>
+                {% if all_data and all_data|length > 10 %}
+                <button class="stat-control-btn expand-btn" onclick="window.expandStatCard(this, '{{ title }}', '{{ column }}')" title="View all {{ all_data|length }} values">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="15 3 21 3 21 9"/>
+                        <polyline points="9 21 3 21 3 15"/>
+                        <line x1="21" y1="3" x2="14" y2="10"/>
+                        <line x1="3" y1="21" x2="10" y2="14"/>
+                    </svg>
+                    <span class="expand-count">{{ all_data|length }}</span>
+                </button>
+                {% endif %}
+            </div>
+        </div>
+        <div class="value-distribution" data-column="{{ column }}" data-partial="{{ is_partial|lower }}">
+            {% for value, count in data %}
+            <div class="distribution-item clickable-stat" data-column="{{ column }}" data-value="{{ value }}" {% if is_partial %}data-partial="true"{% endif %} data-count="{{ count }}" onclick="window.pivotToFilter(this)">
+                <span class="dist-label" title="{{ value }}">{{ value[:40] }}{{ '...' if value|length > 40 else '' }}</span>
+                <div class="dist-bar-wrapper">
+                    <div class="dist-bar {{ bar_class }}" style="width: {{ (count / stats.total_rows * 100) | round(1) }}%"></div>
+                </div>
+                <span class="dist-count">{{ count }}</span>
+            </div>
+            {% endfor %}
+        </div>
+        <!-- Hidden data for flip/expand -->
+        {% if all_data %}
+        <script type="application/json" class="all-values-data">{{ all_data | tojson }}</script>
+        {% endif %}
+    </div>
+    {% endif %}
+    {% endmacro %}
+
+    <!-- Geo Summary -->
+    {% if stats.geo_summary and (stats.geo_summary.countries or stats.geo_summary.asns or stats.geo_summary.cities) %}
+    <div class="stats-section">
+        <h3 class="stats-section-title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"/>
+                <line x1="2" y1="12" x2="22" y2="12"/>
+                <path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/>
+            </svg>
+            Geographic Distribution
+        </h3>
+        <div class="stats-grid">
+            {{ stat_card('Top Countries', stats.geo_summary.countries, 'lb_Country', stats.geo_summary.get('all_countries')) }}
+            {{ stat_card('Top ASNs', stats.geo_summary.asns[:7] if stats.geo_summary.asns else none, 'lb_ASN', stats.geo_summary.get('all_asns')) }}
+            {{ stat_card('Top Cities', stats.geo_summary.cities[:7] if stats.geo_summary.cities else none, 'lb_City', stats.geo_summary.get('all_cities')) }}
+            {{ stat_card('Top Organizations', stats.geo_summary.orgs[:7] if stats.geo_summary.orgs else none, 'lb_Org', stats.geo_summary.get('all_orgs')) }}
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Threat Intelligence Summary -->
+    {% if stats.threat_summary and (stats.threat_summary.categories or stats.threat_summary.feed_counts or stats.threat_summary.feeds) %}
+    <div class="stats-section threat-section">
+        <h3 class="stats-section-title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+            </svg>
+            Threat Intelligence Summary
+        </h3>
+        <div class="stats-grid">
+            {{ stat_card('Threat Categories', stats.threat_summary.categories, 'lb_ThreatCategories', stats.threat_summary.get('all_categories'), 'threat-card', true, 'threat') }}
+            {{ stat_card('Threat Feeds', stats.threat_summary.feeds, stats.threat_summary.feeds_column|default('lb_ThreatFeeds'), stats.threat_summary.get('all_feeds'), 'threat-card', true, 'threat') }}
+            {{ stat_card('Feed Match Count', stats.threat_summary.feed_counts, 'lb_ThreatFeedCount', stats.threat_summary.get('all_feed_counts'), 'threat-card', false, 'threat') }}
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- DNS & Domain Summary -->
+    {% if stats.dns_summary and (stats.dns_summary.reverse_dns or stats.dns_summary.hostnames or stats.dns_summary.domains or stats.dns_summary.tlds) %}
+    <div class="stats-section dns-section">
+        <h3 class="stats-section-title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"/>
+                <path d="M8 12h8M12 8v8"/>
+            </svg>
+            DNS & Domain Analysis
+        </h3>
+        <div class="stats-grid">
+            {{ stat_card('Top Domains', stats.dns_summary.domains, 'lb_Domains', stats.dns_summary.get('all_domains'), '', true, 'dns') }}
+            {{ stat_card('Top TLDs', stats.dns_summary.tlds, 'lb_TLD', stats.dns_summary.get('all_tlds'), '', false, 'dns') }}
+            {{ stat_card('Top Reverse DNS', stats.dns_summary.reverse_dns[:7] if stats.dns_summary.reverse_dns else none, 'lb_ReverseDNS', none, '', false, 'dns') }}
+            {{ stat_card('Top Hostnames', stats.dns_summary.hostnames, 'lb_Hostnames', none, '', true, 'dns') }}
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- WhoIS Summary -->
+    {% if stats.whois_summary and (stats.whois_summary.orgs or stats.whois_summary.countries or stats.whois_summary.registrars or stats.whois_summary.netnames) %}
+    <div class="stats-section whois-section">
+        <h3 class="stats-section-title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
+                <polyline points="14 2 14 8 20 8"/>
+                <line x1="16" y1="13" x2="8" y2="13"/>
+                <line x1="16" y1="17" x2="8" y2="17"/>
+            </svg>
+            WhoIS Information
+        </h3>
+        <div class="stats-grid">
+            {{ stat_card('Top WhoIS Organizations', stats.whois_summary.orgs[:7] if stats.whois_summary.orgs else none, 'lb_IPWhoIsOrg', stats.whois_summary.get('all_orgs'), '', false, 'whois') }}
+            {{ stat_card('Top Net Names', stats.whois_summary.netnames[:7] if stats.whois_summary.netnames else none, 'lb_NetName', stats.whois_summary.get('all_netnames'), '', false, 'whois') }}
+            {{ stat_card('Top WhoIS Countries', stats.whois_summary.countries[:7] if stats.whois_summary.countries else none, 'lb_IPWhoIsCountry', none, '', false, 'whois') }}
+            {{ stat_card('Top Registrars', stats.whois_summary.registrars[:7] if stats.whois_summary.registrars else none, 'lb_DomainWhoIsRegistrar', none, '', false, 'whois') }}
+            {{ stat_card('Top Net Ranges', stats.whois_summary.net_ranges[:7] if stats.whois_summary.net_ranges else none, 'lb_IPWhoIsNetRange', none, '', false, 'whois') }}
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Shodan InternetDB Summary -->
+    {% if stats.shodan_summary and (stats.shodan_summary.ports or stats.shodan_summary.tags or stats.shodan_summary.vulns) %}
+    <div class="stats-section shodan-section">
+        <h3 class="stats-section-title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="2" y="2" width="20" height="8" rx="2" ry="2"/>
+                <rect x="2" y="14" width="20" height="8" rx="2" ry="2"/>
+                <line x1="6" y1="6" x2="6.01" y2="6"/>
+                <line x1="6" y1="18" x2="6.01" y2="18"/>
+            </svg>
+            Shodan InternetDB Analysis
+        </h3>
+        <div class="stats-grid">
+            {% if stats.shodan_summary.ports %}
+            <div class="stats-card" data-stat-card>
+                <div class="stats-card-header">
+                    <h4 class="stats-card-title">Top Open Ports</h4>
+                    <div class="stats-card-controls">
+                        <button class="stat-control-btn flip-btn" onclick="window.flipTagCloud(this)" title="Toggle most/least common">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M7 16V4M7 4L3 8M7 4l4 4M17 8v12M17 20l4-4M17 20l-4-4"/>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+                <div class="tag-cloud ports-cloud" data-column="lb_Ports">
+                    {% for port, count in stats.shodan_summary.ports %}
+                    <span class="port-tag clickable-stat" data-column="lb_Ports" data-value="{{ port }}" data-partial="true" data-count="{{ count }}" onclick="window.pivotToFilter(this)">
+                        {{ port }}
+                        <span class="tag-count">{{ count }}</span>
+                    </span>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
+            
+            {% if stats.shodan_summary.tags %}
+            <div class="stats-card" data-stat-card>
+                <div class="stats-card-header">
+                    <h4 class="stats-card-title">Shodan Tags</h4>
+                    <div class="stats-card-controls">
+                        <button class="stat-control-btn flip-btn" onclick="window.flipTagCloud(this)" title="Toggle most/least common">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M7 16V4M7 4L3 8M7 4l4 4M17 8v12M17 20l4-4M17 20l-4-4"/>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+                <div class="tag-cloud" data-column="lb_Tags">
+                    {% for tag, count in stats.shodan_summary.tags %}
+                    <span class="shodan-tag clickable-stat" data-column="lb_Tags" data-value="{{ tag }}" data-partial="true" data-count="{{ count }}" onclick="window.pivotToFilter(this)">
+                        {{ tag }}
+                        <span class="tag-count">{{ count }}</span>
+                    </span>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
+            
+            {% if stats.shodan_summary.vulns %}
+            <div class="stats-card threat-card" data-stat-card>
+                <div class="stats-card-header">
+                    <h4 class="stats-card-title">Vulnerabilities (CVEs)</h4>
+                    <div class="stats-card-controls">
+                        <button class="stat-control-btn flip-btn" onclick="window.flipTagCloud(this)" title="Toggle most/least common">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M7 16V4M7 4L3 8M7 4l4 4M17 8v12M17 20l4-4M17 20l-4-4"/>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+                <div class="tag-cloud" data-column="lb_Vulns">
+                    {% for vuln, count in stats.shodan_summary.vulns %}
+                    <span class="vuln-tag clickable-stat" data-column="lb_Vulns" data-value="{{ vuln }}" data-partial="true" data-count="{{ count }}" onclick="window.pivotToFilter(this)">
+                        {{ vuln }}
+                        <span class="tag-count">{{ count }}</span>
+                    </span>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
+            
+            {{ stat_card('CPE Identifiers', stats.shodan_summary.cpes[:7] if stats.shodan_summary.cpes else none, 'lb_CPEs', none, '', true, 'shodan') }}
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Column Statistics - Collapsed by default -->
+    <details class="stats-section collapsible-section">
+        <summary class="stats-section-title clickable">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="18" y1="20" x2="18" y2="10"/>
+                <line x1="12" y1="20" x2="12" y2="4"/>
+                <line x1="6" y1="20" x2="6" y2="14"/>
+            </svg>
+            Column Analysis
+            <svg class="expand-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="6 9 12 15 18 9"/>
+            </svg>
+        </summary>
+        
+        <!-- Column Stats Table -->
+        <div class="column-stats-table-wrapper">
+            <table class="column-stats-table">
+                <thead>
+                    <tr>
+                        <th>Column</th>
+                        <th>Unique Values</th>
+                        <th>Fill Rate</th>
+                        <th>Uniqueness</th>
+                        <th>Top Value</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for col in stats.columns %}
+                    <tr class="{% if col.is_enrichment %}enrichment-row{% endif %}">
+                        <td class="col-name">
+                            {{ col.name }}
+                            {% if col.is_enrichment %}
+                            <span class="enrichment-badge">LB</span>
+                            {% endif %}
+                        </td>
+                        <td class="col-unique">{{ col.unique_count }}</td>
+                        <td class="col-fill">
+                            <div class="mini-bar-wrapper">
+                                <div class="mini-bar {% if col.fill_rate < 50 %}low{% elif col.fill_rate < 80 %}medium{% else %}high{% endif %}" 
+                                     style="width: {{ col.fill_rate }}%"></div>
+                            </div>
+                            <span>{{ col.fill_rate }}%</span>
+                        </td>
+                        <td class="col-uniqueness">{{ col.uniqueness }}%</td>
+                        <td class="col-top">
+                            {% if col.top_values %}
+                            <span class="top-value clickable-stat" data-column="{{ col.name }}" data-value="{{ col.top_values[0][0] }}" onclick="window.pivotToFilter(this)" title="{{ col.top_values[0][0] }}">
+                                {{ col.top_values[0][0][:30] }}{{ '...' if col.top_values[0][0]|length > 30 else '' }}
+                            </span>
+                            <span class="top-count">({{ col.top_values[0][1] }})</span>
+                            {% else %}
+                            <span class="empty-indicator">—</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </details>
+
+    <!-- Detailed Column Breakdowns - Collapsed by default -->
+    <details class="stats-section collapsible-section">
+        <summary class="stats-section-title clickable">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="11" cy="11" r="8"/>
+                <path d="M21 21l-4.35-4.35"/>
+            </svg>
+            Detailed Value Analysis
+            <svg class="expand-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="6 9 12 15 18 9"/>
+            </svg>
+        </summary>
+        <p class="stats-hint">Click on a column to see value distribution and rare values</p>
+        
+        <div class="column-details-grid">
+            {% for col in stats.columns %}
+            {% if col.top_values %}
+            <details class="column-detail {% if col.is_enrichment %}enrichment{% endif %}">
+                <summary class="column-detail-summary">
+                    <span class="col-name">{{ col.name }}</span>
+                    <span class="col-meta">{{ col.unique_count }} unique • {{ col.fill_rate }}% filled</span>
+                </summary>
+                <div class="column-detail-content">
+                    <div class="detail-section">
+                        <h5>Top Values</h5>
+                        <div class="value-distribution compact">
+                            {% for value, count in col.top_values %}
+                            <div class="distribution-item clickable-stat" data-column="{{ col.name }}" data-value="{{ value }}" onclick="window.pivotToFilter(this)">
+                                <span class="dist-label" title="{{ value }}">{{ value[:50] }}{{ '...' if value|length > 50 else '' }}</span>
+                                <div class="dist-bar-wrapper">
+                                    <div class="dist-bar" style="width: {{ (count / stats.total_rows * 100) | round(1) }}%"></div>
+                                </div>
+                                <span class="dist-count">{{ count }} ({{ (count / stats.total_rows * 100) | round(1) }}%)</span>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                    
+                    {% if col.rare_values %}
+                    <div class="detail-section rare-section">
+                        <h5>
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+                            </svg>
+                            Rare Values (≤2 occurrences)
+                        </h5>
+                        <div class="rare-values">
+                            {% for value, count in col.rare_values %}
+                            <span class="rare-tag clickable-stat" data-column="{{ col.name }}" data-value="{{ value }}" onclick="window.pivotToFilter(this)" title="{{ value }}">
+                                {{ value[:30] }}{{ '...' if value|length > 30 else '' }}
+                                <span class="rare-count">×{{ count }}</span>
+                            </span>
+                            {% endfor %}
+                        </div>
+                    </div>
+                    {% endif %}
+                </div>
+            </details>
+            {% endif %}
+            {% endfor %}
+        </div>
+    </details>
+</div>
+
+<!-- Stats Expand Modal -->
+<div id="stats-expand-modal" class="stats-modal-overlay" onclick="window.closeStatsModal(event)">
+    <div class="stats-modal-container">
+        <div class="stats-modal-header">
+            <h3 class="stats-modal-title" id="stats-modal-title">All Values</h3>
+            <div class="stats-modal-controls">
+                <button class="stat-control-btn" onclick="window.flipModalValues()" title="Toggle most/least common">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M7 16V4M7 4L3 8M7 4l4 4M17 8v12M17 20l4-4M17 20l-4-4"/>
+                    </svg>
+                    <span id="modal-sort-label">Most Common</span>
+                </button>
+                <button class="stats-modal-close" onclick="window.closeStatsModal()">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="6" x2="6" y2="18"/>
+                        <line x1="6" y1="6" x2="18" y2="18"/>
+                    </svg>
+                </button>
+            </div>
+        </div>
+        <div class="stats-modal-body" id="stats-modal-body">
+            <!-- Content populated by JavaScript -->
+        </div>
+    </div>
+</div>
+
+<script>
+// Store current modal data
+let modalData = { values: [], column: '', reversed: false };
+
+// Make pivotToFilter globally accessible
+window.pivotToFilter = function(element) {
+    const column = element.dataset.column;
+    const value = element.dataset.value;
+    const isPartial = element.dataset.partial === 'true';
+    
+    console.log('pivotToFilter called:', { column, value, isPartial });
+    
+    if (!column || !value) {
+        console.warn('Missing column or value:', { column, value });
+        return;
+    }
+    
+    // Switch to data table tab
+    if (typeof window.switchResultsTab === 'function') {
+        window.switchResultsTab('table');
+    } else {
+        console.warn('switchResultsTab not found');
+    }
+    
+    // Show filters if not visible
+    if (typeof window.filtersVisible !== 'undefined' && !window.filtersVisible) {
+        if (typeof window.toggleFilters === 'function') {
+            window.toggleFilters();
+        }
+    }
+    
+    // Find the best matching column
+    let targetColumn = null;
+    const columnLower = column.toLowerCase();
+    const columnWithoutPrefix = columnLower.replace('lb_', '');
+    
+    console.log('Looking for column:', column, 'in headers:', window.resultHeaders);
+    
+    if (window.resultHeaders) {
+        // Try exact match first
+        if (window.resultHeaders.includes(column)) {
+            targetColumn = column;
+        } else {
+            // Try case-insensitive match
+            targetColumn = window.resultHeaders.find(h => h.toLowerCase() === columnLower);
+            
+            // Try partial match on column name without prefix
+            if (!targetColumn) {
+                targetColumn = window.resultHeaders.find(h => 
+                    h.toLowerCase().replace('lb_', '').includes(columnWithoutPrefix) ||
+                    columnWithoutPrefix.includes(h.toLowerCase().replace('lb_', ''))
+                );
+            }
+            
+            // Try matching just the end of the column name
+            if (!targetColumn) {
+                targetColumn = window.resultHeaders.find(h => 
+                    h.toLowerCase().endsWith(columnWithoutPrefix) ||
+                    columnWithoutPrefix.endsWith(h.toLowerCase().replace('lb_', ''))
+                );
+            }
+        }
+    }
+    
+    console.log('Target column found:', targetColumn);
+    
+    if (targetColumn && typeof window.setColumnFilter === 'function') {
+        window.setColumnFilter(targetColumn, value, isPartial ? 'text' : 'exact');
+        const input = document.querySelector(`.filter-input[data-column="${targetColumn}"]`);
+        if (input) {
+            input.value = value;
+            console.log('Set filter input value to:', value);
+        }
+    } else {
+        console.warn('Could not apply filter. targetColumn:', targetColumn, 'setColumnFilter exists:', typeof window.setColumnFilter === 'function');
+    }
+};
+
+// Also keep local reference for backwards compatibility
+function pivotToFilter(element) {
+    window.pivotToFilter(element);
+}
+
+// Make all functions globally accessible for HTMX-loaded content
+window.flipStatCard = function(btn) {
+    const card = btn.closest('[data-stat-card]');
+    const distribution = card.querySelector('.value-distribution');
+    if (!distribution) return;
+    
+    const items = Array.from(distribution.querySelectorAll('.distribution-item'));
+    const isReversed = card.dataset.reversed === 'true';
+    
+    items.sort((a, b) => {
+        const countA = parseInt(a.dataset.count);
+        const countB = parseInt(b.dataset.count);
+        return isReversed ? countB - countA : countA - countB;
+    });
+    
+    items.forEach(item => distribution.appendChild(item));
+    card.dataset.reversed = isReversed ? 'false' : 'true';
+    btn.classList.toggle('active', !isReversed);
+};
+
+window.flipTagCloud = function(btn) {
+    const card = btn.closest('[data-stat-card]');
+    const cloud = card.querySelector('.tag-cloud');
+    if (!cloud) return;
+    
+    const tags = Array.from(cloud.children);
+    const isReversed = card.dataset.reversed === 'true';
+    
+    tags.sort((a, b) => {
+        const countA = parseInt(a.dataset.count);
+        const countB = parseInt(b.dataset.count);
+        return isReversed ? countB - countA : countA - countB;
+    });
+    
+    tags.forEach(tag => cloud.appendChild(tag));
+    card.dataset.reversed = isReversed ? 'false' : 'true';
+    btn.classList.toggle('active', !isReversed);
+};
+
+window.expandStatCard = function(btn, title, column) {
+    const card = btn.closest('[data-stat-card]');
+    const dataScript = card.querySelector('.all-values-data');
+    
+    if (!dataScript) return;
+    
+    try {
+        modalData.values = JSON.parse(dataScript.textContent);
+        modalData.column = column;
+        modalData.reversed = false;
+        
+        document.getElementById('stats-modal-title').textContent = title + ' (' + modalData.values.length + ' values)';
+        document.getElementById('modal-sort-label').textContent = 'Most Common';
+        renderModalValues();
+        document.getElementById('stats-expand-modal').classList.add('active');
+    } catch (e) {
+        console.error('Failed to parse values data:', e);
+    }
+};
+
+function renderModalValues() {
+    const body = document.getElementById('stats-modal-body');
+    const values = modalData.reversed ? [...modalData.values].reverse() : modalData.values;
+    const totalRows = {{ stats.total_rows }};
+    
+    let html = '<div class="value-distribution modal-distribution">';
+    values.forEach(([value, count]) => {
+        const pct = (count / totalRows * 100).toFixed(1);
+        const truncated = value.length > 60 ? value.substring(0, 60) + '...' : value;
+        html += `
+            <div class="distribution-item clickable-stat" data-column="${modalData.column}" data-value="${value}" data-count="${count}" onclick="window.pivotToFilter(this); window.closeStatsModal();">
+                <span class="dist-label" title="${value}">${truncated}</span>
+                <div class="dist-bar-wrapper">
+                    <div class="dist-bar" style="width: ${pct}%"></div>
+                </div>
+                <span class="dist-count">${count} (${pct}%)</span>
+            </div>
+        `;
+    });
+    html += '</div>';
+    body.innerHTML = html;
+}
+
+window.flipModalValues = function() {
+    modalData.reversed = !modalData.reversed;
+    document.getElementById('modal-sort-label').textContent = modalData.reversed ? 'Least Common' : 'Most Common';
+    renderModalValues();
+};
+
+window.closeStatsModal = function(event) {
+    if (event && event.target !== event.currentTarget) return;
+    document.getElementById('stats-expand-modal').classList.remove('active');
+};
+
+// Close modal on escape
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') {
+        window.closeStatsModal();
+    }
+});
+</script>
+{% endif %}

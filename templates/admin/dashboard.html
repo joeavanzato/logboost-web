@@ -1,0 +1,622 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Dashboard{% endblock %}
+
+{% block content %}
+<div class="admin-page">
+    <div class="page-header">
+        <h1>Dashboard</h1>
+        <p>Overview of LogBoost administration</p>
+    </div>
+    
+    <!-- Status Cards -->
+    <div class="status-cards">
+        <div class="status-card">
+            <div class="status-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="10"/>
+                    <polyline points="12 6 12 12 16 14"/>
+                </svg>
+            </div>
+            <div class="status-content">
+                <span class="status-value">{{ tasks|selectattr('enabled')|list|length }}</span>
+                <span class="status-label">Active Tasks</span>
+            </div>
+        </div>
+        
+        <div class="status-card {% if maxmind_key_set %}success{% else %}warning{% endif %}">
+            <div class="status-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="10"/>
+                    <line x1="2" y1="12" x2="22" y2="12"/>
+                    <path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/>
+                </svg>
+            </div>
+            <div class="status-content">
+                <span class="status-value">{{ 'Set' if maxmind_key_set else 'Not Set' }}</span>
+                <span class="status-label">MaxMind API</span>
+            </div>
+        </div>
+        
+        <div class="status-card {% if shodan_key_set %}success{% else %}warning{% endif %}">
+            <div class="status-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="2" y="2" width="20" height="8" rx="2" ry="2"/>
+                    <rect x="2" y="14" width="20" height="8" rx="2" ry="2"/>
+                    <line x1="6" y1="6" x2="6.01" y2="6"/>
+                    <line x1="6" y1="18" x2="6.01" y2="18"/>
+                </svg>
+            </div>
+            <div class="status-content">
+                <span class="status-value">{{ 'Set' if shodan_key_set else 'Not Set' }}</span>
+                <span class="status-label">Shodan API</span>
+            </div>
+        </div>
+        
+        <div class="status-card">
+            <div class="status-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/>
+                    <circle cx="9" cy="7" r="4"/>
+                    <path d="M23 21v-2a4 4 0 00-3-3.87"/>
+                    <path d="M16 3.13a4 4 0 010 7.75"/>
+                </svg>
+            </div>
+            <div class="status-content">
+                <span class="status-value">{{ account_count }}</span>
+                <span class="status-label">Admin Accounts</span>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Quick Actions -->
+    <div class="dashboard-section">
+        <h2>Quick Actions</h2>
+        <div class="quick-actions">
+            <form id="update-geo-form" action="{{ url_for('admin.run_task', task_type='update_geo') }}" method="POST" class="inline-form" data-api-key-set="{{ 'true' if maxmind_key_set else 'false' }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="action-btn">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="10"/>
+                        <line x1="2" y1="12" x2="22" y2="12"/>
+                        <path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/>
+                    </svg>
+                    Update Geolocation
+                </button>
+            </form>
+            
+            <form action="{{ url_for('admin.run_task', task_type='update_ti') }}" method="POST" class="inline-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="action-btn">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                    </svg>
+                    Update Threat Intel
+                </button>
+            </form>
+            
+            <a href="{{ url_for('admin.settings') }}" class="action-btn secondary">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="3"/>
+                    <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"/>
+                </svg>
+                Configure API Key
+            </a>
+
+            <button type="button" class="action-btn secondary" onclick="openMmdbUploadModal()">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+                    <polyline points="17 8 12 3 7 8"/>
+                    <line x1="12" y1="3" x2="12" y2="15"/>
+                </svg>
+                Upload MMDB Files
+            </button>
+        </div>
+    </div>
+    
+    <!-- Scheduled Tasks Summary -->
+    <div class="dashboard-section">
+        <div class="section-header">
+            <h2>Scheduled Tasks</h2>
+            <a href="{{ url_for('admin.tasks') }}" class="section-link">Manage →</a>
+        </div>
+        <div class="tasks-summary">
+            {% for task in tasks %}
+            <div class="task-row">
+                <div class="task-info">
+                    <span class="task-name">
+                        {% if task.task_type == 'update_geo' %}
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="10"/>
+                            <line x1="2" y1="12" x2="22" y2="12"/>
+                            <path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/>
+                        </svg>
+                        Update Geolocation
+                        {% elif task.task_type == 'update_ti' %}
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                        </svg>
+                        Update Threat Intel
+                        {% else %}
+                        {{ task.task_type }}
+                        {% endif %}
+                    </span>
+                    <span class="task-schedule">Every {{ task.interval_hours }} hour(s)</span>
+                </div>
+                <div class="task-status">
+                    {% if task.enabled %}
+                    <span class="badge success">Enabled</span>
+                    {% else %}
+                    <span class="badge muted">Disabled</span>
+                    {% endif %}
+                </div>
+                <div class="task-timing">
+                    {% if task.last_run %}
+                    <span class="timing-label">Last: {{ task.last_run }}</span>
+                    {% endif %}
+                    {% if task.next_run and task.enabled %}
+                    <span class="timing-label">Next: {{ task.next_run }}</span>
+                    {% endif %}
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    
+    <!-- Recent Logs -->
+    <div class="dashboard-section">
+        <div class="section-header">
+            <h2>Recent Activity</h2>
+            <a href="{{ url_for('admin.logs') }}" class="section-link">View All →</a>
+        </div>
+        {% if recent_logs %}
+        <div class="logs-table-wrapper">
+            <table class="admin-table">
+                <thead>
+                    <tr>
+                        <th>Task</th>
+                        <th>Status</th>
+                        <th>Started</th>
+                        <th>Duration</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for log in recent_logs %}
+                    <tr onclick="window.location='{{ url_for('admin.log_detail', log_id=log.id) }}'" style="cursor: pointer;">
+                        <td>{{ log.task_type }}</td>
+                        <td>
+                            <span class="badge {{ log.status }}">{{ log.status }}</span>
+                        </td>
+                        <td>{{ log.started_at }}</td>
+                        <td>
+                            {% if log.completed_at %}
+                            {{ log.completed_at }}
+                            {% else %}
+                            Running...
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="empty-state">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
+                <polyline points="14 2 14 8 20 8"/>
+            </svg>
+            <p>No task activity yet</p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- API Key Required Modal -->
+<div id="api-key-modal" class="modal" style="display: none;">
+    <div class="modal-content">
+        <div class="modal-header">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 24px; height: 24px; color: var(--warning);">
+                <circle cx="12" cy="12" r="10"/>
+                <line x1="12" y1="8" x2="12" y2="12"/>
+                <line x1="12" y1="16" x2="12.01" y2="16"/>
+            </svg>
+            <h3>MaxMind API Key Required</h3>
+        </div>
+        <p>Please configure your MaxMind API key in <a href="{{ url_for('admin.settings') }}">Settings</a> before updating geolocation databases.</p>
+        <div class="modal-actions">
+            <button onclick="closeModal()" class="action-btn secondary">Close</button>
+            <a href="{{ url_for('admin.settings') }}" class="action-btn">Go to Settings</a>
+        </div>
+    </div>
+</div>
+
+<!-- MMDB Upload Modal -->
+<div id="mmdb-upload-modal" class="modal" style="display: none;">
+    <div class="modal-content modal-content-wide">
+        <div class="modal-header">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 24px; height: 24px; color: var(--accent);">
+                <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+                <polyline points="17 8 12 3 7 8"/>
+                <line x1="12" y1="3" x2="12" y2="15"/>
+            </svg>
+            <h3>Upload MaxMind Database Files</h3>
+            <button class="modal-close" onclick="closeMmdbUploadModal()">&times;</button>
+        </div>
+        <p>Upload GeoLite2 database files to replace existing databases. All three files are required.</p>
+
+        <form id="mmdb-upload-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+            <div class="upload-area" id="mmdb-upload-area">
+                <input type="file" id="mmdb-file-input" name="mmdb_files" multiple accept=".mmdb">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width: 48px; height: 48px; color: #666; margin-bottom: 12px;">
+                    <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+                    <polyline points="17 8 12 3 7 8"/>
+                    <line x1="12" y1="3" x2="12" y2="15"/>
+                </svg>
+                <p><strong style="color: var(--accent);">Click to select files</strong> or drag and drop</p>
+                <p style="font-size: 12px; color: #666;">.mmdb files only</p>
+            </div>
+
+            <div class="file-checklist">
+                <div class="file-item" data-file="GeoLite2-ASN.mmdb">
+                    <span class="file-status"></span>
+                    <span class="file-name">GeoLite2-ASN.mmdb</span>
+                </div>
+                <div class="file-item" data-file="GeoLite2-Country.mmdb">
+                    <span class="file-status"></span>
+                    <span class="file-name">GeoLite2-Country.mmdb</span>
+                </div>
+                <div class="file-item" data-file="GeoLite2-City.mmdb">
+                    <span class="file-status"></span>
+                    <span class="file-name">GeoLite2-City.mmdb</span>
+                </div>
+            </div>
+
+            <div id="mmdb-upload-status" class="upload-status" style="display: none;"></div>
+
+            <div class="modal-actions">
+                <button type="button" onclick="closeMmdbUploadModal()" class="action-btn secondary">Cancel</button>
+                <button type="submit" id="mmdb-upload-btn" class="action-btn" disabled>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 16px; height: 16px;">
+                        <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+                        <polyline points="17 8 12 3 7 8"/>
+                        <line x1="12" y1="3" x2="12" y2="15"/>
+                    </svg>
+                    Upload Files
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<style>
+.modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+}
+.modal-content {
+    background: #1e1e2e;
+    border: 1px solid #3d3d5c;
+    border-radius: 8px;
+    padding: 24px;
+    max-width: 400px;
+    width: 90%;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+}
+.modal-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 16px;
+}
+.modal-header h3 {
+    margin: 0;
+    color: #e0e0e0;
+}
+.modal-content p {
+    color: #a0a0a0;
+    margin-bottom: 20px;
+}
+.modal-content a {
+    color: var(--accent);
+}
+.modal-actions {
+    display: flex;
+    gap: 12px;
+    justify-content: flex-end;
+}
+.modal-content-wide {
+    max-width: 500px;
+}
+.modal-close {
+    margin-left: auto;
+    background: none;
+    border: none;
+    color: #888;
+    font-size: 24px;
+    cursor: pointer;
+    padding: 0;
+    line-height: 1;
+}
+.modal-close:hover {
+    color: #e0e0e0;
+}
+.upload-area {
+    border: 2px dashed #3d3d5c;
+    border-radius: 8px;
+    padding: 32px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.2s;
+    margin-bottom: 16px;
+}
+.upload-area:hover {
+    border-color: var(--accent);
+    background: rgba(0, 212, 170, 0.05);
+}
+.upload-area.dragover {
+    border-color: var(--accent);
+    background: rgba(0, 212, 170, 0.1);
+}
+.upload-area input[type="file"] {
+    display: none;
+}
+.upload-area p {
+    margin: 4px 0;
+}
+.file-checklist {
+    background: #12121a;
+    border-radius: 6px;
+    padding: 12px;
+    margin-bottom: 16px;
+}
+.file-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+}
+.file-item .file-status {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #3d3d5c;
+    flex-shrink: 0;
+}
+.file-item.selected .file-status {
+    background: #10b981;
+}
+.file-item .file-name {
+    color: #888;
+}
+.file-item.selected .file-name {
+    color: #e0e0e0;
+}
+.upload-status {
+    padding: 12px;
+    border-radius: 6px;
+    font-size: 14px;
+    margin-bottom: 16px;
+}
+.upload-status.success {
+    background: rgba(16, 185, 129, 0.1);
+    border: 1px solid #10b981;
+    color: #10b981;
+}
+.upload-status.error {
+    background: rgba(239, 68, 68, 0.1);
+    border: 1px solid #ef4444;
+    color: #ef4444;
+}
+</style>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const geoForm = document.getElementById('update-geo-form');
+    if (geoForm) {
+        geoForm.addEventListener('submit', function(e) {
+            const apiKeySet = geoForm.dataset.apiKeySet === 'true';
+            if (!apiKeySet) {
+                e.preventDefault();
+                document.getElementById('api-key-modal').style.display = 'flex';
+            }
+        });
+    }
+
+    // MMDB Upload Modal Setup
+    setupMmdbUpload();
+});
+
+function closeModal() {
+    document.getElementById('api-key-modal').style.display = 'none';
+}
+
+// Close modal on escape key
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') {
+        closeModal();
+        closeMmdbUploadModal();
+    }
+});
+
+// Close modal on backdrop click
+document.getElementById('api-key-modal')?.addEventListener('click', function(e) {
+    if (e.target === this) {
+        closeModal();
+    }
+});
+
+document.getElementById('mmdb-upload-modal')?.addEventListener('click', function(e) {
+    if (e.target === this) {
+        closeMmdbUploadModal();
+    }
+});
+
+// MMDB Upload Modal Functions
+function openMmdbUploadModal() {
+    resetMmdbUploadForm();
+    document.getElementById('mmdb-upload-modal').style.display = 'flex';
+}
+
+function closeMmdbUploadModal() {
+    document.getElementById('mmdb-upload-modal').style.display = 'none';
+}
+
+function resetMmdbUploadForm() {
+    mmdbSelectedFiles.clear();
+    updateMmdbFileChecklist();
+    document.getElementById('mmdb-upload-status').style.display = 'none';
+    document.getElementById('mmdb-upload-btn').disabled = true;
+    document.getElementById('mmdb-upload-btn').innerHTML = `
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 16px; height: 16px;">
+            <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+            <polyline points="17 8 12 3 7 8"/>
+            <line x1="12" y1="3" x2="12" y2="15"/>
+        </svg>
+        Upload Files
+    `;
+}
+
+const mmdbRequiredFiles = ['GeoLite2-ASN.mmdb', 'GeoLite2-Country.mmdb', 'GeoLite2-City.mmdb'];
+const mmdbSelectedFiles = new Map();
+
+function setupMmdbUpload() {
+    const uploadArea = document.getElementById('mmdb-upload-area');
+    const fileInput = document.getElementById('mmdb-file-input');
+    const uploadForm = document.getElementById('mmdb-upload-form');
+
+    if (!uploadArea) return;
+
+    // Click to select files
+    uploadArea.addEventListener('click', () => fileInput.click());
+
+    // Drag and drop
+    uploadArea.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        uploadArea.classList.add('dragover');
+    });
+
+    uploadArea.addEventListener('dragleave', () => {
+        uploadArea.classList.remove('dragover');
+    });
+
+    uploadArea.addEventListener('drop', (e) => {
+        e.preventDefault();
+        uploadArea.classList.remove('dragover');
+        handleMmdbFiles(e.dataTransfer.files);
+    });
+
+    // File input change
+    fileInput.addEventListener('change', () => {
+        handleMmdbFiles(fileInput.files);
+    });
+
+    // Form submission
+    uploadForm.addEventListener('submit', handleMmdbUpload);
+}
+
+function handleMmdbFiles(files) {
+    for (const file of files) {
+        if (file.name.endsWith('.mmdb') && mmdbRequiredFiles.includes(file.name)) {
+            mmdbSelectedFiles.set(file.name, file);
+        }
+    }
+    updateMmdbFileChecklist();
+}
+
+function updateMmdbFileChecklist() {
+    const fileItems = document.querySelectorAll('.file-item');
+    fileItems.forEach(item => {
+        const fileName = item.dataset.file;
+        if (mmdbSelectedFiles.has(fileName)) {
+            item.classList.add('selected');
+        } else {
+            item.classList.remove('selected');
+        }
+    });
+
+    // Enable upload button only if all required files are selected
+    const allFilesSelected = mmdbRequiredFiles.every(f => mmdbSelectedFiles.has(f));
+    document.getElementById('mmdb-upload-btn').disabled = !allFilesSelected;
+}
+
+async function handleMmdbUpload(e) {
+    e.preventDefault();
+
+    const uploadBtn = document.getElementById('mmdb-upload-btn');
+    const uploadStatus = document.getElementById('mmdb-upload-status');
+    const csrfToken = document.querySelector('#mmdb-upload-form input[name="csrf_token"]').value;
+
+    const formData = new FormData();
+    for (const [name, file] of mmdbSelectedFiles) {
+        formData.append('mmdb_files', file);
+    }
+
+    uploadBtn.disabled = true;
+    uploadBtn.textContent = 'Uploading...';
+    uploadStatus.style.display = 'none';
+
+    try {
+        const response = await fetch('/admin/settings/upload-mmdb', {
+            method: 'POST',
+            body: formData,
+            headers: {
+                'X-CSRFToken': csrfToken
+            }
+        });
+
+        const result = await response.json();
+
+        if (response.ok) {
+            uploadStatus.className = 'upload-status success';
+            uploadStatus.textContent = result.message || 'Files uploaded successfully!';
+            uploadStatus.style.display = 'block';
+
+            // Close modal and refresh after delay
+            setTimeout(() => {
+                closeMmdbUploadModal();
+                window.location.reload();
+            }, 1500);
+        } else {
+            uploadStatus.className = 'upload-status error';
+            uploadStatus.textContent = result.error || 'Upload failed';
+            uploadStatus.style.display = 'block';
+            uploadBtn.disabled = false;
+            uploadBtn.innerHTML = `
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 16px; height: 16px;">
+                    <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+                    <polyline points="17 8 12 3 7 8"/>
+                    <line x1="12" y1="3" x2="12" y2="15"/>
+                </svg>
+                Upload Files
+            `;
+        }
+    } catch (error) {
+        uploadStatus.className = 'upload-status error';
+        uploadStatus.textContent = 'Network error: ' + error.message;
+        uploadStatus.style.display = 'block';
+        uploadBtn.disabled = false;
+        uploadBtn.innerHTML = `
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 16px; height: 16px;">
+                <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+                <polyline points="17 8 12 3 7 8"/>
+                <line x1="12" y1="3" x2="12" y2="15"/>
+            </svg>
+            Upload Files
+        `;
+    }
+}
+</script>
+{% endblock %}

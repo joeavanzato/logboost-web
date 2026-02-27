@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="csrf-token" content="{{ csrf_token() }}">
+    <title>Setup Required - LogBoost Web UI</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-primary: #0a0a0f;
+            --bg-secondary: #12121a;
+            --bg-tertiary: #1a1a24;
+            --text-primary: #e0e0e0;
+            --text-secondary: #888;
+            --border: #2a2a3a;
+            --accent: #00d4aa;
+            --accent-hover: #00e4bb;
+            --warning: #f59e0b;
+            --error: #ef4444;
+            --success: #10b981;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Space Grotesk', sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .setup-container {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 40px;
+            max-width: 600px;
+            width: 100%;
+            text-align: center;
+        }
+
+        .setup-icon {
+            width: 80px;
+            height: 80px;
+            margin: 0 auto 24px;
+            color: var(--warning);
+        }
+
+        h1 {
+            font-size: 28px;
+            margin-bottom: 12px;
+            color: var(--text-primary);
+        }
+
+        .setup-description {
+            color: var(--text-secondary);
+            margin-bottom: 32px;
+            line-height: 1.6;
+        }
+
+        .missing-files {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 32px;
+            text-align: left;
+        }
+
+        .missing-files h3 {
+            font-size: 14px;
+            color: var(--text-secondary);
+            margin-bottom: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .file-list {
+            list-style: none;
+        }
+
+        .file-list li {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 14px;
+            padding: 8px 12px;
+            margin-bottom: 8px;
+            background: var(--bg-primary);
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .file-list li:last-child {
+            margin-bottom: 0;
+        }
+
+        .file-status {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+        }
+
+        .file-status.missing {
+            background: var(--error);
+        }
+
+        .file-status.found {
+            background: var(--success);
+        }
+
+        .options-section {
+            margin-top: 32px;
+        }
+
+        .options-section h2 {
+            font-size: 18px;
+            margin-bottom: 20px;
+            color: var(--text-primary);
+        }
+
+        .option-card {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 24px;
+            margin-bottom: 16px;
+            text-align: left;
+        }
+
+        .option-card h3 {
+            font-size: 16px;
+            margin-bottom: 8px;
+            color: var(--accent);
+        }
+
+        .option-card p {
+            color: var(--text-secondary);
+            font-size: 14px;
+            margin-bottom: 16px;
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 12px 24px;
+            font-size: 14px;
+            font-weight: 500;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            text-decoration: none;
+            transition: all 0.2s;
+        }
+
+        .btn-primary {
+            background: var(--accent);
+            color: var(--bg-primary);
+        }
+
+        .btn-primary:hover {
+            background: var(--accent-hover);
+        }
+
+        .btn-secondary {
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+            border: 1px solid var(--border);
+        }
+
+        .btn-secondary:hover {
+            background: var(--bg-tertiary);
+        }
+
+        .upload-form {
+            margin-top: 16px;
+        }
+
+        .upload-area {
+            border: 2px dashed var(--border);
+            border-radius: 8px;
+            padding: 24px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .upload-area:hover {
+            border-color: var(--accent);
+            background: rgba(0, 212, 170, 0.05);
+        }
+
+        .upload-area.dragover {
+            border-color: var(--accent);
+            background: rgba(0, 212, 170, 0.1);
+        }
+
+        .upload-area input[type="file"] {
+            display: none;
+        }
+
+        .upload-icon {
+            width: 48px;
+            height: 48px;
+            margin: 0 auto 12px;
+            color: var(--text-secondary);
+        }
+
+        .upload-text {
+            color: var(--text-secondary);
+            font-size: 14px;
+        }
+
+        .upload-text strong {
+            color: var(--accent);
+        }
+
+        .selected-files {
+            margin-top: 16px;
+            text-align: left;
+        }
+
+        .selected-file {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 8px 12px;
+            background: var(--bg-primary);
+            border-radius: 4px;
+            margin-bottom: 8px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 13px;
+        }
+
+        .selected-file .remove-file {
+            background: none;
+            border: none;
+            color: var(--error);
+            cursor: pointer;
+            font-size: 18px;
+            padding: 0 4px;
+        }
+
+        .upload-btn {
+            margin-top: 16px;
+            width: 100%;
+        }
+
+        .upload-status {
+            margin-top: 16px;
+            padding: 12px;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+
+        .upload-status.success {
+            background: rgba(16, 185, 129, 0.1);
+            border: 1px solid var(--success);
+            color: var(--success);
+        }
+
+        .upload-status.error {
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid var(--error);
+            color: var(--error);
+        }
+
+        .admin-link {
+            margin-top: 24px;
+            padding-top: 24px;
+            border-top: 1px solid var(--border);
+        }
+
+        .admin-link a {
+            color: var(--accent);
+            text-decoration: none;
+        }
+
+        .admin-link a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <div class="setup-container">
+        <svg class="setup-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <circle cx="12" cy="12" r="10"/>
+            <line x1="12" y1="8" x2="12" y2="12"/>
+            <line x1="12" y1="16" x2="12.01" y2="16"/>
+        </svg>
+
+        <h1>Setup Required</h1>
+        <p class="setup-description">
+            LogBoost requires MaxMind GeoIP databases to enrich IP addresses with geolocation data.
+            Please configure your MaxMind databases before using the application.
+        </p>
+
+        <div class="missing-files">
+            <h3>Required Database Files</h3>
+            <ul class="file-list">
+                {% for file in required_files %}
+                <li>
+                    <span class="file-status {{ 'missing' if file in missing_files else 'found' }}"></span>
+                    {{ file }}
+                </li>
+                {% endfor %}
+            </ul>
+        </div>
+
+        <div class="options-section">
+            <h2>Choose Setup Method</h2>
+
+            <div class="option-card">
+                <h3>Option 1: Configure MaxMind API Key</h3>
+                <p>
+                    Enter your MaxMind license key in Admin Settings, then use "Update Geolocation"
+                    to automatically download the latest databases.
+                </p>
+                <a href="{{ url_for('admin.settings') }}" class="btn btn-primary">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 18px; height: 18px;">
+                        <circle cx="12" cy="12" r="3"/>
+                        <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"/>
+                    </svg>
+                    Go to Admin Settings
+                </a>
+            </div>
+
+            <div class="option-card">
+                <h3>Option 2: Upload Database Files</h3>
+                <p>
+                    If you already have MaxMind GeoLite2 database files, upload them directly.
+                    You need all three files: GeoLite2-ASN.mmdb, GeoLite2-Country.mmdb, and GeoLite2-City.mmdb.
+                </p>
+
+                <form id="upload-form" class="upload-form" enctype="multipart/form-data">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+                    <div class="upload-area" id="upload-area">
+                        <input type="file" id="mmdb-files" name="mmdb_files" multiple accept=".mmdb">
+                        <svg class="upload-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                            <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+                            <polyline points="17 8 12 3 7 8"/>
+                            <line x1="12" y1="3" x2="12" y2="15"/>
+                        </svg>
+                        <p class="upload-text">
+                            <strong>Click to select files</strong> or drag and drop<br>
+                            .mmdb files only
+                        </p>
+                    </div>
+
+                    <div class="selected-files" id="selected-files"></div>
+
+                    <button type="submit" class="btn btn-primary upload-btn" id="upload-btn" disabled>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 18px; height: 18px;">
+                            <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+                            <polyline points="17 8 12 3 7 8"/>
+                            <line x1="12" y1="3" x2="12" y2="15"/>
+                        </svg>
+                        Upload Database Files
+                    </button>
+                </form>
+
+                <div class="upload-status" id="upload-status" style="display: none;"></div>
+            </div>
+        </div>
+
+        <div class="admin-link">
+            <p>Already configured? <a href="{{ url_for('index') }}">Refresh this page</a> to check again.</p>
+        </div>
+    </div>
+
+    <script>
+        const uploadArea = document.getElementById('upload-area');
+        const fileInput = document.getElementById('mmdb-files');
+        const selectedFilesDiv = document.getElementById('selected-files');
+        const uploadBtn = document.getElementById('upload-btn');
+        const uploadForm = document.getElementById('upload-form');
+        const uploadStatus = document.getElementById('upload-status');
+
+        const requiredFiles = ['GeoLite2-ASN.mmdb', 'GeoLite2-Country.mmdb', 'GeoLite2-City.mmdb'];
+        let selectedFiles = new Map();
+
+        // Click to select files
+        uploadArea.addEventListener('click', () => fileInput.click());
+
+        // Drag and drop
+        uploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadArea.classList.add('dragover');
+        });
+
+        uploadArea.addEventListener('dragleave', () => {
+            uploadArea.classList.remove('dragover');
+        });
+
+        uploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadArea.classList.remove('dragover');
+            handleFiles(e.dataTransfer.files);
+        });
+
+        // File input change
+        fileInput.addEventListener('change', () => {
+            handleFiles(fileInput.files);
+        });
+
+        function handleFiles(files) {
+            for (const file of files) {
+                if (file.name.endsWith('.mmdb') && requiredFiles.includes(file.name)) {
+                    selectedFiles.set(file.name, file);
+                }
+            }
+            updateSelectedFilesDisplay();
+        }
+
+        function updateSelectedFilesDisplay() {
+            selectedFilesDiv.innerHTML = '';
+
+            for (const [name, file] of selectedFiles) {
+                const div = document.createElement('div');
+                div.className = 'selected-file';
+                div.innerHTML = `
+                    <span>${name}</span>
+                    <button type="button" class="remove-file" data-name="${name}">&times;</button>
+                `;
+                selectedFilesDiv.appendChild(div);
+            }
+
+            // Add click handlers for remove buttons
+            selectedFilesDiv.querySelectorAll('.remove-file').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    selectedFiles.delete(btn.dataset.name);
+                    updateSelectedFilesDisplay();
+                });
+            });
+
+            // Enable upload button only if all required files are selected
+            const allFilesSelected = requiredFiles.every(f => selectedFiles.has(f));
+            uploadBtn.disabled = !allFilesSelected;
+        }
+
+        // Form submission
+        uploadForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const formData = new FormData();
+            formData.append('csrf_token', document.querySelector('input[name="csrf_token"]').value);
+
+            for (const [name, file] of selectedFiles) {
+                formData.append('mmdb_files', file);
+            }
+
+            uploadBtn.disabled = true;
+            uploadBtn.textContent = 'Uploading...';
+            uploadStatus.style.display = 'none';
+
+            try {
+                const response = await fetch('/admin/settings/upload-mmdb', {
+                    method: 'POST',
+                    body: formData,
+                    headers: {
+                        'X-CSRFToken': document.querySelector('input[name="csrf_token"]').value
+                    }
+                });
+
+                const result = await response.json();
+
+                if (response.ok) {
+                    uploadStatus.className = 'upload-status success';
+                    uploadStatus.textContent = result.message || 'Files uploaded successfully! Redirecting...';
+                    uploadStatus.style.display = 'block';
+
+                    // Redirect to main page after short delay
+                    setTimeout(() => {
+                        window.location.href = '{{ url_for("index") }}';
+                    }, 1500);
+                } else {
+                    uploadStatus.className = 'upload-status error';
+                    uploadStatus.textContent = result.error || 'Upload failed';
+                    uploadStatus.style.display = 'block';
+                    uploadBtn.disabled = false;
+                    uploadBtn.innerHTML = `
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 18px; height: 18px;">
+                            <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+                            <polyline points="17 8 12 3 7 8"/>
+                            <line x1="12" y1="3" x2="12" y2="15"/>
+                        </svg>
+                        Upload Database Files
+                    `;
+                }
+            } catch (error) {
+                uploadStatus.className = 'upload-status error';
+                uploadStatus.textContent = 'Network error: ' + error.message;
+                uploadStatus.style.display = 'block';
+                uploadBtn.disabled = false;
+                uploadBtn.innerHTML = `
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 18px; height: 18px;">
+                        <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+                        <polyline points="17 8 12 3 7 8"/>
+                        <line x1="12" y1="3" x2="12" y2="15"/>
+                    </svg>
+                    Upload Database Files
+                `;
+            }
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,817 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Threat Intelligence{% endblock %}
+
+{% block content %}
+<div class="admin-header">
+    <h1>Threat Intelligence Feeds</h1>
+    <p class="admin-subtitle">Manage threat intelligence feed sources for LogBoost</p>
+</div>
+
+<div class="admin-content">
+    {% if error %}
+    <div class="error-banner">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/>
+            <line x1="12" y1="8" x2="12" y2="12"/>
+            <line x1="12" y1="16" x2="12.01" y2="16"/>
+        </svg>
+        <span>{{ error }}</span>
+        {% if not logboost_path %}
+        <a href="{{ url_for('admin.setup') }}" class="btn btn-primary">Configure LogBoost</a>
+        {% endif %}
+    </div>
+    {% else %}
+    
+    <!-- Stats & Actions Bar -->
+    <div class="ti-header">
+        <div class="ti-stats">
+            <div class="ti-stat">
+                <span class="ti-stat-value">{{ feeds|length }}</span>
+                <span class="ti-stat-label">Feeds</span>
+            </div>
+            <div class="ti-stat">
+                <span class="ti-stat-value">{{ all_tags|length }}</span>
+                <span class="ti-stat-label">Tags</span>
+            </div>
+        </div>
+        
+        <div class="ti-actions">
+            <div class="ti-search">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="11" cy="11" r="8"/>
+                    <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                </svg>
+                <input type="text" id="feed-search" placeholder="Search..." oninput="filterFeeds()">
+            </div>
+            <select id="tag-filter" onchange="filterFeeds()">
+                <option value="">All Tags</option>
+                {% for tag in all_tags %}
+                <option value="{{ tag }}">{{ tag }}</option>
+                {% endfor %}
+            </select>
+            <button class="btn btn-primary" onclick="showAddFeedModal()">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="12" y1="5" x2="12" y2="19"/>
+                    <line x1="5" y1="12" x2="19" y2="12"/>
+                </svg>
+                Add Feed
+            </button>
+        </div>
+    </div>
+    
+    <!-- Feeds Table -->
+    <div class="ti-table">
+        <div class="ti-table-header">
+            <div class="ti-col-name">Name</div>
+            <div class="ti-col-url">URL</div>
+            <div class="ti-col-tags">Tags</div>
+            <div class="ti-col-actions"></div>
+        </div>
+        
+        <div class="ti-table-body" id="feeds-container">
+            {% for feed in feeds %}
+            <div class="ti-row" data-index="{{ loop.index0 }}" data-name="{{ feed.name }}" data-tags="{{ feed.type|join(',') }}">
+                <div class="ti-col-name">
+                    <span class="ti-editable" onclick="makeEditable(this, {{ loop.index0 }}, 'name')">{{ feed.name }}</span>
+                </div>
+                <div class="ti-col-url">
+                    <span class="ti-editable ti-url" onclick="makeEditable(this, {{ loop.index0 }}, 'url')" title="{{ feed.url }}">{{ feed.url }}</span>
+                </div>
+                <div class="ti-col-tags" id="tags-{{ loop.index0 }}">
+                    {% for tag in feed.type %}
+                    <span class="ti-tag">{{ tag }}<button onclick="removeTag({{ loop.index0 }}, '{{ tag }}')">&times;</button></span>
+                    {% endfor %}
+                    <button class="ti-add-tag" onclick="showTagInput({{ loop.index0 }})" title="Add tag">+</button>
+                    <div class="ti-tag-input-wrap" id="tag-input-{{ loop.index0 }}">
+                        <input type="text" placeholder="tag" 
+                               onkeydown="handleTagInput(event, {{ loop.index0 }})"
+                               onblur="hideTagInput({{ loop.index0 }})">
+                    </div>
+                </div>
+                <div class="ti-col-actions">
+                    <span class="ti-saved" id="status-{{ loop.index0 }}">✓</span>
+                    <button class="ti-delete" onclick="deleteFeed({{ loop.index0 }}, '{{ feed.name }}')" title="Delete">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="3 6 5 6 21 6"/>
+                            <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    
+    {% if not feeds %}
+    <div class="empty-state">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+        </svg>
+        <h3>No Feeds Configured</h3>
+        <p>Add threat intelligence feeds to get started</p>
+        <button class="btn btn-primary" onclick="showAddFeedModal()">Add First Feed</button>
+    </div>
+    {% endif %}
+    
+    {% endif %}
+</div>
+
+<!-- Add Feed Modal -->
+<div class="modal-overlay" id="add-feed-modal" onclick="if(event.target===this)hideAddFeedModal()">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h2>Add New Feed</h2>
+            <button class="modal-close" onclick="hideAddFeedModal()">&times;</button>
+        </div>
+        <div class="modal-body">
+            <div class="form-group">
+                <label for="new-feed-name">Feed Name</label>
+                <input type="text" id="new-feed-name" placeholder="e.g., my_custom_feed">
+            </div>
+            <div class="form-group">
+                <label for="new-feed-url">Feed URL</label>
+                <input type="url" id="new-feed-url" placeholder="https://example.com/feed.txt">
+            </div>
+            <div class="form-group">
+                <label>Tags</label>
+                <div class="modal-tags" id="new-feed-tags-container">
+                    <input type="text" class="modal-tag-input" id="new-feed-tag-input" placeholder="Add tag, press Enter"
+                           onkeydown="handleNewFeedTagInput(event)">
+                </div>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-secondary" onclick="hideAddFeedModal()">Cancel</button>
+            <button class="btn btn-primary" onclick="addNewFeed()">Add Feed</button>
+        </div>
+    </div>
+</div>
+
+<style>
+.error-banner {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 1rem 1.5rem;
+    background: rgba(255, 68, 68, 0.1);
+    border: 1px solid rgba(255, 68, 68, 0.3);
+    border-radius: 8px;
+    color: #ff6b6b;
+    margin-bottom: 1.5rem;
+}
+
+.error-banner svg {
+    width: 20px;
+    height: 20px;
+    flex-shrink: 0;
+}
+
+.error-banner .btn {
+    margin-left: auto;
+}
+
+/* Header with stats and actions */
+.ti-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1.5rem;
+    gap: 1rem;
+    flex-wrap: wrap;
+}
+
+.ti-stats {
+    display: flex;
+    gap: 1.5rem;
+}
+
+.ti-stat {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+}
+
+.ti-stat-value {
+    font-size: 1.5rem;
+    font-weight: 600;
+    color: var(--cyber-green);
+}
+
+.ti-stat-label {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+}
+
+.ti-actions {
+    display: flex;
+    gap: 0.75rem;
+    align-items: center;
+}
+
+.ti-search {
+    position: relative;
+}
+
+.ti-search svg {
+    position: absolute;
+    left: 0.75rem;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 16px;
+    height: 16px;
+    color: var(--text-muted);
+}
+
+.ti-search input {
+    padding-left: 2.25rem;
+    width: 180px;
+}
+
+.ti-actions select {
+    min-width: 120px;
+}
+
+/* Table layout */
+.ti-table {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+.ti-table-header {
+    display: grid;
+    grid-template-columns: 200px 1fr 200px 80px;
+    padding: 0.75rem 1rem;
+    background: var(--bg-tertiary);
+    border-bottom: 1px solid var(--border-color);
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+}
+
+.ti-row {
+    display: grid;
+    grid-template-columns: 200px 1fr 200px 80px;
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--border-color);
+    align-items: center;
+    transition: background 0.15s;
+}
+
+.ti-row:last-child {
+    border-bottom: none;
+}
+
+.ti-row:hover {
+    background: var(--bg-tertiary);
+}
+
+.ti-row.hidden {
+    display: none;
+}
+
+/* Editable cells */
+.ti-editable {
+    cursor: pointer;
+    padding: 0.25rem 0.5rem;
+    margin: -0.25rem -0.5rem;
+    border-radius: 4px;
+    transition: background 0.15s;
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ti-editable:hover {
+    background: var(--bg-tertiary);
+}
+
+.ti-url {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+}
+
+.ti-edit-input {
+    width: 100%;
+    padding: 0.25rem 0.5rem;
+    margin: -0.25rem -0.5rem;
+    font-size: inherit;
+    font-family: inherit;
+    background: var(--bg-primary);
+    border: 1px solid var(--cyber-green);
+    border-radius: 4px;
+    color: var(--text-primary);
+}
+
+.ti-edit-input:focus {
+    outline: none;
+    box-shadow: 0 0 0 2px var(--cyber-green-glow);
+}
+
+/* Tags */
+.ti-col-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    align-items: center;
+    position: relative;
+}
+
+.ti-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.2rem 0.4rem 0.2rem 0.6rem;
+    background: var(--cyber-green-glow);
+    border: 1px solid var(--cyber-green-dim);
+    border-radius: 12px;
+    font-size: 0.75rem;
+    color: var(--cyber-green);
+}
+
+.ti-tag button {
+    background: none;
+    border: none;
+    padding: 0;
+    width: 14px;
+    height: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    color: var(--cyber-green);
+    opacity: 0.6;
+    font-size: 1rem;
+    line-height: 1;
+    border-radius: 50%;
+}
+
+.ti-tag button:hover {
+    opacity: 1;
+    color: #ff6b6b;
+}
+
+.ti-add-tag {
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: 1px dashed var(--border-color);
+    border-radius: 10px;
+    cursor: pointer;
+    color: var(--text-muted);
+    font-size: 0.9rem;
+    transition: all 0.15s;
+}
+
+.ti-add-tag:hover {
+    border-color: var(--cyber-green);
+    color: var(--cyber-green);
+    background: var(--cyber-green-glow);
+}
+
+.ti-tag-input-wrap {
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    z-index: 10;
+    margin-top: 4px;
+}
+
+.ti-tag-input-wrap.active {
+    display: block;
+}
+
+.ti-tag-input-wrap input {
+    width: 100px;
+    padding: 0.35rem 0.5rem;
+    font-size: 0.8rem;
+}
+
+/* Actions column */
+.ti-col-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 0.5rem;
+}
+
+.ti-saved {
+    color: var(--cyber-green);
+    font-size: 0.85rem;
+    opacity: 0;
+    transition: opacity 0.3s;
+}
+
+.ti-saved.visible {
+    opacity: 1;
+}
+
+.ti-delete {
+    background: transparent;
+    border: none;
+    padding: 0.35rem;
+    border-radius: 4px;
+    cursor: pointer;
+    color: var(--text-muted);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.15s;
+}
+
+.ti-delete svg {
+    width: 16px;
+    height: 16px;
+}
+
+.ti-delete:hover {
+    background: rgba(255, 68, 68, 0.1);
+    color: #ff6b6b;
+}
+
+/* Empty state */
+.empty-state {
+    text-align: center;
+    padding: 4rem 2rem;
+    color: var(--text-muted);
+}
+
+.empty-state svg {
+    width: 48px;
+    height: 48px;
+    margin-bottom: 1rem;
+    opacity: 0.5;
+}
+
+.empty-state h3 {
+    color: var(--text-primary);
+    margin-bottom: 0.5rem;
+    font-size: 1.1rem;
+}
+
+.empty-state p {
+    margin-bottom: 1.5rem;
+    font-size: 0.9rem;
+}
+
+/* Modal */
+.modal-overlay {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.7);
+    z-index: 1000;
+    align-items: center;
+    justify-content: center;
+}
+
+.modal-overlay.active {
+    display: flex;
+}
+
+.modal-content {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    width: 100%;
+    max-width: 480px;
+}
+
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1rem 1.25rem;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.modal-header h2 {
+    font-size: 1.1rem;
+    margin: 0;
+}
+
+.modal-close {
+    background: none;
+    border: none;
+    font-size: 1.25rem;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 0.25rem;
+    line-height: 1;
+}
+
+.modal-close:hover {
+    color: var(--text-primary);
+}
+
+.modal-body {
+    padding: 1.25rem;
+}
+
+.modal-body .form-group {
+    margin-bottom: 1rem;
+}
+
+.modal-body .form-group:last-child {
+    margin-bottom: 0;
+}
+
+.modal-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    padding: 0.5rem;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    min-height: 40px;
+    align-items: center;
+}
+
+.modal-tags .ti-tag {
+    font-size: 0.8rem;
+}
+
+.modal-tag-input {
+    flex: 1;
+    min-width: 100px;
+    background: transparent;
+    border: none;
+    padding: 0.25rem;
+    font-size: 0.9rem;
+    color: var(--text-primary);
+}
+
+.modal-tag-input:focus {
+    outline: none;
+}
+
+.modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.75rem;
+    padding: 1rem 1.25rem;
+    border-top: 1px solid var(--border-color);
+    background: var(--bg-tertiary);
+}
+
+/* Responsive */
+@media (max-width: 900px) {
+    .ti-table-header,
+    .ti-row {
+        grid-template-columns: 150px 1fr 150px 60px;
+    }
+}
+
+@media (max-width: 700px) {
+    .ti-header {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    
+    .ti-actions {
+        flex-wrap: wrap;
+    }
+    
+    .ti-search input {
+        width: 100%;
+    }
+}
+</style>
+
+<script>
+const allTags = {{ all_tags | tojson | safe }};
+let newFeedTags = [];
+
+function filterFeeds() {
+    const search = document.getElementById('feed-search').value.toLowerCase();
+    const tagFilter = document.getElementById('tag-filter').value.toLowerCase();
+    
+    document.querySelectorAll('.ti-row').forEach(row => {
+        const name = row.dataset.name.toLowerCase();
+        const tags = row.dataset.tags.toLowerCase();
+        
+        const matchesSearch = !search || name.includes(search) || tags.includes(search);
+        const matchesTag = !tagFilter || tags.includes(tagFilter);
+        
+        row.classList.toggle('hidden', !(matchesSearch && matchesTag));
+    });
+}
+
+function makeEditable(el, index, field) {
+    const currentValue = el.textContent;
+    const input = document.createElement('input');
+    input.type = field === 'url' ? 'url' : 'text';
+    input.className = 'ti-edit-input';
+    input.value = currentValue;
+    
+    const save = () => {
+        const newValue = input.value.trim();
+        if (newValue && newValue !== currentValue) {
+            updateFeed(index, field, newValue);
+            el.textContent = newValue;
+            if (field === 'name') {
+                document.querySelector(`.ti-row[data-index="${index}"]`).dataset.name = newValue;
+            }
+        } else {
+            el.textContent = currentValue;
+        }
+        el.style.display = '';
+        input.remove();
+    };
+    
+    input.onblur = save;
+    input.onkeydown = (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+        if (e.key === 'Escape') { el.textContent = currentValue; el.style.display = ''; input.remove(); }
+    };
+    
+    el.style.display = 'none';
+    el.parentNode.insertBefore(input, el.nextSibling);
+    input.focus();
+    input.select();
+}
+
+function updateFeed(index, field, value) {
+    const data = {};
+    data[field] = value;
+    
+    fetch(`/admin/api/threat-intel/feed/${index}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+    })
+    .then(res => res.json())
+    .then(data => {
+        if (data.error) {
+            alert('Error: ' + data.error);
+        } else {
+            showSaved(index);
+        }
+    })
+    .catch(err => alert('Error: ' + err.message));
+}
+
+function showSaved(index) {
+    const el = document.getElementById(`status-${index}`);
+    if (el) {
+        el.classList.add('visible');
+        setTimeout(() => el.classList.remove('visible'), 1500);
+    }
+}
+
+function showTagInput(index) {
+    const wrap = document.getElementById(`tag-input-${index}`);
+    wrap.classList.add('active');
+    wrap.querySelector('input').focus();
+}
+
+function hideTagInput(index) {
+    setTimeout(() => {
+        document.getElementById(`tag-input-${index}`).classList.remove('active');
+    }, 150);
+}
+
+function handleTagInput(event, index) {
+    if (event.key === 'Enter') {
+        event.preventDefault();
+        const input = event.target;
+        const tag = input.value.trim().toLowerCase();
+        if (tag) {
+            addTag(index, tag);
+            input.value = '';
+        }
+    } else if (event.key === 'Escape') {
+        hideTagInput(index);
+    }
+}
+
+function addTag(index, tag) {
+    const container = document.getElementById(`tags-${index}`);
+    const existingTags = Array.from(container.querySelectorAll('.ti-tag'))
+        .map(t => t.textContent.replace('×', '').trim());
+    
+    if (existingTags.includes(tag)) return;
+    
+    existingTags.push(tag);
+    updateFeed(index, 'type', existingTags);
+    
+    // Add tag element before the add button
+    const addBtn = container.querySelector('.ti-add-tag');
+    const tagEl = document.createElement('span');
+    tagEl.className = 'ti-tag';
+    tagEl.innerHTML = `${tag}<button onclick="removeTag(${index}, '${tag}')">&times;</button>`;
+    container.insertBefore(tagEl, addBtn);
+    
+    // Update data attribute
+    document.querySelector(`.ti-row[data-index="${index}"]`).dataset.tags = existingTags.join(',');
+}
+
+function removeTag(index, tag) {
+    const container = document.getElementById(`tags-${index}`);
+    const tags = Array.from(container.querySelectorAll('.ti-tag'))
+        .map(t => t.textContent.replace('×', '').trim())
+        .filter(t => t !== tag);
+    
+    updateFeed(index, 'type', tags);
+    
+    container.querySelectorAll('.ti-tag').forEach(t => {
+        if (t.textContent.replace('×', '').trim() === tag) t.remove();
+    });
+    
+    document.querySelector(`.ti-row[data-index="${index}"]`).dataset.tags = tags.join(',');
+}
+
+function deleteFeed(index, name) {
+    if (!confirm(`Delete feed "${name}"?`)) return;
+    
+    fetch(`/admin/api/threat-intel/feed/${index}`, { method: 'DELETE' })
+    .then(res => res.json())
+    .then(data => {
+        if (data.error) alert('Error: ' + data.error);
+        else location.reload();
+    })
+    .catch(err => alert('Error: ' + err.message));
+}
+
+function showAddFeedModal() {
+    document.getElementById('add-feed-modal').classList.add('active');
+    document.getElementById('new-feed-name').focus();
+    newFeedTags = [];
+    renderNewFeedTags();
+}
+
+function hideAddFeedModal() {
+    document.getElementById('add-feed-modal').classList.remove('active');
+    document.getElementById('new-feed-name').value = '';
+    document.getElementById('new-feed-url').value = '';
+    newFeedTags = [];
+    renderNewFeedTags();
+}
+
+function handleNewFeedTagInput(event) {
+    if (event.key === 'Enter') {
+        event.preventDefault();
+        const tag = event.target.value.trim().toLowerCase();
+        if (tag && !newFeedTags.includes(tag)) {
+            newFeedTags.push(tag);
+            renderNewFeedTags();
+        }
+        event.target.value = '';
+    }
+}
+
+function renderNewFeedTags() {
+    const container = document.getElementById('new-feed-tags-container');
+    const input = container.querySelector('.modal-tag-input');
+    container.querySelectorAll('.ti-tag').forEach(t => t.remove());
+    
+    newFeedTags.forEach((tag, i) => {
+        const tagEl = document.createElement('span');
+        tagEl.className = 'ti-tag';
+        tagEl.innerHTML = `${tag}<button type="button" onclick="removeNewFeedTag(${i})">&times;</button>`;
+        container.insertBefore(tagEl, input);
+    });
+}
+
+function removeNewFeedTag(index) {
+    newFeedTags.splice(index, 1);
+    renderNewFeedTags();
+}
+
+function addNewFeed() {
+    const name = document.getElementById('new-feed-name').value.trim();
+    const url = document.getElementById('new-feed-url').value.trim();
+    
+    if (!name) { alert('Please enter a feed name'); return; }
+    if (!url) { alert('Please enter a feed URL'); return; }
+    
+    const tags = newFeedTags.length > 0 ? newFeedTags : ['suspicious'];
+    
+    fetch('/admin/api/threat-intel/feed', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, url, type: tags })
+    })
+    .then(res => res.json())
+    .then(data => {
+        if (data.error) alert('Error: ' + data.error);
+        else location.reload();
+    })
+    .catch(err => alert('Error: ' + err.message));
+}
+</script>
+{% endblock %}

@@ -1,0 +1,93 @@
+{% extends "admin/base.html" %}
+
+{% block title %}User Accounts{% endblock %}
+
+{% block content %}
+<div class="admin-page">
+    <div class="page-header">
+        <div>
+            <h1>User Accounts</h1>
+            <p>Manage user and administrator accounts</p>
+        </div>
+        <a href="{{ url_for('admin.create_account') }}" class="btn primary">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="12" y1="5" x2="12" y2="19"/>
+                <line x1="5" y1="12" x2="19" y2="12"/>
+            </svg>
+            Add Account
+        </a>
+    </div>
+    
+    <div class="accounts-table-wrapper">
+        <table class="admin-table">
+            <thead>
+                <tr>
+                    <th>Username</th>
+                    <th>Role</th>
+                    <th>Created</th>
+                    <th>Last Updated</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for account in accounts %}
+                <tr>
+                    <td>
+                        <div class="account-name">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/>
+                                <circle cx="12" cy="7" r="4"/>
+                            </svg>
+                            {{ account.username }}
+                            {% if account.username == session.get('username') %}
+                            <span class="badge info">You</span>
+                            {% endif %}
+                        </div>
+                    </td>
+                    <td>
+                        {% if account.role == 'admin' %}
+                        <span class="badge success">Admin</span>
+                        {% else %}
+                        <span class="badge secondary">User</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ account.created_at }}</td>
+                    <td>{{ account.updated_at }}</td>
+                    <td>
+                        <div class="action-buttons">
+                            <a href="{{ url_for('admin.edit_account', account_id=account.id) }}" class="btn small secondary">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/>
+                                    <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                                </svg>
+                                Edit
+                            </a>
+                            <a href="{{ url_for('admin.change_password', account_id=account.id) }}" class="btn small secondary">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                                </svg>
+                                Password
+                            </a>
+                            {% if account.id != session.get('user_id') %}
+                            <form action="{{ url_for('admin.delete_account', account_id=account.id) }}" method="POST" class="inline-form" onsubmit="return confirm('Are you sure you want to delete this account?');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <button type="submit" class="btn small danger">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <polyline points="3 6 5 6 21 6"/>
+                                        <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/>
+                                        <line x1="10" y1="11" x2="10" y2="17"/>
+                                        <line x1="14" y1="11" x2="14" y2="17"/>
+                                    </svg>
+                                    Delete
+                                </button>
+                            </form>
+                            {% endif %}
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

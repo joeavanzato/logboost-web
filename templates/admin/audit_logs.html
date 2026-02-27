@@ -1,0 +1,387 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Audit Logs{% endblock %}
+
+{% block content %}
+<div class="admin-page">
+    <div class="page-header">
+        <div>
+            <h1>Audit Logs</h1>
+            <p>Security audit trail of user actions ({{ total_count }} total, {{ retention_days }} day retention)</p>
+        </div>
+        <div class="header-actions">
+            <a href="{{ url_for('admin.export_audit_logs', action=action_filter, user=user_filter, start_date=start_date, end_date=end_date) }}" class="btn secondary">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+                    <polyline points="7 10 12 15 17 10"/>
+                    <line x1="12" y1="15" x2="12" y2="3"/>
+                </svg>
+                Export CSV
+            </a>
+            <form action="{{ url_for('admin.cleanup_audit_logs') }}" method="POST" style="display: inline;">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn secondary">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="1 4 1 10 7 10"/>
+                        <path d="M3.51 15a9 9 0 102.13-9.36L1 10"/>
+                    </svg>
+                    Cleanup Old
+                </button>
+            </form>
+            {% if logs %}
+            <form action="{{ url_for('admin.clear_audit_logs') }}" method="POST" style="display: inline;" onsubmit="return confirm('Are you sure you want to clear ALL audit logs? This cannot be undone.');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn danger">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="3 6 5 6 21 6"/>
+                        <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/>
+                    </svg>
+                    Clear All
+                </button>
+            </form>
+            {% endif %}
+        </div>
+    </div>
+    
+    <!-- Filters -->
+    <div class="filters-card">
+        <form method="GET" action="{{ url_for('admin.audit_logs') }}" class="filters-form">
+            <div class="filter-group">
+                <label for="action">Action</label>
+                <select name="action" id="action">
+                    <option value="">All Actions</option>
+                    {% for action in action_types %}
+                    <option value="{{ action }}" {% if action_filter == action %}selected{% endif %}>{{ action }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="filter-group">
+                <label for="user">User / IP</label>
+                <input type="text" name="user" id="user" value="{{ user_filter }}" placeholder="Search user or IP...">
+            </div>
+            <div class="filter-group">
+                <label for="start_date">Start Date</label>
+                <input type="date" name="start_date" id="start_date" value="{{ start_date }}">
+            </div>
+            <div class="filter-group">
+                <label for="end_date">End Date</label>
+                <input type="date" name="end_date" id="end_date" value="{{ end_date }}">
+            </div>
+            <div class="filter-group">
+                <label for="per_page">Per Page</label>
+                <select name="per_page" id="per_page">
+                    <option value="25" {% if per_page == 25 %}selected{% endif %}>25</option>
+                    <option value="50" {% if per_page == 50 %}selected{% endif %}>50</option>
+                    <option value="100" {% if per_page == 100 %}selected{% endif %}>100</option>
+                    <option value="200" {% if per_page == 200 %}selected{% endif %}>200</option>
+                </select>
+            </div>
+            <div class="filter-actions">
+                <button type="submit" class="btn primary">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="11" cy="11" r="8"/>
+                        <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                    </svg>
+                    Filter
+                </button>
+                <a href="{{ url_for('admin.audit_logs') }}" class="btn secondary">Clear</a>
+            </div>
+        </form>
+    </div>
+    
+    <!-- Retention Setting -->
+    <div class="settings-card compact">
+        <form method="POST" action="{{ url_for('admin.save_audit_retention') }}" class="inline-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <label for="audit_retention_days">Retention Period:</label>
+            <input type="number" name="audit_retention_days" id="audit_retention_days" 
+                   value="{{ retention_days }}" min="7" max="365" style="width: 80px;">
+            <span>days</span>
+            <button type="submit" class="btn small primary">Save</button>
+        </form>
+    </div>
+    
+    {% if logs %}
+    <div class="logs-table-wrapper">
+        <table class="admin-table audit-table">
+            <thead>
+                <tr>
+                    <th>Timestamp</th>
+                    <th>User</th>
+                    <th>IP Address</th>
+                    <th>Action</th>
+                    <th>Resource</th>
+                    <th>Status</th>
+                    <th>Details</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for log in logs %}
+                <tr class="{% if not log.success %}failed-row{% endif %}">
+                    <td class="timestamp">{{ log.timestamp }}</td>
+                    <td>{{ log.username or '—' }}</td>
+                    <td class="ip-address">{{ log.ip_address or '—' }}</td>
+                    <td>
+                        <span class="action-badge action-{{ log.action.split('_')[0] }}">{{ log.action }}</span>
+                    </td>
+                    <td>
+                        {% if log.resource_type %}
+                        <span class="resource-info">
+                            {{ log.resource_type }}{% if log.resource_id %}: {{ log.resource_id[:30] }}{% if log.resource_id|length > 30 %}...{% endif %}{% endif %}
+                        </span>
+                        {% else %}
+                        —
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if log.success %}
+                        <span class="badge success">Success</span>
+                        {% else %}
+                        <span class="badge failed">Failed</span>
+                        {% endif %}
+                    </td>
+                    <td class="details-cell">
+                        {% if log.details %}
+                        <button class="btn small secondary details-toggle" onclick="toggleDetails(this)" title="View details">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                                <circle cx="12" cy="12" r="3"/>
+                            </svg>
+                        </button>
+                        <div class="details-content hidden">
+                            <pre>{{ log.details | tojson(indent=2) }}</pre>
+                        </div>
+                        {% else %}
+                        —
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    
+    {% if total_pages > 1 %}
+    <div class="pagination">
+        {% if page > 1 %}
+        <a href="{{ url_for('admin.audit_logs', page=page-1, action=action_filter, user=user_filter, start_date=start_date, end_date=end_date, per_page=per_page) }}" class="pagination-btn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="15 18 9 12 15 6"/>
+            </svg>
+        </a>
+        {% endif %}
+        
+        <span class="pagination-info">Page {{ page }} of {{ total_pages }} ({{ total_count }} entries)</span>
+        
+        {% if page < total_pages %}
+        <a href="{{ url_for('admin.audit_logs', page=page+1, action=action_filter, user=user_filter, start_date=start_date, end_date=end_date, per_page=per_page) }}" class="pagination-btn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="9 18 15 12 9 6"/>
+            </svg>
+        </a>
+        {% endif %}
+    </div>
+    {% endif %}
+    
+    {% else %}
+    <div class="empty-state">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
+            <polyline points="14 2 14 8 20 8"/>
+            <line x1="16" y1="13" x2="8" y2="13"/>
+            <line x1="16" y1="17" x2="8" y2="17"/>
+            <polyline points="10 9 9 9 8 9"/>
+        </svg>
+        <h3>No Audit Logs</h3>
+        <p>{% if action_filter or user_filter or start_date or end_date %}No logs match your filter criteria{% else %}User activity logs will appear here{% endif %}</p>
+    </div>
+    {% endif %}
+</div>
+
+<style>
+.header-actions {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.filters-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius);
+    padding: 1rem;
+    margin-bottom: 1rem;
+}
+
+.filters-form {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    align-items: flex-end;
+}
+
+.filter-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.filter-group label {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.filter-group input,
+.filter-group select {
+    padding: 0.5rem;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    color: var(--text-primary);
+    font-size: 0.875rem;
+}
+
+.filter-group input:focus,
+.filter-group select:focus {
+    outline: none;
+    border-color: var(--accent-primary);
+}
+
+.filter-actions {
+    display: flex;
+    gap: 0.5rem;
+    align-items: flex-end;
+}
+
+.settings-card.compact {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius);
+    padding: 0.75rem 1rem;
+    margin-bottom: 1rem;
+}
+
+.inline-form {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.inline-form label {
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+}
+
+.inline-form input[type="number"] {
+    padding: 0.35rem 0.5rem;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    color: var(--text-primary);
+    font-size: 0.875rem;
+}
+
+.inline-form span {
+    color: var(--text-muted);
+    font-size: 0.875rem;
+}
+
+.audit-table .timestamp {
+    white-space: nowrap;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+}
+
+.audit-table .ip-address {
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+}
+
+.action-badge {
+    display: inline-block;
+    padding: 0.2rem 0.5rem;
+    border-radius: var(--radius-sm);
+    font-size: 0.75rem;
+    font-weight: 500;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-color);
+}
+
+.action-badge.action-login { background: rgba(76, 175, 80, 0.15); border-color: #4caf50; color: #4caf50; }
+.action-badge.action-logout { background: rgba(158, 158, 158, 0.15); border-color: #9e9e9e; color: #9e9e9e; }
+.action-badge.action-setting { background: rgba(33, 150, 243, 0.15); border-color: #2196f3; color: #2196f3; }
+.action-badge.action-graph { background: rgba(156, 39, 176, 0.15); border-color: #9c27b0; color: #9c27b0; }
+.action-badge.action-shodan { background: rgba(255, 87, 34, 0.15); border-color: #ff5722; color: #ff5722; }
+.action-badge.action-dns { background: rgba(0, 188, 212, 0.15); border-color: #00bcd4; color: #00bcd4; }
+.action-badge.action-whois { background: rgba(255, 193, 7, 0.15); border-color: #ffc107; color: #ffc107; }
+.action-badge.action-logboost { background: rgba(0, 230, 118, 0.15); border-color: #00e676; color: #00e676; }
+.action-badge.action-intel { background: rgba(233, 30, 99, 0.15); border-color: #e91e63; color: #e91e63; }
+.action-badge.action-api { background: rgba(103, 58, 183, 0.15); border-color: #673ab7; color: #673ab7; }
+.action-badge.action-audit { background: rgba(96, 125, 139, 0.15); border-color: #607d8b; color: #607d8b; }
+
+.resource-info {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+}
+
+.failed-row {
+    background: rgba(244, 67, 54, 0.08);
+}
+
+.details-cell {
+    position: relative;
+}
+
+.details-content {
+    position: absolute;
+    right: 0;
+    top: 100%;
+    z-index: 100;
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius);
+    padding: 0.5rem;
+    max-width: 400px;
+    max-height: 300px;
+    overflow: auto;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.details-content pre {
+    margin: 0;
+    font-size: 0.75rem;
+    font-family: var(--font-mono);
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+
+.details-content.hidden {
+    display: none;
+}
+</style>
+
+<script>
+function toggleDetails(btn) {
+    const content = btn.nextElementSibling;
+    content.classList.toggle('hidden');
+    
+    // Close other open details
+    document.querySelectorAll('.details-content').forEach(el => {
+        if (el !== content) {
+            el.classList.add('hidden');
+        }
+    });
+}
+
+// Close details when clicking outside
+document.addEventListener('click', function(e) {
+    if (!e.target.closest('.details-cell')) {
+        document.querySelectorAll('.details-content').forEach(el => {
+            el.classList.add('hidden');
+        });
+    }
+});
+</script>
+{% endblock %}
