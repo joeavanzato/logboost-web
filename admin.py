@@ -17,8 +17,8 @@ import zipfile
 import requests
 from datetime import datetime, timedelta
 from pathlib import Path
-from functools import wraps
 from flask import Blueprint, render_template, request, redirect, url_for, session, flash, jsonify
+from auth import login_required, admin_required
 
 # Get logger
 logger = logging.getLogger(__name__)
@@ -380,28 +380,10 @@ def verify_password(password: str, password_hash: str) -> bool:
 # ============================================
 # Authentication
 # ============================================
-
-def login_required(f):
-    """Decorator to require any logged-in user."""
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        if not session.get('logged_in'):
-            return redirect(url_for('auth_routes.login'))
-        return f(*args, **kwargs)
-    return decorated_function
-
-
-def admin_required(f):
-    """Decorator to require admin role."""
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        if not session.get('logged_in'):
-            return redirect(url_for('auth_routes.login'))
-        if session.get('user_role') != ROLE_ADMIN:
-            flash('Admin access required', 'error')
-            return redirect(url_for('index'))
-        return f(*args, **kwargs)
-    return decorated_function
+# Decorators imported from auth.py - single source of truth.
+# Both decorators validate users against the database on every request,
+# preventing stale session cookies from granting access after a DB wipe.
+# from auth import login_required, admin_required  (imported at top of file)
 
 
 @admin_bp.route('/login', methods=['GET', 'POST'])
