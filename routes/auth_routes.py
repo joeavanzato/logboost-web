@@ -3,15 +3,66 @@ Authentication routes - login and logout.
 """
 
 from flask import Blueprint, request, session, redirect, url_for, flash, render_template
-from admin import get_db, verify_password, ROLE_ADMIN, log_audit
+from admin import get_db, verify_password, ROLE_ADMIN, log_audit, needs_setup, hash_password
 
 
 auth_routes_bp = Blueprint('auth_routes', __name__)
 
 
+@auth_routes_bp.route('/setup', methods=['GET', 'POST'])
+def setup():
+    """First-user setup - create initial admin account."""
+    # If setup already complete, redirect to login
+    if not needs_setup():
+        return redirect(url_for('auth_routes.login'))
+
+    if request.method == 'POST':
+        username = request.form.get('username', '').strip()
+        password = request.form.get('password', '')
+        confirm_password = request.form.get('confirm_password', '')
+
+        # Validation
+        errors = []
+        if not username or len(username) < 3:
+            errors.append('Username must be at least 3 characters')
+        if not password or len(password) < 8:
+            errors.append('Password must be at least 8 characters')
+        if password != confirm_password:
+            errors.append('Passwords do not match')
+
+        if errors:
+            for error in errors:
+                flash(error, 'error')
+            return render_template('setup_admin.html', username=username)
+
+        # Create admin account
+        conn = get_db()
+        cursor = conn.cursor()
+        try:
+            password_hash = hash_password(password)
+            cursor.execute(
+                'INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)',
+                (username, password_hash, ROLE_ADMIN)
+            )
+            conn.commit()
+            log_audit('setup_complete', 'user', None, {'admin_username': username}, success=True)
+            flash('Admin account created. Please log in.', 'success')
+            return redirect(url_for('auth_routes.login'))
+        except Exception as e:
+            flash(f'Failed to create account: {str(e)}', 'error')
+        finally:
+            conn.close()
+
+    return render_template('setup_admin.html')
+
+
 @auth_routes_bp.route('/login', methods=['GET', 'POST'])
 def login():
     """Main login page."""
+    # Redirect to setup if no admin exists
+    if needs_setup():
+        return redirect(url_for('auth_routes.setup'))
+
     if session.get('logged_in'):
         return redirect(url_for('index'))
     

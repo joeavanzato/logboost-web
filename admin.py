@@ -29,9 +29,9 @@ admin_bp = Blueprint('admin', __name__, url_prefix='/admin')
 # Database path — configurable via LOGBOOST_DB_PATH env var
 DB_PATH = Path(os.environ.get('LOGBOOST_DB_PATH', Path(__file__).parent / 'logboost_admin.db'))
 
-# Default admin credentials
-DEFAULT_ADMIN_USER = 'admin'
-DEFAULT_ADMIN_PASS = 'changeme'
+# REMOVED - No default credentials (first-user setup flow instead)
+# DEFAULT_ADMIN_USER = 'admin'
+# DEFAULT_ADMIN_PASS = 'changeme'
 
 # LogBoost binary path
 LOGBOOST_BINARY = os.environ.get('LOGBOOST_PATH', 'LogBoost')
@@ -54,6 +54,16 @@ def get_db():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
+
+
+def needs_setup() -> bool:
+    """Check if initial setup is needed (no admin users exist)."""
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute('SELECT COUNT(*) FROM users WHERE role = ?', (ROLE_ADMIN,))
+    count = cursor.fetchone()[0]
+    conn.close()
+    return count == 0
 
 
 def init_db():
@@ -333,17 +343,7 @@ def init_db():
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs(action)')
     
     conn.commit()
-    
-    # Create default admin account if no users exist
-    cursor.execute('SELECT COUNT(*) FROM users')
-    if cursor.fetchone()[0] == 0:
-        password_hash = hash_password(DEFAULT_ADMIN_PASS)
-        cursor.execute(
-            'INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)',
-            (DEFAULT_ADMIN_USER, password_hash, ROLE_ADMIN)
-        )
-        conn.commit()
-    
+
     # Create default task entries if none exist
     cursor.execute('SELECT COUNT(*) FROM scheduled_tasks')
     if cursor.fetchone()[0] == 0:
