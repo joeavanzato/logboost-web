@@ -83,8 +83,11 @@ ENV SSL_COMMON_NAME=localhost
 
 # Create /data directory tree for volume mount points
 # If no volume is mounted, these are writable empty directories inside the image
-RUN mkdir -p /data/maxmind /data/intel /data/cache /data/config /data/db /data/bin /data/ssl \
+RUN mkdir -p /data/maxmind /data/intel /data/cache /data/config /data/db /data/bin /data/ssl /data/backups \
     && chown -R logboost:logboost /data
+
+# Make backup script executable
+RUN chmod +x /app/scripts/backup.sh
 
 # Copy and enable entrypoint validation script
 COPY entrypoint.sh /entrypoint.sh

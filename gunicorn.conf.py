@@ -2,6 +2,19 @@
 # Loaded via: gunicorn --config gunicorn.conf.py app:app
 
 import os
+import logging
+
+
+# Filter to suppress noisy SSL handshake warnings from self-signed certs
+# These occur when clients connect but reject the untrusted certificate
+class SSLHandshakeFilter(logging.Filter):
+    def filter(self, record):
+        # Suppress "Invalid request" warnings caused by SSL handshake failures
+        if record.levelno == logging.WARNING and "SSLV3_ALERT" in record.getMessage():
+            return False
+        if record.levelno == logging.WARNING and "SSL_ERROR_SSL" in record.getMessage():
+            return False
+        return True
 
 # Worker configuration
 # workers=1 is MANDATORY — SQLite cannot handle concurrent write locks from multiple processes
@@ -33,6 +46,31 @@ keyfile = "/data/ssl/key.pem"
 accesslog = "-"
 errorlog = "-"
 loglevel = os.environ.get("LOGBOOST_LOG_LEVEL", "info").lower()
+
+# Apply SSL handshake filter to suppress self-signed cert warnings
+logconfig_dict = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "filters": {
+        "ssl_handshake": {
+            "()": SSLHandshakeFilter,
+        },
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "filters": ["ssl_handshake"],
+            "stream": "ext://sys.stderr",
+        },
+    },
+    "loggers": {
+        "gunicorn.error": {
+            "level": "INFO",
+            "handlers": ["console"],
+            "propagate": False,
+        },
+    },
+}
 
 # Process naming (visible in docker exec ps output)
 proc_name = "logboost-web"

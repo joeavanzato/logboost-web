@@ -349,7 +349,8 @@ def init_db():
     if cursor.fetchone()[0] == 0:
         tasks = [
             ('update_geo', 168, 0),  # Weekly by default
-            ('update_ti', 24, 0),     # Daily by default
+            ('update_ti', 24, 0),    # Daily by default
+            ('backup', 24, 0),       # Daily by default
         ]
         cursor.executemany(
             'INSERT INTO scheduled_tasks (task_type, interval_hours, enabled) VALUES (?, ?, ?)',
@@ -1992,6 +1993,10 @@ def execute_task(task_type: str):
         elif task_type == 'build_ti':
             cmd.append('-buildti')
             cmd.extend(['-tidb', '/app/threats.db'])
+        elif task_type == 'backup':
+            # Backup task uses shell script, not LogBoost binary
+            backup_dir = os.environ.get('BACKUP_DIR', '/data/backups')
+            cmd = ['/bin/sh', '/app/scripts/backup.sh', backup_dir]
         else:
             raise ValueError(f'Unknown task type: {task_type}')
 

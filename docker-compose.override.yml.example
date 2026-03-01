@@ -1,0 +1,66 @@
+# docker-compose.override.yml.example
+# Copy to docker-compose.override.yml and customize for your deployment
+# This file is automatically merged with docker-compose.yml when present
+#
+# Usage:
+#   cp docker-compose.override.yml.example docker-compose.override.yml
+#   # Edit as needed
+#   docker compose up -d
+
+services:
+  logboost-web:
+    # ============================================
+    # Custom SSL Certificates
+    # ============================================
+    # Mount your own SSL certificates instead of using auto-generated self-signed certs
+    # Uncomment and adjust paths to your certificate files:
+    #
+    # volumes:
+    #   # Mount custom SSL cert and key (read-only)
+    #   - /path/to/your/cert.pem:/data/ssl/cert.pem:ro
+    #   - /path/to/your/key.pem:/data/ssl/key.pem:ro
+    #
+    # For Let's Encrypt certificates (certbot):
+    # volumes:
+    #   - /etc/letsencrypt/live/yourdomain.com/fullchain.pem:/data/ssl/cert.pem:ro
+    #   - /etc/letsencrypt/live/yourdomain.com/privkey.pem:/data/ssl/key.pem:ro
+
+    # ============================================
+    # Environment Overrides
+    # ============================================
+    environment:
+      # Custom SSL Common Name (for auto-generated certs)
+      SSL_COMMON_NAME: ${SSL_COMMON_NAME:-localhost}
+
+      # Change default port
+      # SSL_PORT: 443
+
+      # Enable debug logging
+      # LOGBOOST_LOG_LEVEL: debug
+
+    # ============================================
+    # Port Mapping Overrides
+    # ============================================
+    # Uncomment to use standard HTTPS port:
+    # ports:
+    #   - "443:8443"
+
+    # ============================================
+    # Resource Limits (Production)
+    # ============================================
+    # Uncomment to set resource constraints:
+    # deploy:
+    #   resources:
+    #     limits:
+    #       cpus: '2'
+    #       memory: 2G
+    #     reservations:
+    #       cpus: '0.5'
+    #       memory: 512M
+
+    # ============================================
+    # Backup Volume (optional)
+    # ============================================
+    # Mount a host directory for backups:
+    # volumes:
+    #   - /opt/logboost/backups:/backups

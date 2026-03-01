@@ -24,6 +24,7 @@ services:
       - logboost-uploads:/app/uploads       # Session uploads
       - logboost-output:/app/output         # Session output
       - logboost-ssl:/data/ssl              # SSL certificates (auto-generated or mounted)
+      - logboost-backups:/data/backups      # Database backups
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-fk", "https://localhost:8443/health"]
@@ -42,3 +43,4 @@ volumes:
   logboost-uploads:
   logboost-output:
   logboost-ssl:
+  logboost-backups:
