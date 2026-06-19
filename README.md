@@ -1,10 +1,80 @@
 # LogBoost Web
 
-A web-based interface for [LogBoost](https://github.com/joeavanzato/LogBoost) - IP enrichment and log parsing at scale.
+A self-hosted **network intelligence platform** for security analysts. Paste any text, log file, or threat-intel feed; LogBoost Web extracts every IP and domain, enriches them with GeoIP, ASN, DNS, WHOIS, Shodan InternetDB, and threat-intel matches, then lets you pivot through the relationships in a graph view. Ships as a single Docker container with HTTPS enabled by default.
 
 ![Docker](https://img.shields.io/badge/Docker-Ready-blue.svg)
 ![Python](https://img.shields.io/badge/Python-3.12-green.svg)
 ![License](https://img.shields.io/badge/License-MIT-yellow.svg)
+
+<!-- TODO: replace with a real screenshot -->
+<!-- ![LogBoost Web screenshot](docs/screenshot.png) -->
+
+## 60-Second Quickstart
+
+You need **Docker** and **Docker Compose**. Everything else (DB schemas, threat feeds, SSL cert) is auto-provisioned.
+
+```bash
+# 1. Generate a secret key — REQUIRED. The app refuses to start without one.
+python -c "import secrets; print(secrets.token_hex(32))"
+
+# 2. Save this docker-compose.yml (replace SECRET_KEY with the value from step 1)
+cat > docker-compose.yml <<'EOF'
+services:
+  logboost-web:
+    image: ghcr.io/joeavanzato/logboost-web:latest
+    ports:
+      - "8443:8443"
+    environment:
+      SECRET_KEY: "PASTE_GENERATED_KEY_HERE"
+      FLASK_ENV: production
+      SSL_COMMON_NAME: "localhost"
+    volumes:
+      - logboost-db:/data/db
+      - logboost-maxmind:/data/maxmind
+      - logboost-intel:/data/intel
+      - logboost-config:/data/config
+      - logboost-ssl:/data/ssl
+    restart: unless-stopped
+
+volumes:
+  logboost-db:
+  logboost-maxmind:
+  logboost-intel:
+  logboost-config:
+  logboost-ssl:
+EOF
+
+# 3. Start the container
+docker compose up -d
+
+# 4. Open https://localhost:8443 — accept the self-signed cert warning, then create your admin account
+```
+
+That's it. On first visit you'll be prompted to create an admin user, then walked through MaxMind setup (upload `.mmdb` files or paste a free MaxMind API key). Threat intel feeds auto-populate from the bundled config.
+
+> **Note on the cert warning:** the container generates a self-signed SSL cert on first boot. Browsers will warn — that's expected. For production, mount your own cert (see [SSL Configuration](#sslhttps-configuration)).
+
+## FAQ
+
+**Q: What do I need API keys for?**
+Nothing critical. Geo, DNS, WHOIS, Shodan InternetDB, and threat intel matching all work without any API keys (though MaxMind's auto-update needs a free key — the manual `.mmdb` upload path doesn't). Paid keys unlock advanced features like Shodan search, ViewDNS pivots, and CIRCL passive DNS history. See the [API Integrations table](#api-integrations) below.
+
+**Q: Will it run on a Raspberry Pi / ARM?**
+The image is built for `linux/amd64`. ARM users should rebuild from source — the Dockerfile works on both architectures.
+
+**Q: How big is `threats.db`?**
+Around 400-500 MB after the first threat-intel update, with ~8M IP entries indexed. Expect ~2-3 minutes for the initial download/build on first run.
+
+**Q: Can I use it without exposing it to the internet?**
+Recommended. Bind it to `127.0.0.1:8443` or put it behind your VPN / Tailscale / Wireguard / reverse proxy. The admin panel doesn't have brute-force protection yet (planned).
+
+**Q: How do I back up my data?**
+A backup script ships with the container at `/app/scripts/backup.sh`. Schedule it from **Admin Panel → Settings → Backup Schedule**. Backups go to the `logboost-backups` volume; copy them off-host with `docker cp` or a host bind-mount.
+
+**Q: How do I upgrade?**
+`docker compose pull && docker compose up -d`. Volumes persist across upgrades; the SQLite admin DB has no migrations (yet) so backwards-compatibility is currently best-effort.
+
+---
 
 ## Features
 
@@ -87,68 +157,23 @@ If you upload the three MaxMind MMDB files (or use a MaxMind API key to download
 
 ---
 
-## Quick Start
+## Detailed Setup
 
-### Prerequisites
+The [60-Second Quickstart](#60-second-quickstart) above gets you running. This section covers the parts you may want to know more about once it's up.
 
-- Docker and Docker Compose
-- MaxMind GeoLite2 databases OR a MaxMind account (free)
-
-### 1. Create docker-compose.yml
-
-```yaml
-services:
-  logboost-web:
-    image: ghcr.io/joeavanzato/logboost-web:latest
-    ports:
-      - "8443:8443"   # HTTPS
-    environment:
-      SECRET_KEY: "generate-a-secure-key-here"
-      FLASK_ENV: production
-      SSL_COMMON_NAME: "localhost"  # Set to your hostname for valid cert
-    volumes:
-      - logboost-db:/data/db
-      - logboost-maxmind:/data/maxmind
-      - logboost-intel:/data/intel
-      - logboost-config:/data/config
-      - logboost-ssl:/data/ssl      # SSL certificates
-    restart: unless-stopped
-
-volumes:
-  logboost-db:
-  logboost-maxmind:
-  logboost-intel:
-  logboost-config:
-  logboost-ssl:
-```
-
-### 2. Start the Container
-
-```bash
-docker compose up -d
-```
-
-### 3. Access the Application
+### Endpoints
 
 - **Main UI:** https://localhost:8443
 - **Admin Panel:** https://localhost:8443/admin
-- **Health Check:** https://localhost:8443/health (use `curl -k` for self-signed certs)
+- **Health check:** https://localhost:8443/health (use `curl -k` for self-signed certs)
 
-> **Note:** On first run, the container generates a self-signed SSL certificate. Your browser will show a certificate warning - this is expected for self-signed certs. Click "Advanced" and proceed to the site. For production deployments, see the [SSL Configuration](#sslhttps-configuration) section for using custom certificates.
+### MaxMind GeoIP Setup
 
-### 4. Initial Setup
+On first launch you'll see a setup screen prompting you to configure MaxMind databases. You need all three: `GeoLite2-ASN.mmdb`, `GeoLite2-Country.mmdb`, `GeoLite2-City.mmdb`.
 
-On first launch you will see a setup screen prompting you to configure MaxMind databases:
+**Option A — Upload existing files:** drag and drop them on the setup page.
 
-**Option A: Upload MMDB Files**
-
-Upload your existing GeoLite2-ASN.mmdb, GeoLite2-Country.mmdb, and GeoLite2-City.mmdb files directly from the setup page.
-
-**Option B: Configure API Key**
-
-1. Log into Admin Panel (create admin account on first visit)
-2. Go to Settings, enter your MaxMind API Key
-3. Return to Dashboard, click "Update Geolocation"
+**Option B — Auto-download:** create a free MaxMind account, generate an API key, paste it in **Admin → Settings → MaxMind API Key**, then click **Update Geolocation** on the dashboard. Schedule recurring updates from **Admin → Scheduled Tasks**.
 
 ---
 
@@ -305,6 +330,51 @@ Configure automatic updates:
 - Create additional admin accounts
 - Change passwords
 - View audit logs for all user actions
+
+---
+
+## Backup & Restore
+
+A POSIX shell script ships with the container at `/app/scripts/backup.sh` and handles both backup and restore for the two SQLite databases that hold your state: `logboost_admin.db` (users, settings, audit logs, saved graphs) and `threats.db` (threat-intel IOCs).
+
+### Scheduling backups
+
+Configure automatic backups from **Admin Panel → Settings → Backup Schedule**. Files land in the `logboost-backups` volume by default. To copy them off-host, either bind-mount the volume or use `docker cp`:
+
+```bash
+docker cp logboost-web:/data/backups ./local-backups
+```
+
+### Restore
+
+The restore subcommand replaces the live databases with the contents of a previous backup.
+
+```bash
+# Restore both DBs from the most recent backup in /data/backups/latest/
+docker exec -it logboost-web /app/scripts/backup.sh restore --from /data/backups
+
+# Restore from a specific dated file
+docker exec -it logboost-web /app/scripts/backup.sh restore \
+    --admin /data/backups/logboost_admin_20260502_131908.db \
+    --threat /data/backups/threats_20260502_131908.db
+
+# Skip the confirmation prompt (for cron / unattended use)
+docker exec logboost-web /app/scripts/backup.sh restore --from /data/backups --yes
+```
+
+What it does, in order:
+
+1. **Verifies** each backup file (existence, non-zero size, `PRAGMA integrity_check`, expected tables present)
+2. **Prompts for confirmation** — type `RESTORE` to proceed, anything else aborts (skip with `--yes`)
+3. **Snapshots the current live DBs** as `*.pre-restore.{timestamp}.db` next to the originals (skip with `--no-safety-copy`)
+4. **Replaces the live DBs** using SQLite's `.restore` command — this is an atomic page-copy that respects open connections rather than ripping the file out from under the running app
+5. Tells you to run `docker restart` so workers re-open clean connections
+
+If something looks wrong after the restore, roll back by copying the `*.pre-restore.*.db` snapshot back to its original path. Once you've verified the restore looks correct, you can delete those snapshots.
+
+### Manual restore (escape hatch)
+
+If the script doesn't fit your situation, the underlying operation is just a SQLite file swap. Stop the container, copy your backup file into the volume at `/data/db/logboost_admin.db` and `/data/intel/threats.db`, restart. Make sure file ownership is `1000:1000` (the `logboost` user) before starting.
 
 ---
 

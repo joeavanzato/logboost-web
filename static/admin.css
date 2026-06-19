@@ -1,5 +1,29 @@
 /* LogBoost Admin Styles */
 
+/* Admin-scoped typography (Geist) — overrides app fonts without touching main UI */
+.admin-body {
+    --font-display: 'Geist', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+    --font-mono: 'Geist Mono', 'JetBrains Mono', monospace;
+    font-family: var(--font-display);
+    -webkit-font-smoothing: antialiased;
+    letter-spacing: -0.005em;
+}
+
+/* Restrained background atmosphere — single soft green wash from the top */
+.admin-body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: radial-gradient(90% 50% at 70% -10%, rgba(0, 255, 136, 0.06) 0%, transparent 55%);
+    pointer-events: none;
+    z-index: 0;
+}
+
+.admin-container {
+    position: relative;
+    z-index: 1;
+}
+
 /* Warning Banner */
 .warning-banner {
     background: rgba(239, 68, 68, 0.15);
@@ -93,21 +117,24 @@
 }
 
 .nav-item {
+    position: relative;
     display: flex;
     align-items: center;
     gap: 0.75rem;
-    padding: 0.75rem 1rem;
+    padding: 0.7rem 1rem;
     color: var(--text-secondary);
     text-decoration: none;
     font-size: 0.9rem;
     font-weight: 500;
     border-radius: var(--radius-md);
-    transition: all 0.2s ease;
+    transition: color 0.18s ease, background 0.18s ease;
 }
 
 .nav-item svg {
     width: 18px;
     height: 18px;
+    opacity: 0.85;
+    transition: opacity 0.18s ease;
 }
 
 .nav-item:hover {
@@ -115,9 +142,27 @@
     background: var(--bg-surface);
 }
 
+.nav-item:hover svg { opacity: 1; }
+
 .nav-item.active {
     color: var(--cyber-green);
     background: var(--cyber-green-glow);
+}
+
+.nav-item.active svg { opacity: 1; }
+
+/* Left accent bar on the active item */
+.nav-item.active::before {
+    content: '';
+    position: absolute;
+    left: -0.75rem;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 3px;
+    height: 60%;
+    background: var(--cyber-green);
+    border-radius: 0 3px 3px 0;
+    box-shadow: 0 0 10px rgba(0, 255, 136, 0.5);
 }
 
 .sidebar-footer {
@@ -392,7 +437,7 @@
 
 /* Admin Page */
 .admin-page {
-    max-width: 1200px;
+    max-width: none;
 }
 
 .page-header {
@@ -403,10 +448,11 @@
 }
 
 .page-header h1 {
-    font-size: 1.75rem;
+    font-size: 1.7rem;
     font-weight: 600;
+    letter-spacing: -0.02em;
     color: var(--text-primary);
-    margin-bottom: 0.25rem;
+    margin-bottom: 0.3rem;
 }
 
 .page-header p {
@@ -449,6 +495,12 @@
     background: var(--bg-surface);
     border: 1px solid var(--border-muted);
     border-radius: var(--radius-md);
+    transition: border-color 0.18s ease, transform 0.18s ease;
+}
+
+.status-card:hover {
+    transform: translateY(-2px);
+    border-color: var(--border-default);
 }
 
 .status-card.success {
@@ -832,7 +884,7 @@
     flex: 1;
 }
 
-.task-config-form label {
+.task-config-form label:not(.toggle-label) {
     display: block;
     font-size: 0.8rem;
     font-weight: 500;
@@ -1347,7 +1399,7 @@
 .form-actions {
     display: flex;
     gap: 0.75rem;
-    justify-content: flex-end;
+    justify-content: flex-start;
     padding-top: 1rem;
     border-top: 1px solid var(--border-muted);
     margin-top: 1rem;
@@ -1619,4 +1671,166 @@
     .api-key-input-wrapper {
         flex-direction: column;
     }
+}
+
+/* Collapsible Settings Cards */
+.settings-card.collapsible .settings-card-header {
+    cursor: pointer;
+    user-select: none;
+}
+
+.settings-card.collapsible .settings-card-header:hover {
+    background: var(--bg-elevated, rgba(255, 255, 255, 0.02));
+}
+
+.settings-card-toggle {
+    width: 18px;
+    height: 18px;
+    stroke: var(--text-muted);
+    flex-shrink: 0;
+    margin-left: auto;
+    transition: transform 0.2s ease;
+    align-self: center;
+}
+
+.settings-card-header > div .status-badge {
+    margin-top: 0.5rem;
+    margin-left: 0;
+    display: inline-block;
+}
+
+.settings-card.collapsed .settings-card-toggle {
+    transform: rotate(-90deg);
+}
+
+.settings-card.collapsible .settings-card-header {
+    transition: border-color 0.2s ease;
+}
+
+.settings-card.collapsed .settings-card-header {
+    border-bottom-color: transparent;
+}
+
+.settings-card-body {
+    display: grid;
+    grid-template-rows: 1fr;
+    transition: grid-template-rows 0.25s ease;
+}
+
+.settings-card-body-inner {
+    min-height: 0;
+    overflow: hidden;
+}
+
+.settings-card.collapsed .settings-card-body {
+    grid-template-rows: 0fr;
+}
+
+/* ============================================================
+   Shared components referenced by setup / threat-intel / settings
+   ============================================================ */
+
+/* Alternate page-header convention (setup, threat intel) */
+.admin-header {
+    margin-bottom: 2rem;
+}
+
+.admin-header h1 {
+    font-size: 1.7rem;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    color: var(--text-primary);
+    margin-bottom: 0.3rem;
+}
+
+.admin-subtitle {
+    font-size: 0.9rem;
+    color: var(--text-muted);
+}
+
+/* Multi-column form layout (settings) */
+.form-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 1rem 1.5rem;
+}
+
+.form-grid.two-col {
+    grid-template-columns: repeat(2, 1fr);
+}
+
+@media (max-width: 640px) {
+    .form-grid,
+    .form-grid.two-col {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* Custom checkbox (settings) */
+.checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 0.625rem;
+    cursor: pointer;
+    user-select: none;
+}
+
+.checkbox-label input {
+    position: absolute;
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.checkbox-custom {
+    flex-shrink: 0;
+    width: 18px;
+    height: 18px;
+    border: 1px solid var(--border-default);
+    border-radius: 5px;
+    background: var(--bg-elevated);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.checkbox-custom::after {
+    content: '';
+    width: 9px;
+    height: 9px;
+    border-radius: 2px;
+    background: var(--bg-deepest);
+    transform: scale(0);
+    transition: transform 0.15s ease;
+}
+
+.checkbox-label input:checked + .checkbox-custom {
+    background: var(--cyber-green);
+    border-color: var(--cyber-green);
+}
+
+.checkbox-label input:checked + .checkbox-custom::after {
+    transform: scale(1);
+}
+
+.checkbox-label input:focus-visible + .checkbox-custom {
+    box-shadow: 0 0 0 3px var(--cyber-green-glow);
+}
+
+/* Neutral default for status badges with no semantic modifier */
+.status-badge {
+    background: var(--bg-elevated);
+    color: var(--text-secondary);
+}
+
+/* Compact info box variant (settings) */
+.info-box.small {
+    padding: 0.875rem 1rem;
+    font-size: 0.825rem;
+}
+
+.info-box.small svg {
+    width: 18px;
+    height: 18px;
 }

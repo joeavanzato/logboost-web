@@ -28,7 +28,7 @@
     </script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500;600&family=Geist:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0" rel="stylesheet">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
@@ -54,7 +54,6 @@
                     <rect x="26" y="12" width="8" height="20" rx="2" fill="var(--cyber-green)" opacity="0.4"/>
                 </svg>
                 <span class="logo-text">LogBoost</span>
-                <span class="logo-badge">Web UI</span>
             </div>
             <div class="header-actions">
                 <button class="expand-toggle" onclick="toggleExpandedView()" title="Toggle wide view">
@@ -142,6 +141,12 @@
                         <line x1="6" y1="20" x2="6" y2="14"/>
                     </svg>
                     Graph Stats
+                </button>
+                <button class="tab" data-tab="intel-browser" onclick="switchTab('intel-browser')">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                    </svg>
+                    Intel Browser
                 </button>
             </div>
 
@@ -947,6 +952,164 @@
                             </svg>
                             <p>No graph data available</p>
                             <p class="hint">Add nodes to the graph to see statistics</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Intel Browser Tab Content -->
+            <div id="intel-browser-panel" class="tab-panel">
+                <div class="intel-browser">
+                    <div class="intel-browser-header">
+                        <div class="intel-browser-title">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                            </svg>
+                            <h2>Intel Browser</h2>
+                        </div>
+                        <p class="intel-browser-subtitle">Browse IOCs from <code>threats.db</code> by source or tag</p>
+                    </div>
+
+                    <div class="intel-subtabs">
+                        <button type="button" class="intel-subtab active" data-subtab="browser" onclick="intelSwitchSubTab('browser')">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <line x1="8" y1="6" x2="21" y2="6"/>
+                                <line x1="8" y1="12" x2="21" y2="12"/>
+                                <line x1="8" y1="18" x2="21" y2="18"/>
+                                <line x1="3" y1="6" x2="3.01" y2="6"/>
+                                <line x1="3" y1="12" x2="3.01" y2="12"/>
+                                <line x1="3" y1="18" x2="3.01" y2="18"/>
+                            </svg>
+                            Browser
+                        </button>
+                        <button type="button" class="intel-subtab" data-subtab="stats" onclick="intelSwitchSubTab('stats')">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <line x1="18" y1="20" x2="18" y2="10"/>
+                                <line x1="12" y1="20" x2="12" y2="4"/>
+                                <line x1="6" y1="20" x2="6" y2="14"/>
+                            </svg>
+                            Statistics
+                        </button>
+                    </div>
+
+                    <div class="intel-sub-panel active" id="intel-sub-browser">
+                    <div class="intel-filters">
+                        <div class="intel-filter">
+                            <label for="intel-source">Source</label>
+                            <select id="intel-source" onchange="intelLoadFirstPage()">
+                                <option value="">All sources</option>
+                            </select>
+                        </div>
+                        <div class="intel-filter">
+                            <label for="intel-tag">Tag</label>
+                            <select id="intel-tag" onchange="intelLoadFirstPage()">
+                                <option value="">All tags</option>
+                            </select>
+                        </div>
+                        <div class="intel-filter intel-filter-grow">
+                            <label for="intel-search">IP starts with</label>
+                            <input type="text" id="intel-search" placeholder="e.g., 192.168" oninput="intelDebouncedSearch()">
+                        </div>
+                        <div class="intel-filter-actions">
+                            <button type="button" class="btn-intel secondary" onclick="intelClearFilters()">Clear</button>
+                            <button type="button" class="btn-intel primary" onclick="intelExport()">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+                                    <polyline points="7 10 12 15 17 10"/>
+                                    <line x1="12" y1="15" x2="12" y2="3"/>
+                                </svg>
+                                Export CSV
+                            </button>
+                            <button type="button" class="btn-intel secondary" id="intel-enrich-btn" onclick="intelEnrichSelection()" disabled title="Ctrl/Cmd+click rows to select">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <circle cx="11" cy="11" r="8"/>
+                                    <path d="M21 21l-4.35-4.35"/>
+                                </svg>
+                                Enrich (0)
+                            </button>
+                            <button type="button" class="btn-intel secondary" id="intel-graph-btn" onclick="intelGraphSelection()" disabled title="Ctrl/Cmd+click rows to select">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <circle cx="18" cy="5" r="3"/>
+                                    <circle cx="6" cy="12" r="3"/>
+                                    <circle cx="18" cy="19" r="3"/>
+                                    <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/>
+                                    <line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>
+                                </svg>
+                                Graph (0)
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="intel-table-wrap">
+                        <table class="intel-table">
+                            <thead>
+                                <tr>
+                                    <th>IP</th>
+                                    <th>Sources</th>
+                                    <th>Tags</th>
+                                </tr>
+                            </thead>
+                            <tbody id="intel-rows">
+                                <tr class="intel-empty"><td colspan="3">Loading...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div class="intel-footer">
+                        <span class="intel-status" id="intel-status">—</span>
+                        <div class="intel-pager">
+                            <button type="button" class="btn-intel secondary" id="intel-prev" onclick="intelPrev()" disabled>← Prev</button>
+                            <button type="button" class="btn-intel secondary" id="intel-next" onclick="intelNext()" disabled>Next →</button>
+                        </div>
+                    </div>
+                    </div>
+
+                    <div class="intel-sub-panel" id="intel-sub-stats">
+                        <div class="intel-stats-summary">
+                            <div class="intel-stat-card">
+                                <div class="intel-stat-value" id="stat-total-entries">—</div>
+                                <div class="intel-stat-label">Total Entries</div>
+                            </div>
+                            <div class="intel-stat-card">
+                                <div class="intel-stat-value" id="stat-unique-ips">—</div>
+                                <div class="intel-stat-label">Unique IPs</div>
+                            </div>
+                            <div class="intel-stat-card">
+                                <div class="intel-stat-value" id="stat-source-count">—</div>
+                                <div class="intel-stat-label">Sources</div>
+                            </div>
+                            <div class="intel-stat-card">
+                                <div class="intel-stat-value" id="stat-tag-count">—</div>
+                                <div class="intel-stat-label">Tags</div>
+                            </div>
+                        </div>
+
+                        <div class="intel-stats-grid">
+                            <div class="intel-stats-section">
+                                <h3>Sources <span class="intel-stats-hint">Click to filter</span></h3>
+                                <div class="intel-stats-list" id="intel-stats-sources">Loading...</div>
+                            </div>
+                            <div class="intel-stats-section">
+                                <h3>Tags <span class="intel-stats-hint">Click to filter</span></h3>
+                                <div class="intel-stats-list" id="intel-stats-tags">Loading...</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Save / Discard / Cancel modal for graph clobber -->
+                    <div class="intel-modal-overlay" id="intel-graph-confirm" onclick="if(event.target===this)intelGraphConfirmCancel()">
+                        <div class="intel-modal">
+                            <div class="intel-modal-header">
+                                <h3>Replace current graph?</h3>
+                            </div>
+                            <div class="intel-modal-body">
+                                <p>The graph already contains <strong id="intel-modal-node-count">0</strong> node(s). What should happen with it before loading your selection?</p>
+                            </div>
+                            <div class="intel-modal-footer">
+                                <button type="button" class="btn-intel secondary" onclick="intelGraphConfirmCancel()">Cancel</button>
+                                <button type="button" class="btn-intel secondary" onclick="intelGraphConfirmDiscard()">Discard</button>
+                                <button type="button" class="btn-intel primary" onclick="intelGraphConfirmSave()">Save first</button>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -1800,12 +1963,17 @@
             // Hide/show results container based on tab
             const resultsContainer = document.getElementById('results-container');
             if (resultsContainer) {
-                resultsContainer.style.display = (tabName === 'graph' || tabName === 'graph-stats') ? 'none' : '';
+                resultsContainer.style.display = (tabName === 'graph' || tabName === 'graph-stats' || tabName === 'intel-browser') ? 'none' : '';
             }
-            
+
             // Refresh graph stats when switching to that tab
             if (tabName === 'graph-stats' && window.refreshGraphStats) {
                 window.refreshGraphStats();
+            }
+
+            // Lazy-init intel browser on first activation
+            if (tabName === 'intel-browser' && window.intelInit) {
+                window.intelInit();
             }
             
             // Update URL hash
@@ -1817,7 +1985,7 @@
         // Handle initial URL hash and hash changes
         function handleHashChange() {
             const hash = window.location.hash.slice(1); // Remove #
-            const validTabs = ['adhoc', 'upload', 'graph', 'graph-stats'];
+            const validTabs = ['adhoc', 'upload', 'graph', 'graph-stats', 'intel-browser'];
             if (validTabs.includes(hash)) {
                 switchTab(hash, false);
             }
@@ -2447,21 +2615,35 @@
         }
 
         function graphFromModal() {
-            // Get IP from current modal row
-            const ipCell = document.querySelector('#modal-content .detail-row');
-            if (ipCell) {
-                // Find IP in the modal content
-                const rows = document.querySelectorAll('#modal-content .detail-row');
-                for (const row of rows) {
-                    const label = row.querySelector('.detail-label')?.textContent || '';
-                    const value = row.querySelector('.detail-value')?.textContent || '';
-                    if (label.toLowerCase().includes('ip') || /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(value)) {
-                        window.graphManager.promptGraph(value, 'ip');
-                        closeModal();
-                        return;
-                    }
+            // Modal fields are rendered by createFieldHtml() as
+            //   <div class="modal-field">
+            //     <div class="modal-field-header"><span class="modal-field-label">IP</span></div>
+            //     <span class="modal-field-value">1.2.3.4</span>
+            //   </div>
+            const fields = document.querySelectorAll('#modal-content .modal-field');
+            const ipv4 = /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/;
+            const ipv6 = /^[0-9a-f:]+$/i;
+
+            // Pass 1: exact "IP" label (lb_IP -> "IP" after the lb_ prefix is stripped).
+            for (const f of fields) {
+                const label = (f.querySelector('.modal-field-label')?.textContent || '').trim().toLowerCase();
+                const value = (f.querySelector('.modal-field-value')?.textContent || '').trim();
+                if (label === 'ip' && value && value !== '—') {
+                    window.graphManager.promptGraph(value, 'ip');
+                    closeModal();
+                    return;
                 }
             }
+            // Pass 2: any field whose value looks like an IPv4/IPv6 address.
+            for (const f of fields) {
+                const value = (f.querySelector('.modal-field-value')?.textContent || '').trim();
+                if (ipv4.test(value) || (value.includes(':') && ipv6.test(value))) {
+                    window.graphManager.promptGraph(value, 'ip');
+                    closeModal();
+                    return;
+                }
+            }
+            console.warn('[graphFromModal] no IP found in row modal');
         }
 
         // Graph modal helpers
@@ -8421,6 +8603,885 @@
 
         // Initialize graph manager
         window.graphManager = new GraphManager();
+    })();
+    </script>
+
+    <style>
+    /* ===== Intel Browser ===== */
+    .intel-browser {
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+        padding: 1.25rem;
+        background: var(--bg-secondary, var(--bg-surface));
+        border: 1px solid var(--border-color, var(--border-default));
+        border-radius: var(--radius-lg, 12px);
+    }
+
+    .intel-browser-header {
+        border-bottom: 1px solid var(--border-color, var(--border-default));
+        padding-bottom: 1rem;
+    }
+
+    .intel-browser-title {
+        display: flex;
+        align-items: center;
+        gap: 0.6rem;
+    }
+
+    .intel-browser-title svg {
+        width: 22px;
+        height: 22px;
+        stroke: var(--cyber-green);
+    }
+
+    .intel-browser-title h2 {
+        margin: 0;
+        font-size: 1.15rem;
+        font-weight: 600;
+    }
+
+    .intel-browser-subtitle {
+        margin: 0.4rem 0 0;
+        font-size: 0.85rem;
+        color: var(--text-muted);
+    }
+
+    .intel-browser-subtitle code {
+        font-family: var(--font-mono, 'JetBrains Mono', monospace);
+        font-size: 0.8rem;
+        padding: 1px 6px;
+        background: var(--bg-elevated);
+        border-radius: 4px;
+    }
+
+    .intel-filters {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        align-items: flex-end;
+    }
+
+    .intel-filter {
+        display: flex;
+        flex-direction: column;
+        gap: 0.35rem;
+        min-width: 160px;
+    }
+
+    .intel-filter-grow {
+        flex: 1;
+        min-width: 200px;
+    }
+
+    .intel-filter label {
+        font-size: 0.75rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--text-muted);
+    }
+
+    .intel-filter select,
+    .intel-filter input {
+        appearance: none;
+        -webkit-appearance: none;
+        padding: 0.55rem 0.75rem;
+        font-family: var(--font-display);
+        font-size: 0.875rem;
+        color: var(--text-primary);
+        background: var(--bg-elevated);
+        border: 1px solid var(--border-default, var(--border-color));
+        border-radius: var(--radius-md, 6px);
+        transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    }
+
+    .intel-filter select {
+        padding-right: 2rem;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23808a99' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+        background-repeat: no-repeat;
+        background-position: right 0.6rem center;
+    }
+
+    .intel-filter input::placeholder {
+        color: var(--text-muted);
+    }
+
+    .intel-filter select:focus,
+    .intel-filter input:focus {
+        outline: none;
+        border-color: var(--cyber-green);
+        box-shadow: 0 0 0 3px var(--cyber-green-glow);
+    }
+
+    .intel-filter-actions {
+        display: flex;
+        gap: 0.5rem;
+        margin-left: auto;
+    }
+
+    .btn-intel {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        padding: 0.55rem 0.95rem;
+        font-family: var(--font-display);
+        font-size: 0.875rem;
+        font-weight: 500;
+        border-radius: var(--radius-md, 6px);
+        border: 1px solid transparent;
+        cursor: pointer;
+        transition: all 0.15s ease;
+    }
+
+    .btn-intel svg {
+        width: 14px;
+        height: 14px;
+    }
+
+    .btn-intel.primary {
+        color: var(--bg-deepest);
+        background: var(--cyber-green);
+    }
+
+    .btn-intel.primary:hover {
+        background: var(--cyber-green-dim, var(--cyber-green));
+    }
+
+    .btn-intel.secondary {
+        color: var(--text-primary);
+        background: var(--bg-elevated);
+        border-color: var(--border-default, var(--border-color));
+    }
+
+    .btn-intel.secondary:hover {
+        border-color: var(--cyber-green);
+        background: var(--cyber-green-glow);
+    }
+
+    .btn-intel:disabled {
+        opacity: 0.5;
+        pointer-events: none;
+    }
+
+    .intel-table-wrap {
+        max-height: 60vh;
+        overflow: auto;
+        border: 1px solid var(--border-color, var(--border-default));
+        border-radius: var(--radius-md, 6px);
+        background: var(--bg-elevated);
+    }
+
+    .intel-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-family: var(--font-display);
+        font-size: 0.875rem;
+    }
+
+    .intel-table thead th {
+        position: sticky;
+        top: 0;
+        background: var(--bg-tertiary, var(--bg-surface));
+        text-align: left;
+        font-size: 0.72rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--text-muted);
+        padding: 0.65rem 0.85rem;
+        border-bottom: 1px solid var(--border-color, var(--border-default));
+        z-index: 1;
+    }
+
+    .intel-table tbody td {
+        padding: 0.55rem 0.85rem;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+        color: var(--text-primary);
+    }
+
+    .intel-table tbody tr:nth-child(even) td {
+        background: rgba(255, 255, 255, 0.025);
+    }
+
+    .intel-table tbody tr:hover td {
+        background: var(--cyber-green-glow);
+    }
+
+    .intel-table tbody tr.selected td {
+        background: rgba(0, 255, 136, 0.12) !important;
+    }
+
+    .intel-table tbody tr.selected td:first-child {
+        box-shadow: inset 3px 0 0 var(--cyber-green);
+    }
+
+    .intel-table tbody tr {
+        cursor: pointer;
+        user-select: none;
+    }
+
+    /* Confirm modal */
+    .intel-modal-overlay {
+        display: none;
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.75);
+        backdrop-filter: blur(4px);
+        z-index: 1500;
+        align-items: center;
+        justify-content: center;
+        padding: 1rem;
+    }
+    .intel-modal-overlay.active { display: flex; }
+    .intel-modal {
+        background: var(--bg-elevated);
+        border: 1px solid var(--border-default, var(--border-color));
+        border-radius: var(--radius-lg, 12px);
+        width: 100%;
+        max-width: 460px;
+        box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+    }
+    .intel-modal-header {
+        padding: 1rem 1.5rem;
+        border-bottom: 1px solid var(--border-color, var(--border-default));
+    }
+    .intel-modal-header h3 { margin: 0; font-size: 1.05rem; }
+    .intel-modal-body {
+        padding: 1.25rem 1.5rem;
+        font-size: 0.9rem;
+        color: var(--text-secondary, var(--text-primary));
+    }
+    .intel-modal-footer {
+        display: flex;
+        justify-content: flex-end;
+        gap: 0.5rem;
+        padding: 1rem 1.5rem;
+        border-top: 1px solid var(--border-color, var(--border-default));
+        background: var(--bg-tertiary, var(--bg-surface));
+        border-bottom-left-radius: var(--radius-lg, 12px);
+        border-bottom-right-radius: var(--radius-lg, 12px);
+    }
+
+    .intel-table tbody td:first-child {
+        font-family: var(--font-mono, 'JetBrains Mono', monospace);
+        white-space: nowrap;
+        vertical-align: top;
+    }
+
+    .intel-table tbody td:nth-child(2),
+    .intel-table tbody td:nth-child(3) {
+        word-break: break-word;
+        vertical-align: top;
+    }
+
+    .intel-empty td {
+        text-align: center;
+        padding: 2rem !important;
+        color: var(--text-muted);
+        background: transparent !important;
+    }
+
+    .intel-footer {
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+    }
+
+    .intel-status {
+        font-size: 0.85rem;
+        color: var(--text-muted);
+    }
+
+    .intel-pager {
+        display: flex;
+        gap: 0.5rem;
+        margin-left: auto;
+    }
+
+    /* Sub-tabs */
+    .intel-subtabs {
+        display: flex;
+        gap: 0.25rem;
+        border-bottom: 1px solid var(--border-color, var(--border-default));
+        margin-top: -0.25rem;
+    }
+
+    .intel-subtab {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.45rem;
+        padding: 0.6rem 1rem;
+        font-family: var(--font-display);
+        font-size: 0.85rem;
+        font-weight: 500;
+        color: var(--text-muted);
+        background: transparent;
+        border: none;
+        border-bottom: 2px solid transparent;
+        cursor: pointer;
+        transition: color 0.15s ease, border-color 0.15s ease;
+        margin-bottom: -1px;
+    }
+
+    .intel-subtab svg {
+        width: 14px;
+        height: 14px;
+    }
+
+    .intel-subtab:hover {
+        color: var(--text-primary);
+    }
+
+    .intel-subtab.active {
+        color: var(--cyber-green);
+        border-bottom-color: var(--cyber-green);
+    }
+
+    .intel-sub-panel {
+        display: none;
+        flex-direction: column;
+        gap: 1rem;
+    }
+
+    .intel-sub-panel.active {
+        display: flex;
+    }
+
+    /* Stats summary cards */
+    .intel-stats-summary {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+        gap: 0.75rem;
+    }
+
+    .intel-stat-card {
+        padding: 1rem 1.25rem;
+        background: var(--bg-elevated);
+        border: 1px solid var(--border-color, var(--border-default));
+        border-radius: var(--radius-md, 6px);
+    }
+
+    .intel-stat-value {
+        font-family: var(--font-mono, 'JetBrains Mono', monospace);
+        font-size: 1.5rem;
+        font-weight: 600;
+        color: var(--cyber-green);
+        line-height: 1.1;
+    }
+
+    .intel-stat-label {
+        margin-top: 0.35rem;
+        font-size: 0.72rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--text-muted);
+    }
+
+    /* Stats lists (sources + tags) */
+    .intel-stats-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 1rem;
+    }
+
+    @media (max-width: 800px) {
+        .intel-stats-grid { grid-template-columns: 1fr; }
+    }
+
+    .intel-stats-section {
+        background: var(--bg-elevated);
+        border: 1px solid var(--border-color, var(--border-default));
+        border-radius: var(--radius-md, 6px);
+        overflow: hidden;
+    }
+
+    .intel-stats-section h3 {
+        margin: 0;
+        padding: 0.7rem 0.95rem;
+        font-size: 0.85rem;
+        font-weight: 600;
+        background: var(--bg-tertiary, var(--bg-surface));
+        border-bottom: 1px solid var(--border-color, var(--border-default));
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+    }
+
+    .intel-stats-hint {
+        font-size: 0.7rem;
+        font-weight: 500;
+        color: var(--text-muted);
+        text-transform: none;
+        letter-spacing: normal;
+    }
+
+    .intel-stats-list {
+        max-height: 50vh;
+        overflow-y: auto;
+        padding: 0.4rem;
+    }
+
+    .intel-stat-row {
+        position: relative;
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        width: 100%;
+        padding: 0.5rem 0.7rem;
+        background: transparent;
+        border: none;
+        border-radius: 4px;
+        color: var(--text-primary);
+        font-family: var(--font-display);
+        font-size: 0.85rem;
+        text-align: left;
+        cursor: pointer;
+        transition: background 0.12s ease;
+        overflow: hidden;
+    }
+
+    .intel-stat-row:hover {
+        background: var(--cyber-green-glow);
+    }
+
+    .intel-stat-bar {
+        position: absolute;
+        left: 0;
+        top: 0;
+        bottom: 0;
+        background: rgba(0, 255, 136, 0.07);
+        z-index: 0;
+        transition: width 0.2s ease;
+    }
+
+    .intel-stat-row > .intel-stat-name,
+    .intel-stat-row > .intel-stat-count {
+        position: relative;
+        z-index: 1;
+    }
+
+    .intel-stat-name {
+        flex: 1;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .intel-stat-count {
+        font-family: var(--font-mono, 'JetBrains Mono', monospace);
+        font-size: 0.8rem;
+        color: var(--text-muted);
+        font-variant-numeric: tabular-nums;
+    }
+    </style>
+
+    <script>
+    (function() {
+        const PAGE_SIZE = 100;
+        let offset = 0;
+        let hasMore = false;
+        let initialized = false;
+        let searchTimer = null;
+        let inflight = null;
+
+        const $sources = () => document.getElementById('intel-source');
+        const $tags = () => document.getElementById('intel-tag');
+        const $search = () => document.getElementById('intel-search');
+        const $rows = () => document.getElementById('intel-rows');
+        const $status = () => document.getElementById('intel-status');
+        const $prev = () => document.getElementById('intel-prev');
+        const $next = () => document.getElementById('intel-next');
+
+        function currentParams() {
+            const params = new URLSearchParams();
+            const src = $sources().value;
+            const tag = $tags().value;
+            const q = ($search().value || '').trim();
+            if (src) params.set('source_id', src);
+            if (tag) params.set('tag_id', tag);
+            if (q) params.set('q', q);
+            return params;
+        }
+
+        function setRowsHTML(html) {
+            $rows().innerHTML = html;
+        }
+
+        function escapeHtml(s) {
+            return (s == null ? '' : String(s))
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+        }
+
+        async function loadFilters() {
+            try {
+                const [sRes, tRes] = await Promise.all([
+                    fetch('/api/intel/sources').then(r => r.json()),
+                    fetch('/api/intel/tags').then(r => r.json()),
+                ]);
+                const s = $sources();
+                const t = $tags();
+                const sources = sRes.sources || [];
+                const tags = tRes.tags || [];
+                s.innerHTML = '<option value="">All sources</option>' +
+                    sources.map(x => `<option value="${x.id}">${escapeHtml(x.name)}</option>`).join('');
+                t.innerHTML = '<option value="">All tags</option>' +
+                    tags.map(x => `<option value="${x.id}">${escapeHtml(x.value)}</option>`).join('');
+            } catch (e) {
+                // Filter dropdowns may stay empty if threats.db is missing — table itself surfaces the error
+            }
+        }
+
+        async function loadPage() {
+            if (inflight) inflight.abort();
+            const ctrl = new AbortController();
+            inflight = ctrl;
+
+            const params = currentParams();
+            params.set('limit', PAGE_SIZE);
+            params.set('offset', offset);
+
+            setRowsHTML('<tr class="intel-empty"><td colspan="3">Loading...</td></tr>');
+            $prev().disabled = true;
+            $next().disabled = true;
+
+            try {
+                const res = await fetch('/api/intel/iocs?' + params.toString(), { signal: ctrl.signal });
+                const data = await res.json();
+                if (data.error) {
+                    setRowsHTML(`<tr class="intel-empty"><td colspan="3">Error: ${escapeHtml(data.error)}</td></tr>`);
+                    $status().textContent = '—';
+                    return;
+                }
+                const rows = data.rows || [];
+                hasMore = !!data.has_more;
+
+                if (rows.length === 0) {
+                    const msg = offset === 0 ? 'No IOCs match the current filters.' : 'No more rows.';
+                    setRowsHTML(`<tr class="intel-empty"><td colspan="3">${msg}</td></tr>`);
+                } else {
+                    setRowsHTML(rows.map(r => {
+                        const sel = selectedIPs.has(r.ip) ? ' class="selected"' : '';
+                        return `<tr data-ip="${escapeHtml(r.ip)}"${sel}><td>${escapeHtml(r.ip)}</td><td>${escapeHtml(r.sources)}</td><td>${escapeHtml(r.tags)}</td></tr>`;
+                    }).join(''));
+                }
+                lastClickedIP = null;
+
+                const start = rows.length === 0 ? 0 : offset + 1;
+                const end = offset + rows.length;
+                $status().textContent = rows.length === 0
+                    ? 'No results'
+                    : `Showing ${start.toLocaleString()}–${end.toLocaleString()}${hasMore ? ' (more available)' : ''}`;
+                $prev().disabled = offset === 0;
+                $next().disabled = !hasMore;
+            } catch (err) {
+                if (err.name === 'AbortError') return;
+                setRowsHTML(`<tr class="intel-empty"><td colspan="3">Network error: ${escapeHtml(err.message || '')}</td></tr>`);
+                $status().textContent = '—';
+            } finally {
+                if (inflight === ctrl) inflight = null;
+            }
+        }
+
+        window.intelInit = function() {
+            if (initialized) return;
+            initialized = true;
+            loadFilters().then(loadPage);
+        };
+
+        window.intelLoadFirstPage = function() {
+            offset = 0;
+            clearSelection();
+            loadPage();
+        };
+
+        window.intelDebouncedSearch = function() {
+            clearTimeout(searchTimer);
+            searchTimer = setTimeout(() => { offset = 0; clearSelection(); loadPage(); }, 300);
+        };
+
+        window.intelClearFilters = function() {
+            $sources().value = '';
+            $tags().value = '';
+            $search().value = '';
+            offset = 0;
+            clearSelection();
+            loadPage();
+        };
+
+        window.intelPrev = function() {
+            offset = Math.max(0, offset - PAGE_SIZE);
+            loadPage();
+        };
+
+        window.intelNext = function() {
+            if (!hasMore) return;
+            offset += PAGE_SIZE;
+            loadPage();
+        };
+
+        window.intelExport = function() {
+            const params = currentParams();
+            window.location.href = '/api/intel/export?' + params.toString();
+        };
+
+        // ===== Sub-tabs (Browser / Statistics) =====
+        let statsLoaded = false;
+
+        window.intelSwitchSubTab = function(name) {
+            document.querySelectorAll('.intel-subtab').forEach(b =>
+                b.classList.toggle('active', b.dataset.subtab === name));
+            document.querySelectorAll('.intel-sub-panel').forEach(p =>
+                p.classList.toggle('active', p.id === `intel-sub-${name}`));
+            if (name === 'stats' && !statsLoaded) loadStats();
+        };
+
+        async function loadStats() {
+            const srcEl = document.getElementById('intel-stats-sources');
+            const tagEl = document.getElementById('intel-stats-tags');
+            srcEl.textContent = 'Loading...';
+            tagEl.textContent = 'Loading...';
+
+            try {
+                const res = await fetch('/api/intel/stats');
+                const data = await res.json();
+                if (data.error) {
+                    srcEl.textContent = 'Error: ' + data.error;
+                    tagEl.textContent = 'Error: ' + data.error;
+                    return;
+                }
+                document.getElementById('stat-total-entries').textContent = (data.total_entries || 0).toLocaleString();
+                document.getElementById('stat-unique-ips').textContent = (data.unique_ips || 0).toLocaleString();
+                document.getElementById('stat-source-count').textContent = (data.sources || []).length.toLocaleString();
+                document.getElementById('stat-tag-count').textContent = (data.tags || []).length.toLocaleString();
+
+                srcEl.innerHTML = renderStatList(data.sources || [], 'source');
+                tagEl.innerHTML = renderStatList(data.tags || [], 'tag');
+                statsLoaded = true;
+            } catch (err) {
+                srcEl.textContent = 'Network error: ' + (err.message || '');
+                tagEl.textContent = 'Network error: ' + (err.message || '');
+            }
+        }
+
+        function renderStatList(items, kind) {
+            if (items.length === 0) return '<div style="padding:1rem;color:var(--text-muted)">No data</div>';
+            const max = Math.max(...items.map(i => i.count || 0)) || 1;
+            return items.map(i => {
+                const label = kind === 'source' ? i.name : i.value;
+                const pct = (i.count || 0) / max * 100;
+                return `<button class="intel-stat-row" type="button" onclick="intelPivotTo('${kind}', ${i.id})" title="Filter Browser by ${kind}: ${escapeHtml(label)}">
+                    <span class="intel-stat-bar" style="width: ${pct.toFixed(1)}%"></span>
+                    <span class="intel-stat-name">${escapeHtml(label)}</span>
+                    <span class="intel-stat-count">${(i.count || 0).toLocaleString()}</span>
+                </button>`;
+            }).join('');
+        }
+
+        window.intelPivotTo = function(kind, id) {
+            if (kind === 'source') {
+                $sources().value = String(id);
+            } else {
+                $tags().value = String(id);
+            }
+            offset = 0;
+            clearSelection();
+            intelSwitchSubTab('browser');
+            loadPage();
+        };
+
+        // ===== Row selection (Ctrl/Cmd+click toggle, Shift+click range) =====
+        const SELECTION_CAP = 100;
+        const selectedIPs = new Set();
+        let lastClickedIP = null;
+        let pendingGraphAction = null;
+
+        function clearSelection() {
+            if (selectedIPs.size === 0) return;
+            selectedIPs.clear();
+            updateSelectionUI();
+        }
+
+        function updateSelectionUI() {
+            const count = selectedIPs.size;
+            const enrich = document.getElementById('intel-enrich-btn');
+            const graph = document.getElementById('intel-graph-btn');
+            if (enrich) {
+                enrich.innerHTML = enrich.innerHTML.replace(/Enrich \(\d+\)/, `Enrich (${count})`);
+                enrich.disabled = count === 0;
+            }
+            if (graph) {
+                graph.innerHTML = graph.innerHTML.replace(/Graph \(\d+\)/, `Graph (${count})`);
+                graph.disabled = count === 0;
+            }
+            // Sync row classes
+            $rows().querySelectorAll('tr[data-ip]').forEach(tr => {
+                tr.classList.toggle('selected', selectedIPs.has(tr.dataset.ip));
+            });
+        }
+
+        function toggleSelection(ip) {
+            if (selectedIPs.has(ip)) {
+                selectedIPs.delete(ip);
+            } else {
+                if (selectedIPs.size >= SELECTION_CAP) {
+                    showToast(`Selection capped at ${SELECTION_CAP} IPs`, 'warning');
+                    return;
+                }
+                selectedIPs.add(ip);
+            }
+        }
+
+        function rangeSelectFromCurrentPage(fromIP, toIP) {
+            const rows = Array.from($rows().querySelectorAll('tr[data-ip]'));
+            const ips = rows.map(r => r.dataset.ip);
+            const a = ips.indexOf(fromIP);
+            const b = ips.indexOf(toIP);
+            if (a < 0 || b < 0) return;
+            const [lo, hi] = a <= b ? [a, b] : [b, a];
+            for (let i = lo; i <= hi; i++) {
+                if (selectedIPs.has(ips[i])) continue;
+                if (selectedIPs.size >= SELECTION_CAP) {
+                    showToast(`Selection capped at ${SELECTION_CAP} IPs (range truncated)`, 'warning');
+                    break;
+                }
+                selectedIPs.add(ips[i]);
+            }
+        }
+
+        // Delegated row click handler
+        document.getElementById('intel-rows').addEventListener('click', (e) => {
+            const tr = e.target.closest('tr[data-ip]');
+            if (!tr) return;
+            const ip = tr.dataset.ip;
+            if (e.shiftKey && lastClickedIP) {
+                rangeSelectFromCurrentPage(lastClickedIP, ip);
+            } else if (e.ctrlKey || e.metaKey) {
+                toggleSelection(ip);
+            } else {
+                return; // plain click does nothing
+            }
+            lastClickedIP = ip;
+            updateSelectionUI();
+        });
+
+        function showToast(msg, kind) {
+            if (typeof window.showToast === 'function') {
+                window.showToast(msg, kind || 'info');
+            } else {
+                console.log('[intel]', msg);
+            }
+        }
+
+        // ===== Enrich action (auto-submits the adhoc form) =====
+        window.intelEnrichSelection = function() {
+            if (selectedIPs.size === 0) return;
+            const ips = Array.from(selectedIPs);
+            const form = document.querySelector('#adhoc-panel form.enrichment-form');
+            const textarea = form?.querySelector('textarea[name="text"]');
+            if (!form || !textarea) {
+                showToast('Could not find the enrichment form', 'error');
+                return;
+            }
+            textarea.value = ips.join('\n');
+            ['dns', 'whois', 'idb', 'useti'].forEach(name => {
+                const cb = form.querySelector(`input[type="checkbox"][name="${name}"]`);
+                if (cb && !cb.disabled) cb.checked = true;
+            });
+            switchTab('adhoc');
+            // Auto-submit (HTMX listens for form submit events)
+            if (typeof form.requestSubmit === 'function') {
+                form.requestSubmit();
+            } else {
+                form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+            }
+        };
+
+        // ===== Graph action with Save / Discard / Cancel prompt =====
+        window.intelGraphSelection = function() {
+            if (selectedIPs.size === 0) return;
+            const gm = window.graphManager;
+            const ips = Array.from(selectedIPs);
+            if (!gm || gm.nodes.length === 0) {
+                buildIntelGraph(ips);
+                return;
+            }
+            // Prompt
+            document.getElementById('intel-modal-node-count').textContent = gm.nodes.length;
+            pendingGraphAction = ips;
+            document.getElementById('intel-graph-confirm').classList.add('active');
+        };
+
+        window.intelGraphConfirmCancel = function() {
+            pendingGraphAction = null;
+            document.getElementById('intel-graph-confirm').classList.remove('active');
+        };
+
+        window.intelGraphConfirmDiscard = function() {
+            const ips = pendingGraphAction;
+            pendingGraphAction = null;
+            document.getElementById('intel-graph-confirm').classList.remove('active');
+            if (ips) buildIntelGraph(ips);
+        };
+
+        window.intelGraphConfirmSave = function() {
+            const ips = pendingGraphAction;
+            pendingGraphAction = null;
+            document.getElementById('intel-graph-confirm').classList.remove('active');
+            if (!ips) return;
+            const gm = window.graphManager;
+            const wasModified = gm.isModified;
+            const saveModal = document.getElementById('graph-save-modal');
+            if (!gm || !saveModal) {
+                buildIntelGraph(ips);
+                return;
+            }
+            // Open save modal; poll until it closes (saved or cancelled)
+            gm.saveGraph();
+            const start = Date.now();
+            const tick = () => {
+                const stillOpen = saveModal.classList.contains('active');
+                const justSaved = wasModified && !gm.isModified;
+                if (!stillOpen) {
+                    if (justSaved || !wasModified) {
+                        buildIntelGraph(ips);
+                    } else {
+                        showToast('Save cancelled — graph unchanged', 'info');
+                    }
+                    return;
+                }
+                if (Date.now() - start > 120000) return; // 2-min safety timeout
+                setTimeout(tick, 150);
+            };
+            setTimeout(tick, 250);
+        };
+
+        function buildIntelGraph(ips) {
+            const gm = window.graphManager;
+            if (!gm) {
+                showToast('Graph manager unavailable', 'error');
+                return;
+            }
+            switchTab('graph');
+            // Reset directly (avoid the confirm dialog inside newGraph())
+            gm.nodes = [];
+            gm.edges = [];
+            gm.graphId = null;
+            gm.graphName = 'Intel Browser Selection';
+            gm.isModified = false;
+            if (gm.geoQueueTimer) {
+                clearTimeout(gm.geoQueueTimer);
+                gm.geoQueueTimer = null;
+            }
+            if (gm.pendingGeoIPs && typeof gm.pendingGeoIPs.clear === 'function') {
+                gm.pendingGeoIPs.clear();
+            }
+            if (typeof gm.showGraph === 'function') gm.showGraph();
+            ips.forEach((ip, i) => gm.addNode(ip, 'ip', i === 0));
+            showToast(`Loaded ${ips.length} IP(s) into graph`, 'success');
+        }
     })();
     </script>
 </body>

@@ -246,7 +246,7 @@
 <div id="mmdb-upload-modal" class="modal" style="display: none;">
     <div class="modal-content modal-content-wide">
         <div class="modal-header">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 24px; height: 24px; color: var(--accent);">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 24px; height: 24px; color: var(--cyber-green);">
                 <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
                 <polyline points="17 8 12 3 7 8"/>
                 <line x1="12" y1="3" x2="12" y2="15"/>
@@ -266,7 +266,7 @@
                     <polyline points="17 8 12 3 7 8"/>
                     <line x1="12" y1="3" x2="12" y2="15"/>
                 </svg>
-                <p><strong style="color: var(--accent);">Click to select files</strong> or drag and drop</p>
+                <p><strong style="color: var(--cyber-green);">Click to select files</strong> or drag and drop</p>
                 <p style="font-size: 12px; color: #666;">.mmdb files only</p>
             </div>
 
@@ -305,79 +305,93 @@
 <style>
 .modal {
     position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background: rgba(0, 0, 0, 0.5);
+    inset: 0;
+    background: rgba(4, 6, 9, 0.7);
+    backdrop-filter: blur(3px);
+    -webkit-backdrop-filter: blur(3px);
     display: flex;
     align-items: center;
     justify-content: center;
     z-index: 1000;
+    animation: modal-fade 0.18s ease both;
 }
+@keyframes modal-fade { from { opacity: 0; } to { opacity: 1; } }
 .modal-content {
-    background: #1e1e2e;
-    border: 1px solid #3d3d5c;
-    border-radius: 8px;
-    padding: 24px;
-    max-width: 400px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-lg);
+    padding: 1.5rem;
+    max-width: 420px;
     width: 90%;
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+    box-shadow: var(--shadow-lg);
+    animation: modal-rise 0.22s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@keyframes modal-rise {
+    from { opacity: 0; transform: translateY(10px); }
+    to   { opacity: 1; transform: translateY(0); }
 }
 .modal-header {
     display: flex;
     align-items: center;
-    gap: 12px;
-    margin-bottom: 16px;
+    gap: 0.75rem;
+    margin-bottom: 1rem;
 }
 .modal-header h3 {
     margin: 0;
-    color: #e0e0e0;
+    font-size: 1.05rem;
+    font-weight: 600;
+    color: var(--text-primary);
 }
 .modal-content p {
-    color: #a0a0a0;
-    margin-bottom: 20px;
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+    line-height: 1.6;
+    margin-bottom: 1.25rem;
 }
 .modal-content a {
-    color: var(--accent);
+    color: var(--cyber-green);
+    text-decoration: none;
 }
+.modal-content a:hover { text-decoration: underline; }
 .modal-actions {
     display: flex;
-    gap: 12px;
+    gap: 0.75rem;
     justify-content: flex-end;
 }
 .modal-content-wide {
-    max-width: 500px;
+    max-width: 520px;
 }
 .modal-close {
     margin-left: auto;
     background: none;
     border: none;
-    color: #888;
+    color: var(--text-muted);
     font-size: 24px;
     cursor: pointer;
     padding: 0;
     line-height: 1;
+    transition: color 0.18s ease;
 }
 .modal-close:hover {
-    color: #e0e0e0;
+    color: var(--text-primary);
 }
 .upload-area {
-    border: 2px dashed #3d3d5c;
-    border-radius: 8px;
-    padding: 32px;
+    border: 1.5px dashed var(--border-default);
+    border-radius: var(--radius-md);
+    padding: 2rem;
     text-align: center;
     cursor: pointer;
-    transition: all 0.2s;
-    margin-bottom: 16px;
+    transition: border-color 0.18s ease, background 0.18s ease;
+    margin-bottom: 1rem;
+    background: var(--bg-deep);
 }
 .upload-area:hover {
-    border-color: var(--accent);
-    background: rgba(0, 212, 170, 0.05);
+    border-color: var(--border-focus, rgba(0, 255, 136, 0.4));
+    background: rgba(0, 255, 136, 0.03);
 }
 .upload-area.dragover {
-    border-color: var(--accent);
-    background: rgba(0, 212, 170, 0.1);
+    border-color: var(--cyber-green);
+    background: var(--cyber-green-glow);
 }
 .upload-area input[type="file"] {
     display: none;
@@ -386,50 +400,54 @@
     margin: 4px 0;
 }
 .file-checklist {
-    background: #12121a;
-    border-radius: 6px;
-    padding: 12px;
-    margin-bottom: 16px;
+    background: var(--bg-deep);
+    border: 1px solid var(--border-muted);
+    border-radius: var(--radius-sm);
+    padding: 0.5rem;
+    margin-bottom: 1rem;
 }
 .file-item {
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 8px;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 13px;
+    gap: 0.625rem;
+    padding: 0.5rem;
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
 }
 .file-item .file-status {
-    width: 10px;
-    height: 10px;
+    width: 9px;
+    height: 9px;
     border-radius: 50%;
-    background: #3d3d5c;
+    background: var(--text-hint);
     flex-shrink: 0;
+    transition: background 0.18s ease, box-shadow 0.18s ease;
 }
 .file-item.selected .file-status {
-    background: #10b981;
+    background: var(--cyber-green);
+    box-shadow: 0 0 8px rgba(0, 255, 136, 0.6);
 }
 .file-item .file-name {
-    color: #888;
+    color: var(--text-muted);
 }
 .file-item.selected .file-name {
-    color: #e0e0e0;
+    color: var(--text-primary);
 }
 .upload-status {
-    padding: 12px;
-    border-radius: 6px;
-    font-size: 14px;
-    margin-bottom: 16px;
+    padding: 0.75rem 0.875rem;
+    border-radius: var(--radius-sm);
+    font-size: 0.85rem;
+    font-family: var(--font-mono);
+    margin-bottom: 1rem;
 }
 .upload-status.success {
-    background: rgba(16, 185, 129, 0.1);
-    border: 1px solid #10b981;
-    color: #10b981;
+    background: var(--cyber-green-glow);
+    border: 1px solid rgba(0, 255, 136, 0.25);
+    color: var(--cyber-green);
 }
 .upload-status.error {
-    background: rgba(239, 68, 68, 0.1);
-    border: 1px solid #ef4444;
-    color: #ef4444;
+    background: rgba(248, 81, 73, 0.1);
+    border: 1px solid rgba(248, 81, 73, 0.3);
+    color: var(--error);
 }
 </style>
 

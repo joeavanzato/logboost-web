@@ -11,6 +11,7 @@ LABEL maintainer="logboost" \
 COPY requirements.txt /tmp/requirements.txt
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
+    sqlite3 \
     build-essential \
     && pip install --no-cache-dir -r /tmp/requirements.txt \
     && apt-get purge -y --auto-remove build-essential \

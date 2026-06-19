@@ -23,8 +23,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.parse import urlparse
 from flask import (
     Flask, render_template, request, jsonify, send_file,
-    session, redirect, url_for, flash
+    session, redirect, url_for, flash, Response
 )
+import sqlite3
 from werkzeug.utils import secure_filename
 
 # CSRF Protection
@@ -83,6 +84,10 @@ app.config.update(
 )
 
 # CSRF Protection
+# Disable per-token expiry so long-lived single-page views (Intel Browser, Graph, etc.)
+# don't get "CSRF token has expired" errors after the default 3600s. The session cookie
+# itself still expires normally, which is the real auth boundary.
+app.config['WTF_CSRF_TIME_LIMIT'] = None
 csrf = CSRFProtect(app)
 
 # ============================================
@@ -112,12 +117,40 @@ def handle_csrf_error(e):
     return jsonify({'error': 'CSRF token missing or invalid'}), 400
 
 
+_CSP_POLICY = (
+    "default-src 'self'; "
+    # 'unsafe-inline' is required for the existing inline <script>/<style>/onclick blocks.
+    # External script hosts: unpkg (htmx), cdnjs (d3, psl).
+    "script-src 'self' 'unsafe-inline' https://unpkg.com https://cdnjs.cloudflare.com; "
+    # Google Fonts loads CSS from fonts.googleapis.com.
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+    "font-src 'self' https://fonts.gstatic.com; "
+    # data: + blob: needed for inline SVG icons embedded as background-image and PNG export blobs.
+    "img-src 'self' data: blob:; "
+    "connect-src 'self'; "
+    "frame-ancestors 'self'; "
+    "form-action 'self'; "
+    "base-uri 'self'; "
+    "object-src 'none'"
+)
+
+_PERMISSIONS_POLICY = (
+    "geolocation=(), microphone=(), camera=(), payment=(), usb=(), "
+    "magnetometer=(), accelerometer=(), gyroscope=(), interest-cohort=()"
+)
+
+
 @app.after_request
 def add_security_headers(response):
     """Add security headers to every response."""
     response.headers['X-Content-Type-Options'] = 'nosniff'
     response.headers['X-Frame-Options'] = 'SAMEORIGIN'
     response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+    response.headers['Content-Security-Policy'] = _CSP_POLICY
+    response.headers['Permissions-Policy'] = _PERMISSIONS_POLICY
+    # HSTS only on HTTPS responses — pinning HTTP would lock users out on dev/local-IP setups.
+    if request.is_secure:
+        response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
     return response
 
 
@@ -162,6 +195,139 @@ def check_threat_db_exists():
         return True
     threat_db_path = Path(THREAT_DB_DIR) / 'threats.db'
     return threat_db_path.exists()
+
+
+def _get_threats_db_path():
+    """Return Path to threats.db (preferring /app symlink), or None if missing."""
+    for p in (Path('/app/threats.db'), Path(THREAT_DB_DIR) / 'threats.db'):
+        if p.exists():
+            return p
+    return None
+
+
+# Intel stats cache — keyed by threats.db mtime so updates auto-invalidate.
+_intel_stats_cache = {'mtime': None, 'data': None}
+_intel_stats_lock = threading.Lock()
+
+
+def _compute_intel_stats():
+    """Run aggregate queries against threats.db. Returns dict or None if DB missing."""
+    db_path = _get_threats_db_path()
+    if not db_path:
+        return None
+    uri = f'file:{db_path.as_posix()}?mode=ro'
+    conn = sqlite3.connect(uri, uri=True, timeout=30)
+    conn.row_factory = sqlite3.Row
+    try:
+        total_entries = conn.execute('SELECT COUNT(*) FROM ips').fetchone()[0]
+        unique_ips = conn.execute('SELECT COUNT(DISTINCT ip) FROM ips').fetchone()[0]
+        sources = conn.execute('''
+            SELECT feeds.feed_id AS id, feeds.feed_name AS name, COUNT(*) AS cnt
+            FROM ips LEFT JOIN feeds ON ips.feed = feeds.feed_id
+            GROUP BY feeds.feed_id, feeds.feed_name ORDER BY cnt DESC
+        ''').fetchall()
+        tags = conn.execute('''
+            SELECT categories.category_id AS id, categories.category_value AS value, COUNT(*) AS cnt
+            FROM ips LEFT JOIN categories ON ips.category = categories.category_id
+            GROUP BY categories.category_id, categories.category_value ORDER BY cnt DESC
+        ''').fetchall()
+        return {
+            'total_entries': total_entries,
+            'unique_ips': unique_ips,
+            'sources': [{'id': r['id'], 'name': r['name'] or '(unknown)', 'count': r['cnt']} for r in sources],
+            'tags': [{'id': r['id'], 'value': r['value'] or '(unknown)', 'count': r['cnt']} for r in tags],
+        }
+    finally:
+        conn.close()
+
+
+def _get_intel_stats():
+    """Return cached intel stats; recompute synchronously if threats.db mtime changed."""
+    db_path = _get_threats_db_path()
+    if not db_path:
+        return None
+    current_mtime = db_path.stat().st_mtime
+    cached_data = _intel_stats_cache.get('data')
+    if cached_data is not None and _intel_stats_cache.get('mtime') == current_mtime:
+        return cached_data
+
+    # Single-flight: only one thread should recompute at a time. Others wait then re-check.
+    with _intel_stats_lock:
+        # Re-check inside the lock — another thread may have just refreshed.
+        if _intel_stats_cache.get('data') is not None and _intel_stats_cache.get('mtime') == current_mtime:
+            return _intel_stats_cache['data']
+        try:
+            start = time.monotonic()
+            data = _compute_intel_stats()
+            if data is not None:
+                _intel_stats_cache['mtime'] = current_mtime
+                _intel_stats_cache['data'] = data
+                app.logger.info('Intel: stats recomputed in %.2fs (db mtime=%s)',
+                                time.monotonic() - start, current_mtime)
+            return data
+        except Exception as e:
+            app.logger.warning('Intel: stats compute failed: %s', e)
+            return cached_data  # serve stale if any
+
+
+def _ensure_intel_indexes():
+    """Create indexes on threats.db ips table to speed up the Intel Browser.
+
+    Runs in a background daemon thread at startup so worker boot isn't blocked
+    while a multi-million-row index builds. CREATE INDEX IF NOT EXISTS makes
+    this safe to call on every start; subsequent runs are O(metadata).
+    """
+    db_path = _get_threats_db_path()
+    if not db_path:
+        return  # threats.db not present yet (first install) — nothing to index
+
+    indexes = [
+        ('idx_ips_ip', 'ip'),
+        ('idx_ips_feed', 'feed'),
+        ('idx_ips_category', 'category'),
+    ]
+
+    try:
+        # Writable connection (intel browser endpoints use a separate read-only one)
+        conn = sqlite3.connect(str(db_path), timeout=60)
+        try:
+            existing = {row[0] for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='index'"
+            ).fetchall()}
+
+            to_create = [(n, c) for n, c in indexes if n not in existing]
+            if not to_create:
+                app.logger.info('Intel: indexes already present on threats.db')
+                return
+
+            app.logger.info('Intel: building %d index(es) on threats.db (this may take a few minutes on a large DB)...',
+                            len(to_create))
+            for idx_name, column in to_create:
+                start = time.monotonic()
+                conn.execute(f'CREATE INDEX IF NOT EXISTS {idx_name} ON ips({column})')
+                conn.commit()
+                app.logger.info('Intel: created %s in %.1fs', idx_name, time.monotonic() - start)
+        finally:
+            conn.close()
+    except sqlite3.OperationalError as e:
+        # "database is locked" can happen if LogBoost binary is mid-update.
+        # Next startup will retry.
+        app.logger.warning('Intel: index build skipped (%s) — will retry next startup', e)
+    except Exception as e:
+        app.logger.warning('Intel: index build failed: %s', e)
+
+
+def _warm_intel_caches():
+    """Background startup task: ensure indexes exist, then prime the stats cache."""
+    _ensure_intel_indexes()
+    try:
+        _get_intel_stats()  # primes the cache so the first user click is instant
+    except Exception as e:
+        app.logger.warning('Intel: stats prime failed: %s', e)
+
+
+threading.Thread(target=_warm_intel_caches, daemon=True, name='intel-warmup').start()
+
 
 UPLOAD_FOLDER.mkdir(exist_ok=True)
 OUTPUT_FOLDER.mkdir(exist_ok=True)
@@ -3349,6 +3515,176 @@ def api_viewdns_reverse_whois():
     except Exception as e:
         app.logger.error("[ViewDNS] Exception: %s", str(e), exc_info=True)
         return jsonify({'error': str(e)}), 500
+
+
+def _open_threats_db_ro():
+    """Open a read-only connection to threats.db. Raises FileNotFoundError if missing."""
+    p = _get_threats_db_path()
+    if not p:
+        raise FileNotFoundError('threats.db not found')
+    uri = f'file:{p.as_posix()}?mode=ro'
+    conn = sqlite3.connect(uri, uri=True, timeout=10)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+@app.route('/api/intel/sources', methods=['GET'])
+@login_required
+def intel_sources():
+    """Return all feeds for filter dropdown."""
+    try:
+        conn = _open_threats_db_ro()
+    except FileNotFoundError:
+        return jsonify({'sources': []})
+    try:
+        rows = conn.execute('SELECT feed_id, feed_name FROM feeds ORDER BY feed_name').fetchall()
+        return jsonify({'sources': [{'id': r['feed_id'], 'name': r['feed_name']} for r in rows]})
+    except sqlite3.Error as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
+
+
+@app.route('/api/intel/tags', methods=['GET'])
+@login_required
+def intel_tags():
+    """Return all categories for filter dropdown."""
+    try:
+        conn = _open_threats_db_ro()
+    except FileNotFoundError:
+        return jsonify({'tags': []})
+    try:
+        rows = conn.execute('SELECT category_id, category_value FROM categories ORDER BY category_value').fetchall()
+        return jsonify({'tags': [{'id': r['category_id'], 'value': r['category_value']} for r in rows]})
+    except sqlite3.Error as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
+
+
+def _build_intel_query(args, base_select):
+    """Build WHERE clause + params from query args. Returns (where_sql, params)."""
+    clauses = []
+    params = []
+    source_id = args.get('source_id', '').strip()
+    tag_id = args.get('tag_id', '').strip()
+    q = args.get('q', '').strip()
+    if source_id.isdigit():
+        clauses.append('ips.feed = ?')
+        params.append(int(source_id))
+    if tag_id.isdigit():
+        clauses.append('ips.category = ?')
+        params.append(int(tag_id))
+    if q:
+        clauses.append('ips.ip LIKE ?')
+        params.append(q + '%')
+    where_sql = (' WHERE ' + ' AND '.join(clauses)) if clauses else ''
+    return base_select + where_sql, params
+
+
+@app.route('/api/intel/iocs', methods=['GET'])
+@login_required
+def intel_iocs():
+    """Paginated IOC browser with optional filters."""
+    try:
+        conn = _open_threats_db_ro()
+    except FileNotFoundError:
+        return jsonify({'rows': [], 'has_more': False, 'error': 'threats.db not found'}), 200
+
+    try:
+        limit = max(1, min(int(request.args.get('limit', 100)), 1000))
+    except (TypeError, ValueError):
+        limit = 100
+    try:
+        offset = max(0, int(request.args.get('offset', 0)))
+    except (TypeError, ValueError):
+        offset = 0
+
+    base = (
+        'SELECT ips.ip, '
+        'GROUP_CONCAT(DISTINCT feeds.feed_name) AS sources, '
+        'GROUP_CONCAT(DISTINCT categories.category_value) AS tags '
+        'FROM ips '
+        'LEFT JOIN feeds ON ips.feed = feeds.feed_id '
+        'LEFT JOIN categories ON ips.category = categories.category_id'
+    )
+    sql, params = _build_intel_query(request.args, base)
+    sql += ' GROUP BY ips.ip ORDER BY ips.ip LIMIT ? OFFSET ?'
+    # Fetch limit+1 grouped rows to know if more pages exist without COUNT(*)
+    params_with_paging = params + [limit + 1, offset]
+
+    try:
+        rows = conn.execute(sql, params_with_paging).fetchall()
+    except sqlite3.Error as e:
+        conn.close()
+        return jsonify({'error': str(e)}), 500
+
+    has_more = len(rows) > limit
+    rows = rows[:limit]
+    result = [
+        {'ip': r['ip'], 'sources': r['sources'] or '', 'tags': r['tags'] or ''}
+        for r in rows
+    ]
+    conn.close()
+    return jsonify({'rows': result, 'has_more': has_more, 'limit': limit, 'offset': offset})
+
+
+@app.route('/api/intel/stats', methods=['GET'])
+@login_required
+def intel_stats():
+    """Aggregate counts for the Intel Browser statistics panel.
+
+    Served from an mtime-keyed cache; recomputed automatically when threats.db
+    is rewritten (e.g., LogBoost binary refresh). Cache is primed at startup.
+    """
+    data = _get_intel_stats()
+    if data is None:
+        return jsonify({'sources': [], 'tags': [], 'total_entries': 0, 'unique_ips': 0,
+                        'error': 'threats.db not found'})
+    return jsonify(data)
+
+
+@app.route('/api/intel/export', methods=['GET'])
+@login_required
+def intel_export():
+    """Streaming CSV export of filtered IOCs."""
+    try:
+        conn = _open_threats_db_ro()
+    except FileNotFoundError:
+        return jsonify({'error': 'threats.db not found'}), 404
+
+    base = (
+        'SELECT ips.ip, '
+        'GROUP_CONCAT(DISTINCT feeds.feed_name) AS sources, '
+        'GROUP_CONCAT(DISTINCT categories.category_value) AS tags '
+        'FROM ips '
+        'LEFT JOIN feeds ON ips.feed = feeds.feed_id '
+        'LEFT JOIN categories ON ips.category = categories.category_id'
+    )
+    sql, params = _build_intel_query(request.args, base)
+    sql += ' GROUP BY ips.ip ORDER BY ips.ip'
+
+    def generate():
+        try:
+            yield 'ip,sources,tags\n'
+            cursor = conn.execute(sql, params)
+            for row in cursor:
+                ip = (row['ip'] or '').replace('"', '""')
+                src = (row['sources'] or '').replace('"', '""')
+                tag = (row['tags'] or '').replace('"', '""')
+                yield f'"{ip}","{src}","{tag}"\n'
+        finally:
+            conn.close()
+
+    filename = 'intel_export.csv'
+    return Response(
+        generate(),
+        mimetype='text/csv',
+        headers={
+            'Content-Disposition': f'attachment; filename="{filename}"',
+            'Cache-Control': 'no-store',
+        },
+    )
 
 
 if __name__ == '__main__':

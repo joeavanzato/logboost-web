@@ -39,8 +39,8 @@
     --glow-blue: 0 0 20px rgba(0, 168, 255, 0.3);
     
     /* Typography */
-    --font-display: 'Space Grotesk', system-ui, sans-serif;
-    --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+    --font-display: 'Geist', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+    --font-mono: 'Geist Mono', 'JetBrains Mono', 'Fira Code', monospace;
     
     /* Spacing */
     --radius-sm: 6px;
@@ -113,13 +113,13 @@ body {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 1rem 2rem;
-    background: var(--bg-deep);
+    padding: 0.6rem 1.5rem;
+    background: rgba(13, 17, 23, 0.8);
     border-bottom: 1px solid var(--border-muted);
     position: sticky;
     top: 0;
     z-index: 100;
-    backdrop-filter: blur(8px);
+    backdrop-filter: blur(10px);
 }
 
 .logo {
@@ -129,12 +129,12 @@ body {
 }
 
 .logo-icon {
-    width: 36px;
-    height: 36px;
+    width: 28px;
+    height: 28px;
 }
 
 .logo-text {
-    font-size: 1.5rem;
+    font-size: 1.2rem;
     font-weight: 700;
     letter-spacing: -0.5px;
     background: linear-gradient(135deg, var(--cyber-green), var(--electric-blue));
@@ -143,101 +143,69 @@ body {
     background-clip: text;
 }
 
-.logo-badge {
-    font-size: 0.7rem;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 1px;
-    padding: 0.25rem 0.5rem;
-    background: var(--bg-elevated);
-    border: 1px solid var(--border-default);
-    border-radius: var(--radius-sm);
-    color: var(--text-secondary);
-}
-
 .header-actions {
     display: flex;
-    gap: 1rem;
+    align-items: center;
+    gap: 0.25rem;
 }
 
-.github-link {
+/* Minimal header buttons — borderless, subtle hover fill */
+.github-link,
+.admin-link,
+.logout-link,
+.expand-toggle {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
-    padding: 0.5rem 1rem;
+    gap: 0.45rem;
+    padding: 0.4rem 0.7rem;
     color: var(--text-secondary);
     text-decoration: none;
-    font-size: 0.875rem;
+    font-family: var(--font-display);
+    font-size: 0.825rem;
     font-weight: 500;
-    border: 1px solid var(--border-default);
-    border-radius: var(--radius-md);
-    transition: all 0.2s ease;
+    border: none;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    cursor: pointer;
+    transition: color 0.15s ease, background 0.15s ease;
 }
 
-.admin-link {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    padding: 0.5rem 1rem;
-    color: var(--text-secondary);
-    text-decoration: none;
-    font-size: 0.875rem;
-    font-weight: 500;
-    border: 1px solid var(--border-default);
-    border-radius: var(--radius-md);
-    transition: all 0.2s ease;
+.github-link svg,
+.admin-link svg,
+.logout-link svg,
+.expand-toggle svg {
+    width: 15px;
+    height: 15px;
 }
 
-.admin-link svg {
-    width: 16px;
-    height: 16px;
+.github-link:hover,
+.expand-toggle:hover {
+    color: var(--text-primary);
+    background: var(--bg-elevated);
 }
 
 .admin-link:hover {
     color: var(--cyber-green);
-    border-color: var(--cyber-green);
-    background: var(--cyber-green-glow);
-}
-
-.github-link:hover {
-    color: var(--text-primary);
-    border-color: var(--cyber-green);
     background: var(--cyber-green-glow);
 }
 
 .user-badge {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
-    padding: 0.5rem 1rem;
-    color: var(--text-secondary);
-    font-size: 0.875rem;
+    gap: 0.45rem;
+    padding: 0.4rem 0.7rem;
+    color: var(--text-muted);
+    font-size: 0.825rem;
     font-weight: 500;
-    border: 1px solid var(--border-default);
-    border-radius: var(--radius-md);
-    background: rgba(255, 255, 255, 0.02);
 }
 
 .user-badge svg {
-    width: 16px;
-    height: 16px;
+    width: 15px;
+    height: 15px;
 }
 
 .logout-link {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    padding: 0.5rem 1rem;
-    color: var(--text-secondary);
-    text-decoration: none;
-    font-size: 0.875rem;
-    font-weight: 500;
     font-family: inherit;
-    border: 1px solid var(--border-default);
-    border-radius: var(--radius-md);
-    background: transparent;
-    cursor: pointer;
-    transition: all 0.2s ease;
 }
 
 .logout-form {
@@ -245,43 +213,14 @@ body {
     padding: 0;
 }
 
-.logout-link svg {
-    width: 16px;
-    height: 16px;
-}
-
 .logout-link:hover {
     color: #ef4444;
-    border-color: #ef4444;
     background: rgba(239, 68, 68, 0.1);
 }
 
-/* Expand Toggle Button */
-.expand-toggle {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    padding: 0.5rem 1rem;
-    color: var(--text-secondary);
-    font-family: var(--font-display);
-    font-size: 0.875rem;
-    font-weight: 500;
-    background: transparent;
-    border: 1px solid var(--border-default);
-    border-radius: var(--radius-md);
-    cursor: pointer;
-    transition: all 0.2s ease;
-}
-
-.expand-toggle:hover {
-    color: var(--text-primary);
-    border-color: var(--cyber-green);
-    background: var(--cyber-green-glow);
-}
-
 .expand-toggle svg {
-    width: 16px;
-    height: 16px;
+    width: 15px;
+    height: 15px;
 }
 
 .expand-toggle .hidden {

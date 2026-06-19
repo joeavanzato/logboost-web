@@ -4,309 +4,307 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="csrf-token" content="{{ csrf_token() }}">
-    <title>Setup Required - LogBoost Web UI</title>
+    <title>Setup Required — LogBoost Web UI</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500;600&family=Geist:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
         :root {
-            --bg-primary: #0a0a0f;
-            --bg-secondary: #12121a;
-            --bg-tertiary: #1a1a24;
-            --text-primary: #e0e0e0;
-            --text-secondary: #888;
-            --border: #2a2a3a;
-            --accent: #00d4aa;
-            --accent-hover: #00e4bb;
-            --warning: #f59e0b;
-            --error: #ef4444;
-            --success: #10b981;
+            --cyber-green: #00ff88;
+            --cyber-green-glow: rgba(0, 255, 136, 0.12);
+            --bg-deepest: #080a0d;
+            --bg-surface: #11161d;
+            --bg-input: #0a0e13;
+            --bg-elevated: #161c24;
+            --text-primary: #e6edf3;
+            --text-secondary: #8b949e;
+            --text-muted: #5d6671;
+            --border-default: #232a33;
+            --border-focus: rgba(0, 255, 136, 0.4);
+            --warning: #f5b942;
+            --error: #f85149;
+            --success: #00ff88;
+            --font-sans: 'Geist', -apple-system, BlinkMacSystemFont, sans-serif;
+            --font-mono: 'Geist Mono', 'JetBrains Mono', monospace;
         }
 
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
 
         body {
-            font-family: 'Space Grotesk', sans-serif;
-            background: var(--bg-primary);
+            font-family: var(--font-sans);
+            background: var(--bg-deepest);
             color: var(--text-primary);
             min-height: 100vh;
             display: flex;
             align-items: center;
             justify-content: center;
-            padding: 20px;
-        }
-
-        .setup-container {
-            background: var(--bg-secondary);
-            border: 1px solid var(--border);
-            border-radius: 12px;
-            padding: 40px;
-            max-width: 600px;
-            width: 100%;
-            text-align: center;
+            padding: 32px 24px;
             position: relative;
+            overflow-x: hidden;
+            -webkit-font-smoothing: antialiased;
         }
 
-        .logout-section {
-            position: absolute;
-            top: 20px;
-            right: 20px;
+        body::before {
+            content: '';
+            position: fixed;
+            inset: 0;
+            background: radial-gradient(120% 70% at 50% -10%, var(--cyber-green-glow) 0%, transparent 55%);
+            pointer-events: none;
+        }
+        body::after {
+            content: '';
+            position: fixed;
+            inset: 0;
+            background-image:
+                linear-gradient(var(--border-default) 1px, transparent 1px),
+                linear-gradient(90deg, var(--border-default) 1px, transparent 1px);
+            background-size: 64px 64px;
+            mask-image: radial-gradient(100% 60% at 50% 30%, #000 0%, transparent 75%);
+            -webkit-mask-image: radial-gradient(100% 60% at 50% 30%, #000 0%, transparent 75%);
+            opacity: 0.3;
+            pointer-events: none;
         }
 
-        .setup-icon {
-            width: 80px;
-            height: 80px;
-            margin: 0 auto 24px;
-            color: var(--warning);
+        .setup {
+            position: relative;
+            z-index: 1;
+            width: 100%;
+            max-width: 560px;
+            animation: rise 0.6s cubic-bezier(0.22, 1, 0.36, 1) both;
+        }
+        @keyframes rise {
+            from { opacity: 0; transform: translateY(12px); }
+            to   { opacity: 1; transform: translateY(0); }
         }
 
-        h1 {
-            font-size: 28px;
-            margin-bottom: 12px;
-            color: var(--text-primary);
-        }
-
-        .setup-description {
-            color: var(--text-secondary);
-            margin-bottom: 32px;
-            line-height: 1.6;
-        }
-
-        .missing-files {
-            background: var(--bg-tertiary);
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            padding: 20px;
-            margin-bottom: 32px;
-            text-align: left;
-        }
-
-        .missing-files h3 {
-            font-size: 14px;
-            color: var(--text-secondary);
-            margin-bottom: 12px;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-
-        .file-list {
-            list-style: none;
-        }
-
-        .file-list li {
-            font-family: 'JetBrains Mono', monospace;
-            font-size: 14px;
-            padding: 8px 12px;
-            margin-bottom: 8px;
-            background: var(--bg-primary);
-            border-radius: 4px;
+        /* Top bar: brand + logout */
+        .topbar {
             display: flex;
             align-items: center;
-            gap: 10px;
+            gap: 12px;
+            margin-bottom: 26px;
         }
-
-        .file-list li:last-child {
-            margin-bottom: 0;
+        .brand-mark { width: 28px; height: 28px; }
+        .brand-name { font-size: 18px; font-weight: 600; letter-spacing: -0.02em; }
+        .brand-tag {
+            font-family: var(--font-mono);
+            font-size: 10px;
+            font-weight: 500;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            color: var(--text-muted);
+            padding-top: 2px;
         }
-
-        .file-status {
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-        }
-
-        .file-status.missing {
-            background: var(--error);
-        }
-
-        .file-status.found {
-            background: var(--success);
-        }
-
-        .options-section {
-            margin-top: 32px;
-        }
-
-        .options-section h2 {
-            font-size: 18px;
-            margin-bottom: 20px;
-            color: var(--text-primary);
-        }
-
-        .option-card {
-            background: var(--bg-tertiary);
-            border: 1px solid var(--border);
+        .topbar form { margin-left: auto; }
+        .logout-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 7px;
+            padding: 8px 12px;
+            background: transparent;
+            border: 1px solid var(--border-default);
             border-radius: 8px;
-            padding: 24px;
-            margin-bottom: 16px;
-            text-align: left;
+            color: var(--text-secondary);
+            font-family: var(--font-mono);
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.18s ease;
         }
+        .logout-btn svg { width: 14px; height: 14px; }
+        .logout-btn:hover { color: var(--error); border-color: rgba(248, 81, 73, 0.4); }
 
-        .option-card h3 {
-            font-size: 16px;
-            margin-bottom: 8px;
-            color: var(--accent);
+        /* Header */
+        .head { margin-bottom: 24px; }
+        .head-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 5px 11px;
+            background: rgba(245, 185, 66, 0.08);
+            border: 1px solid rgba(245, 185, 66, 0.25);
+            border-radius: 999px;
+            font-family: var(--font-mono);
+            font-size: 11px;
+            font-weight: 500;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            color: var(--warning);
+            margin-bottom: 14px;
         }
-
-        .option-card p {
+        .head-badge svg { width: 13px; height: 13px; }
+        .head h1 { font-size: 24px; font-weight: 600; letter-spacing: -0.02em; margin-bottom: 8px; }
+        .head p {
             color: var(--text-secondary);
             font-size: 14px;
-            margin-bottom: 16px;
+            line-height: 1.6;
+            max-width: 48ch;
         }
 
+        /* Card shell */
+        .card {
+            background: var(--bg-surface);
+            border: 1px solid var(--border-default);
+            border-radius: 14px;
+            padding: 22px;
+            margin-bottom: 16px;
+        }
+        .card-label {
+            font-family: var(--font-mono);
+            font-size: 11px;
+            font-weight: 500;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: var(--text-muted);
+            margin-bottom: 14px;
+        }
+
+        /* Required files */
+        .file-list { list-style: none; display: flex; flex-direction: column; gap: 8px; }
+        .file-list li {
+            display: flex;
+            align-items: center;
+            gap: 11px;
+            padding: 11px 13px;
+            background: var(--bg-input);
+            border: 1px solid var(--border-default);
+            border-radius: 9px;
+            font-family: var(--font-mono);
+            font-size: 13px;
+        }
+        .file-status {
+            width: 8px; height: 8px;
+            border-radius: 50%;
+            flex-shrink: 0;
+            box-shadow: 0 0 8px currentColor;
+        }
+        .file-status.missing { background: var(--error); color: var(--error); }
+        .file-status.found   { background: var(--success); color: var(--success); }
+        .file-meta { margin-left: auto; font-size: 11px; color: var(--text-muted); }
+
+        /* Option cards */
+        .option {
+            background: var(--bg-surface);
+            border: 1px solid var(--border-default);
+            border-radius: 14px;
+            padding: 22px;
+            margin-bottom: 16px;
+        }
+        .option-num {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 22px; height: 22px;
+            border-radius: 6px;
+            background: var(--cyber-green-glow);
+            color: var(--cyber-green);
+            font-family: var(--font-mono);
+            font-size: 12px;
+            font-weight: 600;
+            margin-right: 9px;
+        }
+        .option h3 { display: flex; align-items: center; font-size: 15px; font-weight: 600; margin-bottom: 8px; }
+        .option p { color: var(--text-secondary); font-size: 13.5px; line-height: 1.6; margin-bottom: 16px; }
+
+        /* Buttons */
         .btn {
             display: inline-flex;
             align-items: center;
             gap: 8px;
-            padding: 12px 24px;
-            font-size: 14px;
-            font-weight: 500;
+            padding: 11px 18px;
+            font-family: var(--font-sans);
+            font-size: 13.5px;
+            font-weight: 600;
             border: none;
-            border-radius: 6px;
+            border-radius: 9px;
             cursor: pointer;
             text-decoration: none;
-            transition: all 0.2s;
+            transition: all 0.18s ease;
         }
+        .btn svg { width: 16px; height: 16px; }
+        .btn-primary { background: var(--cyber-green); color: var(--bg-deepest); }
+        .btn-primary:hover:not(:disabled) { background: #1aff96; box-shadow: 0 6px 24px -8px rgba(0, 255, 136, 0.5); }
+        .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
+        .btn-secondary { background: var(--bg-elevated); color: var(--text-primary); border: 1px solid var(--border-default); }
+        .btn-secondary:hover { border-color: var(--border-focus); }
 
-        .btn-primary {
-            background: var(--accent);
-            color: var(--bg-primary);
-        }
-
-        .btn-primary:hover {
-            background: var(--accent-hover);
-        }
-
-        .btn-secondary {
-            background: var(--bg-secondary);
-            color: var(--text-primary);
-            border: 1px solid var(--border);
-        }
-
-        .btn-secondary:hover {
-            background: var(--bg-tertiary);
-        }
-
-        .upload-form {
-            margin-top: 16px;
-        }
-
+        /* Upload dropzone */
+        .upload-form { margin-top: 4px; }
         .upload-area {
-            border: 2px dashed var(--border);
-            border-radius: 8px;
-            padding: 24px;
+            border: 1.5px dashed var(--border-default);
+            border-radius: 11px;
+            padding: 28px 20px;
             text-align: center;
             cursor: pointer;
-            transition: all 0.2s;
+            transition: all 0.18s ease;
+            background: var(--bg-input);
         }
+        .upload-area:hover { border-color: var(--border-focus); background: rgba(0, 255, 136, 0.03); }
+        .upload-area.dragover { border-color: var(--cyber-green); background: var(--cyber-green-glow); }
+        .upload-area input[type="file"] { display: none; }
+        .upload-icon { width: 36px; height: 36px; margin: 0 auto 10px; color: var(--text-muted); }
+        .upload-text { color: var(--text-secondary); font-size: 13px; line-height: 1.6; }
+        .upload-text strong { color: var(--cyber-green); font-weight: 600; }
+        .upload-text .hint { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); }
 
-        .upload-area:hover {
-            border-color: var(--accent);
-            background: rgba(0, 212, 170, 0.05);
-        }
-
-        .upload-area.dragover {
-            border-color: var(--accent);
-            background: rgba(0, 212, 170, 0.1);
-        }
-
-        .upload-area input[type="file"] {
-            display: none;
-        }
-
-        .upload-icon {
-            width: 48px;
-            height: 48px;
-            margin: 0 auto 12px;
-            color: var(--text-secondary);
-        }
-
-        .upload-text {
-            color: var(--text-secondary);
-            font-size: 14px;
-        }
-
-        .upload-text strong {
-            color: var(--accent);
-        }
-
-        .selected-files {
-            margin-top: 16px;
-            text-align: left;
-        }
-
+        .selected-files { margin-top: 14px; display: flex; flex-direction: column; gap: 8px; }
+        .selected-files:empty { display: none; }
         .selected-file {
             display: flex;
             align-items: center;
             justify-content: space-between;
-            padding: 8px 12px;
-            background: var(--bg-primary);
-            border-radius: 4px;
-            margin-bottom: 8px;
-            font-family: 'JetBrains Mono', monospace;
-            font-size: 13px;
+            padding: 9px 13px;
+            background: var(--bg-input);
+            border: 1px solid var(--border-default);
+            border-radius: 8px;
+            font-family: var(--font-mono);
+            font-size: 12.5px;
         }
-
-        .selected-file .remove-file {
-            background: none;
-            border: none;
-            color: var(--error);
-            cursor: pointer;
-            font-size: 18px;
-            padding: 0 4px;
-        }
-
-        .upload-btn {
-            margin-top: 16px;
-            width: 100%;
-        }
+        .remove-file { background: none; border: none; color: var(--error); cursor: pointer; font-size: 18px; line-height: 1; padding: 0 4px; }
+        .upload-btn { margin-top: 16px; width: 100%; justify-content: center; }
 
         .upload-status {
-            margin-top: 16px;
-            padding: 12px;
-            border-radius: 6px;
-            font-size: 14px;
+            margin-top: 14px;
+            padding: 11px 13px;
+            border-radius: 9px;
+            font-size: 13px;
+            font-family: var(--font-mono);
         }
+        .upload-status.success { background: var(--cyber-green-glow); border: 1px solid rgba(0, 255, 136, 0.25); color: var(--cyber-green); }
+        .upload-status.error   { background: rgba(248, 81, 73, 0.08); border: 1px solid rgba(248, 81, 73, 0.25); color: var(--error); }
 
-        .upload-status.success {
-            background: rgba(16, 185, 129, 0.1);
-            border: 1px solid var(--success);
-            color: var(--success);
+        /* Non-admin notice */
+        .notice {
+            border-color: rgba(245, 185, 66, 0.25);
         }
+        .notice h3 { color: var(--warning); }
 
-        .upload-status.error {
-            background: rgba(239, 68, 68, 0.1);
-            border: 1px solid var(--error);
-            color: var(--error);
+        /* Footer */
+        .foot {
+            margin-top: 22px;
+            text-align: center;
+            font-family: var(--font-mono);
+            font-size: 12px;
+            color: var(--text-muted);
         }
-
-        .admin-link {
-            margin-top: 24px;
-            padding-top: 24px;
-            border-top: 1px solid var(--border);
-        }
-
-        .admin-link a {
-            color: var(--accent);
-            text-decoration: none;
-        }
-
-        .admin-link a:hover {
-            text-decoration: underline;
-        }
+        .foot a { color: var(--text-secondary); text-decoration: none; transition: color 0.18s ease; }
+        .foot a:hover { color: var(--cyber-green); }
+        .foot strong { color: var(--text-secondary); font-weight: 600; }
     </style>
 </head>
 <body>
-    <div class="setup-container">
-        <div class="logout-section">
-            <form action="{{ url_for('auth_routes.logout') }}" method="POST" style="display: inline;">
+    <div class="setup">
+        <div class="topbar">
+            <svg class="brand-mark" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <rect x="2" y="8" width="8" height="24" rx="2" fill="var(--cyber-green)"/>
+                <rect x="14" y="4" width="8" height="32" rx="2" fill="var(--cyber-green)" opacity="0.7"/>
+                <rect x="26" y="12" width="8" height="20" rx="2" fill="var(--cyber-green)" opacity="0.4"/>
+            </svg>
+            <span class="brand-name">LogBoost</span>
+            <span class="brand-tag">Web UI</span>
+            <form action="{{ url_for('auth_routes.logout') }}" method="POST">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <button type="submit" class="btn btn-secondary" title="Logout">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 16px; height: 16px;">
+                <button type="submit" class="logout-btn" title="Logout">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/>
                         <polyline points="16 17 21 12 16 7"/>
                         <line x1="21" y1="12" x2="9" y2="12"/>
@@ -316,104 +314,103 @@
             </form>
         </div>
 
-        <svg class="setup-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-            <circle cx="12" cy="12" r="10"/>
-            <line x1="12" y1="8" x2="12" y2="12"/>
-            <line x1="12" y1="16" x2="12.01" y2="16"/>
-        </svg>
+        <div class="head">
+            <span class="head-badge">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="10"/>
+                    <line x1="12" y1="8" x2="12" y2="12"/>
+                    <line x1="12" y1="16" x2="12.01" y2="16"/>
+                </svg>
+                Setup Required
+            </span>
+            <h1>Configure GeoIP databases</h1>
+            <p>
+                LogBoost enriches IP addresses with geolocation using MaxMind GeoLite2 databases.
+                Provide them below before using the application.
+            </p>
+        </div>
 
-        <h1>Setup Required</h1>
-        <p class="setup-description">
-            LogBoost requires MaxMind GeoIP databases to enrich IP addresses with geolocation data.
-            Please configure your MaxMind databases before using the application.
-        </p>
-
-        <div class="missing-files">
-            <h3>Required Database Files</h3>
+        <div class="card">
+            <div class="card-label">Required database files</div>
             <ul class="file-list">
                 {% for file in required_files %}
                 <li>
                     <span class="file-status {{ 'missing' if file in missing_files else 'found' }}"></span>
                     {{ file }}
+                    <span class="file-meta">{{ 'missing' if file in missing_files else 'found' }}</span>
                 </li>
                 {% endfor %}
             </ul>
         </div>
 
         {% if is_admin %}
-        <div class="options-section">
-            <h2>Choose Setup Method</h2>
+        <div class="option">
+            <h3><span class="option-num">1</span>Configure MaxMind API key</h3>
+            <p>
+                Enter your MaxMind license key in Admin Settings, then run
+                "Update Geolocation" to download the latest databases automatically.
+            </p>
+            <a href="{{ url_for('admin.settings') }}" class="btn btn-primary">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="3"/>
+                    <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"/>
+                </svg>
+                Go to Admin Settings
+            </a>
+        </div>
 
-            <div class="option-card">
-                <h3>Option 1: Configure MaxMind API Key</h3>
-                <p>
-                    Enter your MaxMind license key in Admin Settings, then use "Update Geolocation"
-                    to automatically download the latest databases.
-                </p>
-                <a href="{{ url_for('admin.settings') }}" class="btn btn-primary">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 18px; height: 18px;">
-                        <circle cx="12" cy="12" r="3"/>
-                        <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"/>
+        <div class="option">
+            <h3><span class="option-num">2</span>Upload database files</h3>
+            <p>
+                Already have the GeoLite2 files? Upload all three directly:
+                GeoLite2-ASN.mmdb, GeoLite2-Country.mmdb, and GeoLite2-City.mmdb.
+            </p>
+
+            <form id="upload-form" class="upload-form" enctype="multipart/form-data">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+                <div class="upload-area" id="upload-area">
+                    <input type="file" id="mmdb-files" name="mmdb_files" multiple accept=".mmdb">
+                    <svg class="upload-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                        <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+                        <polyline points="17 8 12 3 7 8"/>
+                        <line x1="12" y1="3" x2="12" y2="15"/>
                     </svg>
-                    Go to Admin Settings
-                </a>
-            </div>
+                    <p class="upload-text">
+                        <strong>Click to select files</strong> or drag and drop<br>
+                        <span class="hint">.mmdb files only</span>
+                    </p>
+                </div>
 
-            <div class="option-card">
-                <h3>Option 2: Upload Database Files</h3>
-                <p>
-                    If you already have MaxMind GeoLite2 database files, upload them directly.
-                    You need all three files: GeoLite2-ASN.mmdb, GeoLite2-Country.mmdb, and GeoLite2-City.mmdb.
-                </p>
+                <div class="selected-files" id="selected-files"></div>
 
-                <form id="upload-form" class="upload-form" enctype="multipart/form-data">
-                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn btn-primary upload-btn" id="upload-btn" disabled>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+                        <polyline points="17 8 12 3 7 8"/>
+                        <line x1="12" y1="3" x2="12" y2="15"/>
+                    </svg>
+                    Upload Database Files
+                </button>
+            </form>
 
-                    <div class="upload-area" id="upload-area">
-                        <input type="file" id="mmdb-files" name="mmdb_files" multiple accept=".mmdb">
-                        <svg class="upload-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                            <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
-                            <polyline points="17 8 12 3 7 8"/>
-                            <line x1="12" y1="3" x2="12" y2="15"/>
-                        </svg>
-                        <p class="upload-text">
-                            <strong>Click to select files</strong> or drag and drop<br>
-                            .mmdb files only
-                        </p>
-                    </div>
-
-                    <div class="selected-files" id="selected-files"></div>
-
-                    <button type="submit" class="btn btn-primary upload-btn" id="upload-btn" disabled>
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 18px; height: 18px;">
-                            <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
-                            <polyline points="17 8 12 3 7 8"/>
-                            <line x1="12" y1="3" x2="12" y2="15"/>
-                        </svg>
-                        Upload Database Files
-                    </button>
-                </form>
-
-                <div class="upload-status" id="upload-status" style="display: none;"></div>
-            </div>
+            <div class="upload-status" id="upload-status" style="display: none;"></div>
         </div>
         {% else %}
-        <div class="options-section">
-            <div class="option-card" style="text-align: center;">
-                <h3 style="color: var(--warning);">Admin Access Required</h3>
-                <p>
-                    Only administrators can configure MaxMind database settings.
-                    Please contact your administrator to complete the setup.
-                </p>
-            </div>
+        <div class="option notice">
+            <h3>Admin access required</h3>
+            <p>
+                Only administrators can configure MaxMind databases. Please contact
+                your administrator to complete setup, or log out to switch accounts.
+            </p>
         </div>
         {% endif %}
 
-        <div class="admin-link">
+        <div class="foot">
             {% if is_admin %}
-            <p>Already configured? <a href="{{ url_for('index') }}">Refresh this page</a> to check again.</p>
+            Already configured? <a href="{{ url_for('index') }}">Refresh to check again</a>
             {% else %}
-            <p>Logged in as <strong>{{ session.get('username', 'User') }}</strong> (non-admin). Use the logout button above to switch accounts.</p>
+            Logged in as <strong>{{ session.get('username', 'User') }}</strong> &middot; non-admin
             {% endif %}
         </div>
     </div>
@@ -429,29 +426,26 @@
         const requiredFiles = ['GeoLite2-ASN.mmdb', 'GeoLite2-Country.mmdb', 'GeoLite2-City.mmdb'];
         let selectedFiles = new Map();
 
-        // Click to select files
-        uploadArea.addEventListener('click', () => fileInput.click());
+        if (uploadArea) {
+            uploadArea.addEventListener('click', () => fileInput.click());
 
-        // Drag and drop
-        uploadArea.addEventListener('dragover', (e) => {
-            e.preventDefault();
-            uploadArea.classList.add('dragover');
-        });
+            uploadArea.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                uploadArea.classList.add('dragover');
+            });
+            uploadArea.addEventListener('dragleave', () => {
+                uploadArea.classList.remove('dragover');
+            });
+            uploadArea.addEventListener('drop', (e) => {
+                e.preventDefault();
+                uploadArea.classList.remove('dragover');
+                handleFiles(e.dataTransfer.files);
+            });
 
-        uploadArea.addEventListener('dragleave', () => {
-            uploadArea.classList.remove('dragover');
-        });
-
-        uploadArea.addEventListener('drop', (e) => {
-            e.preventDefault();
-            uploadArea.classList.remove('dragover');
-            handleFiles(e.dataTransfer.files);
-        });
-
-        // File input change
-        fileInput.addEventListener('change', () => {
-            handleFiles(fileInput.files);
-        });
+            fileInput.addEventListener('change', () => {
+                handleFiles(fileInput.files);
+            });
+        }
 
         function handleFiles(files) {
             for (const file of files) {
@@ -475,7 +469,6 @@
                 selectedFilesDiv.appendChild(div);
             }
 
-            // Add click handlers for remove buttons
             selectedFilesDiv.querySelectorAll('.remove-file').forEach(btn => {
                 btn.addEventListener('click', () => {
                     selectedFiles.delete(btn.dataset.name);
@@ -483,53 +476,65 @@
                 });
             });
 
-            // Enable upload button only if all required files are selected
             const allFilesSelected = requiredFiles.every(f => selectedFiles.has(f));
             uploadBtn.disabled = !allFilesSelected;
         }
 
-        // Form submission
-        uploadForm.addEventListener('submit', async (e) => {
-            e.preventDefault();
+        if (uploadForm) {
+            uploadForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
 
-            const formData = new FormData();
-            formData.append('csrf_token', document.querySelector('input[name="csrf_token"]').value);
+                const formData = new FormData();
+                formData.append('csrf_token', document.querySelector('input[name="csrf_token"]').value);
 
-            for (const [name, file] of selectedFiles) {
-                formData.append('mmdb_files', file);
-            }
+                for (const [name, file] of selectedFiles) {
+                    formData.append('mmdb_files', file);
+                }
 
-            uploadBtn.disabled = true;
-            uploadBtn.textContent = 'Uploading...';
-            uploadStatus.style.display = 'none';
+                uploadBtn.disabled = true;
+                uploadBtn.textContent = 'Uploading...';
+                uploadStatus.style.display = 'none';
 
-            try {
-                const response = await fetch('/admin/settings/upload-mmdb', {
-                    method: 'POST',
-                    body: formData,
-                    headers: {
-                        'X-CSRFToken': document.querySelector('input[name="csrf_token"]').value
+                try {
+                    const response = await fetch('/admin/settings/upload-mmdb', {
+                        method: 'POST',
+                        body: formData,
+                        headers: {
+                            'X-CSRFToken': document.querySelector('input[name="csrf_token"]').value
+                        }
+                    });
+
+                    const result = await response.json();
+
+                    if (response.ok) {
+                        uploadStatus.className = 'upload-status success';
+                        uploadStatus.textContent = result.message || 'Files uploaded successfully! Redirecting...';
+                        uploadStatus.style.display = 'block';
+
+                        setTimeout(() => {
+                            window.location.href = '{{ url_for("index") }}';
+                        }, 1500);
+                    } else {
+                        uploadStatus.className = 'upload-status error';
+                        uploadStatus.textContent = result.error || 'Upload failed';
+                        uploadStatus.style.display = 'block';
+                        uploadBtn.disabled = false;
+                        uploadBtn.innerHTML = `
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+                                <polyline points="17 8 12 3 7 8"/>
+                                <line x1="12" y1="3" x2="12" y2="15"/>
+                            </svg>
+                            Upload Database Files
+                        `;
                     }
-                });
-
-                const result = await response.json();
-
-                if (response.ok) {
-                    uploadStatus.className = 'upload-status success';
-                    uploadStatus.textContent = result.message || 'Files uploaded successfully! Redirecting...';
-                    uploadStatus.style.display = 'block';
-
-                    // Redirect to main page after short delay
-                    setTimeout(() => {
-                        window.location.href = '{{ url_for("index") }}';
-                    }, 1500);
-                } else {
+                } catch (error) {
                     uploadStatus.className = 'upload-status error';
-                    uploadStatus.textContent = result.error || 'Upload failed';
+                    uploadStatus.textContent = 'Network error: ' + error.message;
                     uploadStatus.style.display = 'block';
                     uploadBtn.disabled = false;
                     uploadBtn.innerHTML = `
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 18px; height: 18px;">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
                             <polyline points="17 8 12 3 7 8"/>
                             <line x1="12" y1="3" x2="12" y2="15"/>
@@ -537,21 +542,8 @@
                         Upload Database Files
                     `;
                 }
-            } catch (error) {
-                uploadStatus.className = 'upload-status error';
-                uploadStatus.textContent = 'Network error: ' + error.message;
-                uploadStatus.style.display = 'block';
-                uploadBtn.disabled = false;
-                uploadBtn.innerHTML = `
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 18px; height: 18px;">
-                        <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
-                        <polyline points="17 8 12 3 7 8"/>
-                        <line x1="12" y1="3" x2="12" y2="15"/>
-                    </svg>
-                    Upload Database Files
-                `;
-            }
-        });
+            });
+        }
     </script>
 </body>
 </html>

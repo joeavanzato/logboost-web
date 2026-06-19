@@ -2948,7 +2948,11 @@ def load_graph(graph_id, user_id=None):
         cursor.execute('SELECT * FROM saved_graphs WHERE id = ?', (graph_id,))
     row = cursor.fetchone()
     conn.close()
-    return dict(row) if row else None
+    if not row:
+        return None
+    result = dict(row)
+    result['data'] = json.loads(result['data'])
+    return result
 
 
 def list_graphs(user_id=None):
@@ -3487,6 +3491,75 @@ def add_feed():
         return jsonify({'success': True, 'feed': new_feed, 'index': len(feeds) - 1})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+@admin_bp.route('/api/threat-intel/test-feed', methods=['POST'])
+@admin_required
+def test_feed():
+    """Probe a feed URL for connectivity without downloading the full body.
+
+    Tries HEAD first; falls back to a Range GET (first 1KB) if HEAD is
+    rejected with 405/501. Validates against SSRF rules before any request.
+    """
+    from security import validate_url_for_ssrf
+
+    payload = request.get_json(silent=True) or {}
+    url = (payload.get('url') or '').strip()
+
+    if not url:
+        return jsonify({'ok': False, 'error': 'URL is required', 'status_code': None, 'elapsed_ms': 0}), 400
+
+    is_valid, ssrf_error = validate_url_for_ssrf(url)
+    if not is_valid:
+        return jsonify({'ok': False, 'error': ssrf_error, 'status_code': None, 'elapsed_ms': 0}), 200
+
+    headers = {'User-Agent': 'LogBoost/1.0 connectivity-probe'}
+    timeout = 5
+    started = time.monotonic()
+
+    def _elapsed():
+        return int((time.monotonic() - started) * 1000)
+
+    try:
+        resp = requests.head(url, headers=headers, timeout=timeout, allow_redirects=True)
+        method = 'HEAD'
+
+        if resp.status_code in (405, 501):
+            range_headers = dict(headers)
+            range_headers['Range'] = 'bytes=0-1023'
+            resp = requests.get(url, headers=range_headers, timeout=timeout,
+                                allow_redirects=True, stream=True)
+            try:
+                next(resp.iter_content(2048), b'')
+            finally:
+                resp.close()
+            method = 'GET-Range'
+
+        cl_header = resp.headers.get('Content-Length', '')
+        content_length = int(cl_header) if cl_header.isdigit() else None
+        ok = 200 <= resp.status_code < 400
+
+        return jsonify({
+            'ok': ok,
+            'status_code': resp.status_code,
+            'content_length': content_length,
+            'content_type': resp.headers.get('Content-Type'),
+            'elapsed_ms': _elapsed(),
+            'method': method,
+            'error': None if ok else f'HTTP {resp.status_code}',
+        }), 200
+    except requests.exceptions.Timeout:
+        return jsonify({'ok': False, 'error': f'Timeout after {timeout}s',
+                        'status_code': None, 'elapsed_ms': _elapsed()}), 200
+    except requests.exceptions.SSLError as e:
+        return jsonify({'ok': False, 'error': f'SSL error: {str(e)[:120]}',
+                        'status_code': None, 'elapsed_ms': _elapsed()}), 200
+    except requests.exceptions.ConnectionError as e:
+        return jsonify({'ok': False, 'error': f'Connection error: {str(e)[:120]}',
+                        'status_code': None, 'elapsed_ms': _elapsed()}), 200
+    except Exception as e:
+        return jsonify({'ok': False, 'error': f'{type(e).__name__}: {str(e)[:120]}',
+                        'status_code': None, 'elapsed_ms': _elapsed()}), 200
 
 
 def init_admin(app, csrf=None):

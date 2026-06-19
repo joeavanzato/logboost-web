@@ -17,6 +17,7 @@
 !routes/
 !templates/
 !static/
+!scripts/
 
 # Step 4: Exclude nested unwanted files from included directories
 **/__pycache__/

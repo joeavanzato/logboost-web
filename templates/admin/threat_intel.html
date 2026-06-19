@@ -50,7 +50,13 @@
                 <option value="{{ tag }}">{{ tag }}</option>
                 {% endfor %}
             </select>
-            <button class="btn btn-primary" onclick="showAddFeedModal()">
+            <button class="btn secondary" id="test-all-btn" onclick="testAllFeeds()">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polyline points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+                </svg>
+                <span class="test-all-label">Test All</span>
+            </button>
+            <button class="btn primary" onclick="showAddFeedModal()">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <line x1="12" y1="5" x2="12" y2="19"/>
                     <line x1="5" y1="12" x2="19" y2="12"/>
@@ -90,6 +96,12 @@
                     </div>
                 </div>
                 <div class="ti-col-actions">
+                    <span class="ti-test-status" id="test-status-{{ loop.index0 }}"></span>
+                    <button class="ti-test-btn" onclick="testFeed({{ loop.index0 }})" title="Test connectivity">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+                        </svg>
+                    </button>
                     <span class="ti-saved" id="status-{{ loop.index0 }}">✓</span>
                     <button class="ti-delete" onclick="deleteFeed({{ loop.index0 }}, '{{ feed.name }}')" title="Delete">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -142,8 +154,8 @@
             </div>
         </div>
         <div class="modal-footer">
-            <button class="btn btn-secondary" onclick="hideAddFeedModal()">Cancel</button>
-            <button class="btn btn-primary" onclick="addNewFeed()">Add Feed</button>
+            <button class="btn secondary" onclick="hideAddFeedModal()">Cancel</button>
+            <button class="btn primary" onclick="addNewFeed()">Add Feed</button>
         </div>
     </div>
 </div>
@@ -224,28 +236,69 @@
 }
 
 .ti-search input {
-    padding-left: 2.25rem;
-    width: 180px;
+    padding: 0.625rem 1rem 0.625rem 2.25rem;
+    width: 220px;
+    font-family: var(--font-display);
+    font-size: 0.875rem;
+    color: var(--text-primary);
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-md);
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.ti-search input::placeholder {
+    color: var(--text-muted);
+}
+
+.ti-search input:focus {
+    outline: none;
+    border-color: var(--cyber-green);
+    box-shadow: 0 0 0 3px var(--cyber-green-glow);
 }
 
 .ti-actions select {
-    min-width: 120px;
+    appearance: none;
+    -webkit-appearance: none;
+    min-width: 140px;
+    padding: 0.625rem 2.25rem 0.625rem 1rem;
+    font-family: var(--font-display);
+    font-size: 0.875rem;
+    color: var(--text-primary);
+    background-color: var(--bg-elevated);
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23808a99' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.75rem center;
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.ti-actions select:hover {
+    border-color: var(--cyber-green);
+}
+
+.ti-actions select:focus {
+    outline: none;
+    border-color: var(--cyber-green);
+    box-shadow: 0 0 0 3px var(--cyber-green-glow);
 }
 
 /* Table layout */
 .ti-table {
-    background: var(--bg-secondary);
-    border: 1px solid var(--border-color);
+    background: var(--bg-surface);
+    border: 1px solid var(--border-muted);
     border-radius: 8px;
     overflow: hidden;
 }
 
 .ti-table-header {
     display: grid;
-    grid-template-columns: 200px 1fr 200px 80px;
+    grid-template-columns: 200px fit-content(600px) auto 1fr;
     padding: 0.75rem 1rem;
-    background: var(--bg-tertiary);
-    border-bottom: 1px solid var(--border-color);
+    background: var(--bg-elevated);
+    border-bottom: 1px solid var(--border-muted);
     font-size: 0.75rem;
     font-weight: 600;
     text-transform: uppercase;
@@ -255,9 +308,9 @@
 
 .ti-row {
     display: grid;
-    grid-template-columns: 200px 1fr 200px 80px;
+    grid-template-columns: 200px fit-content(600px) auto 1fr;
     padding: 0.75rem 1rem;
-    border-bottom: 1px solid var(--border-color);
+    border-bottom: 1px solid var(--border-muted);
     align-items: center;
     transition: background 0.15s;
 }
@@ -267,11 +320,39 @@
 }
 
 .ti-row:hover {
-    background: var(--bg-tertiary);
+    background: var(--bg-elevated);
 }
 
 .ti-row.hidden {
     display: none;
+}
+
+/* Zebra striping */
+.ti-table-body > .ti-row:nth-child(even) {
+    background: rgba(255, 255, 255, 0.025);
+}
+
+.ti-table-body > .ti-row:nth-child(even):hover {
+    background: var(--bg-elevated);
+}
+
+/* Column borders */
+.ti-table-header > div,
+.ti-row > div {
+    padding-right: 1rem;
+    border-right: 1px solid var(--border-muted);
+    min-width: 0;
+}
+
+.ti-table-header > div:last-child,
+.ti-row > div:last-child {
+    padding-right: 0;
+    border-right: none;
+}
+
+.ti-table-header > div:not(:first-child),
+.ti-row > div:not(:first-child) {
+    padding-left: 1rem;
 }
 
 /* Editable cells */
@@ -288,11 +369,11 @@
 }
 
 .ti-editable:hover {
-    background: var(--bg-tertiary);
+    background: var(--bg-elevated);
 }
 
 .ti-url {
-    font-family: 'JetBrains Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 0.85rem;
     color: var(--text-secondary);
 }
@@ -303,7 +384,7 @@
     margin: -0.25rem -0.5rem;
     font-size: inherit;
     font-family: inherit;
-    background: var(--bg-primary);
+    background: var(--bg-deep);
     border: 1px solid var(--cyber-green);
     border-radius: 4px;
     color: var(--text-primary);
@@ -364,7 +445,7 @@
     align-items: center;
     justify-content: center;
     background: transparent;
-    border: 1px dashed var(--border-color);
+    border: 1px dashed var(--border-muted);
     border-radius: 10px;
     cursor: pointer;
     color: var(--text-muted);
@@ -392,9 +473,26 @@
 }
 
 .ti-tag-input-wrap input {
-    width: 100px;
-    padding: 0.35rem 0.5rem;
+    width: 140px;
+    padding: 0.4rem 0.65rem;
+    font-family: var(--font-display);
     font-size: 0.8rem;
+    color: var(--text-primary);
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-md, 6px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.ti-tag-input-wrap input::placeholder {
+    color: var(--text-muted);
+}
+
+.ti-tag-input-wrap input:focus {
+    outline: none;
+    border-color: var(--cyber-green);
+    box-shadow: 0 0 0 3px var(--cyber-green-glow), 0 4px 12px rgba(0, 0, 0, 0.4);
 }
 
 /* Actions column */
@@ -403,6 +501,91 @@
     align-items: center;
     justify-content: flex-end;
     gap: 0.5rem;
+}
+
+/* Connectivity test button + status indicator */
+.ti-test-btn {
+    background: none;
+    border: none;
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-muted);
+    border-radius: var(--radius-sm, 4px);
+    cursor: pointer;
+    transition: color 0.15s ease, background 0.15s ease;
+}
+
+.ti-test-btn:hover {
+    color: var(--cyber-green);
+    background: var(--cyber-green-glow);
+}
+
+.ti-test-btn svg {
+    width: 16px;
+    height: 16px;
+}
+
+.ti-test-btn:disabled {
+    opacity: 0.5;
+    pointer-events: none;
+}
+
+.ti-test-status {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 22px;
+    height: 22px;
+    padding: 0 0.45rem;
+    border-radius: 11px;
+    font-size: 0.8rem;
+    font-weight: 700;
+    line-height: 1;
+}
+
+.ti-test-status:empty {
+    display: none;
+}
+
+.ti-test-status.pending {
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--text-muted);
+}
+
+.ti-test-status.pending::before {
+    content: '';
+    width: 12px;
+    height: 12px;
+    border: 2px solid var(--text-muted);
+    border-top-color: transparent;
+    border-radius: 50%;
+    animation: ti-spin 0.6s linear infinite;
+}
+
+.ti-test-status.ok {
+    background: rgba(0, 255, 136, 0.15);
+    color: var(--cyber-green);
+}
+
+.ti-test-status.fail {
+    background: rgba(255, 68, 68, 0.15);
+    color: #ff6b6b;
+}
+
+@keyframes ti-spin {
+    to { transform: rotate(360deg); }
+}
+
+#test-all-btn.testing {
+    pointer-events: none;
+    opacity: 0.7;
+}
+
+#test-all-btn.testing svg {
+    animation: ti-spin 1s linear infinite;
 }
 
 .ti-saved {
@@ -468,77 +651,138 @@
 .modal-overlay {
     display: none;
     position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: rgba(0, 0, 0, 0.7);
+    inset: 0;
+    background: rgba(0, 0, 0, 0.8);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
     z-index: 1000;
     align-items: center;
     justify-content: center;
+    padding: 1rem;
+    animation: modalFade 0.15s ease-out;
 }
 
 .modal-overlay.active {
     display: flex;
 }
 
+@keyframes modalFade {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+@keyframes modalRise {
+    from { opacity: 0; transform: translateY(8px) scale(0.98); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
 .modal-content {
-    background: var(--bg-secondary);
-    border: 1px solid var(--border-color);
-    border-radius: 12px;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-default, var(--border-muted));
+    border-radius: var(--radius-lg, 12px);
     width: 100%;
-    max-width: 480px;
+    max-width: 520px;
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+    animation: modalRise 0.2s ease-out;
 }
 
 .modal-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 1rem 1.25rem;
-    border-bottom: 1px solid var(--border-color);
+    padding: 1rem 1.5rem;
+    border-bottom: 1px solid var(--border-muted);
 }
 
 .modal-header h2 {
-    font-size: 1.1rem;
+    font-size: 1.15rem;
+    font-weight: 600;
+    color: var(--text-primary);
     margin: 0;
 }
 
 .modal-close {
     background: none;
     border: none;
-    font-size: 1.25rem;
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.5rem;
     color: var(--text-muted);
     cursor: pointer;
-    padding: 0.25rem;
+    border-radius: var(--radius-md, 6px);
     line-height: 1;
+    transition: background 0.15s ease, color 0.15s ease;
 }
 
 .modal-close:hover {
     color: var(--text-primary);
+    background: var(--bg-elevated);
 }
 
 .modal-body {
-    padding: 1.25rem;
+    padding: 1.5rem;
 }
 
 .modal-body .form-group {
-    margin-bottom: 1rem;
+    margin-bottom: 1.125rem;
 }
 
 .modal-body .form-group:last-child {
     margin-bottom: 0;
 }
 
+.modal-body .form-group label {
+    display: block;
+    margin-bottom: 0.5rem;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--text-secondary, var(--text-muted));
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.modal-body .form-group > input[type="text"],
+.modal-body .form-group > input[type="url"] {
+    width: 100%;
+    padding: 0.625rem 1rem;
+    font-family: var(--font-display);
+    font-size: 0.875rem;
+    color: var(--text-primary);
+    background: var(--bg-surface);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-md, 6px);
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.modal-body .form-group > input::placeholder {
+    color: var(--text-muted);
+}
+
+.modal-body .form-group > input:focus {
+    outline: none;
+    border-color: var(--cyber-green);
+    box-shadow: 0 0 0 3px var(--cyber-green-glow);
+}
+
 .modal-tags {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.5rem;
+    gap: 0.4rem;
     padding: 0.5rem;
-    background: var(--bg-tertiary);
-    border: 1px solid var(--border-color);
-    border-radius: 6px;
-    min-height: 40px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-md, 6px);
+    min-height: 42px;
     align-items: center;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.modal-tags:focus-within {
+    border-color: var(--cyber-green);
+    box-shadow: 0 0 0 3px var(--cyber-green-glow);
 }
 
 .modal-tags .ti-tag {
@@ -547,12 +791,17 @@
 
 .modal-tag-input {
     flex: 1;
-    min-width: 100px;
+    min-width: 120px;
     background: transparent;
     border: none;
-    padding: 0.25rem;
-    font-size: 0.9rem;
+    padding: 0.25rem 0.4rem;
+    font-family: var(--font-display);
+    font-size: 0.875rem;
     color: var(--text-primary);
+}
+
+.modal-tag-input::placeholder {
+    color: var(--text-muted);
 }
 
 .modal-tag-input:focus {
@@ -563,9 +812,11 @@
     display: flex;
     justify-content: flex-end;
     gap: 0.75rem;
-    padding: 1rem 1.25rem;
-    border-top: 1px solid var(--border-color);
-    background: var(--bg-tertiary);
+    padding: 1rem 1.5rem;
+    border-top: 1px solid var(--border-muted);
+    background: var(--bg-elevated);
+    border-bottom-left-radius: var(--radius-lg, 12px);
+    border-bottom-right-radius: var(--radius-lg, 12px);
 }
 
 /* Responsive */
@@ -649,7 +900,7 @@ function updateFeed(index, field, value) {
     const data = {};
     data[field] = value;
     
-    fetch(`/admin/api/threat-intel/feed/${index}`, {
+    csrfFetch(`/admin/api/threat-intel/feed/${index}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data)
@@ -738,7 +989,7 @@ function removeTag(index, tag) {
 function deleteFeed(index, name) {
     if (!confirm(`Delete feed "${name}"?`)) return;
     
-    fetch(`/admin/api/threat-intel/feed/${index}`, { method: 'DELETE' })
+    csrfFetch(`/admin/api/threat-intel/feed/${index}`, { method: 'DELETE' })
     .then(res => res.json())
     .then(data => {
         if (data.error) alert('Error: ' + data.error);
@@ -801,7 +1052,7 @@ function addNewFeed() {
     
     const tags = newFeedTags.length > 0 ? newFeedTags : ['suspicious'];
     
-    fetch('/admin/api/threat-intel/feed', {
+    csrfFetch('/admin/api/threat-intel/feed', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name, url, type: tags })
@@ -812,6 +1063,78 @@ function addNewFeed() {
         else location.reload();
     })
     .catch(err => alert('Error: ' + err.message));
+}
+
+// ===== Connectivity testing =====
+
+function applyTestResult(el, data) {
+    if (data.ok) {
+        el.className = 'ti-test-status ok';
+        el.textContent = '✓';
+        const parts = [];
+        if (data.status_code) parts.push(`HTTP ${data.status_code}`);
+        if (data.elapsed_ms != null) parts.push(`${data.elapsed_ms}ms`);
+        if (data.method) parts.push(`via ${data.method}`);
+        if (data.content_type) parts.push(data.content_type);
+        if (data.content_length != null) parts.push(`${data.content_length.toLocaleString()} bytes`);
+        el.title = parts.join(' • ');
+    } else {
+        el.className = 'ti-test-status fail';
+        el.textContent = '✗';
+        el.title = data.error || 'Failed';
+    }
+}
+
+async function testFeed(index) {
+    const row = document.querySelector(`.ti-row[data-index="${index}"]`);
+    if (!row) return;
+    const urlEl = row.querySelector('.ti-url');
+    const url = urlEl ? (urlEl.getAttribute('title') || urlEl.textContent.trim()) : '';
+    const statusEl = document.getElementById(`test-status-${index}`);
+    if (!statusEl || !url) return;
+
+    statusEl.className = 'ti-test-status pending';
+    statusEl.textContent = '';
+    statusEl.title = 'Testing...';
+
+    try {
+        const res = await csrfFetch('/admin/api/threat-intel/test-feed', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url })
+        });
+        const data = await res.json();
+        applyTestResult(statusEl, data);
+    } catch (err) {
+        applyTestResult(statusEl, { ok: false, error: err.message || 'Network error' });
+    }
+}
+
+async function testAllFeeds() {
+    const btn = document.getElementById('test-all-btn');
+    const rows = Array.from(document.querySelectorAll('.ti-row[data-index]'));
+    if (rows.length === 0) return;
+
+    btn.disabled = true;
+    btn.classList.add('testing');
+
+    const indices = rows.map(r => parseInt(r.dataset.index, 10));
+    const concurrency = Math.min(5, indices.length);
+    let cursor = 0;
+
+    async function worker() {
+        while (cursor < indices.length) {
+            const idx = indices[cursor++];
+            await testFeed(idx);
+        }
+    }
+
+    try {
+        await Promise.all(Array.from({ length: concurrency }, worker));
+    } finally {
+        btn.disabled = false;
+        btn.classList.remove('testing');
+    }
 }
 </script>
 {% endblock %}
