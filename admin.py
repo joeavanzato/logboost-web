@@ -730,14 +730,21 @@ def dashboard():
         threat_db_missing = not threat_db_path.exists()
         intel_indexes_missing = not threat_db_missing and not _intel_indexes_present(threat_db_path)
 
+        from app import check_mmdb_files_exist  # lazy: app imports admin
+        mmdb_available, mmdb_missing = check_mmdb_files_exist()
+
         return render_template('admin/dashboard.html',
                                tasks=tasks,
+                               task_labels=TASK_LABELS,
                                recent_logs=recent_logs,
                                maxmind_key_set=maxmind_key_set,
                                shodan_key_set=shodan_key_set,
                                account_count=account_count,
+                               mmdb_available=mmdb_available,
+                               mmdb_missing=mmdb_missing,
                                threat_db_missing=threat_db_missing,
-                               intel_indexes_missing=intel_indexes_missing)
+                               intel_indexes_missing=intel_indexes_missing,
+                               logboost_version=get_setting('logboost_installed_version', BUNDLED_LOGBOOST_VERSION))
 
 
 # ============================================
@@ -1809,15 +1816,26 @@ def test_api_key():
 # Task Management
 # ============================================
 
+def _tasks_page(tab):
+    """The Tasks screen: the schedule and the run log are two tabs of one page."""
+    page = max(request.args.get('page', 1, type=int), 1)
+    per_page = 20
+    with db() as conn:
+        tasks = conn.execute('SELECT * FROM scheduled_tasks ORDER BY task_type').fetchall()
+        total = conn.execute('SELECT COUNT(*) FROM task_logs').fetchone()[0]
+        logs = conn.execute('SELECT * FROM task_logs ORDER BY started_at DESC LIMIT ? OFFSET ?',
+                            (per_page, (page - 1) * per_page)).fetchall()
+    return render_template('admin/tasks.html', tab=tab, tasks=tasks, task_labels=TASK_LABELS,
+                           maxmind_key_set=bool(get_setting('maxmind_api_key')),
+                           logs=logs, page=page, total=total,
+                           total_pages=(total + per_page - 1) // per_page)
+
+
 @admin_bp.route('/tasks')
 @admin_required
 def tasks():
-    """View and manage scheduled tasks."""
-    with db() as conn:
-        cursor = conn.cursor()
-        cursor.execute('SELECT * FROM scheduled_tasks ORDER BY task_type')
-        tasks = cursor.fetchall()
-        return render_template('admin/tasks.html', tasks=tasks)
+    """Scheduled tasks."""
+    return _tasks_page('log' if request.args.get('tab') == 'log' else 'schedule')
 
 
 @admin_bp.route('/tasks/<task_type>/configure', methods=['POST'])
@@ -1881,34 +1899,8 @@ def run_task(task_type):
 @admin_bp.route('/logs')
 @admin_required
 def logs():
-    """View task logs."""
-    page = request.args.get('page', 1, type=int)
-    per_page = 20
-    
-    with db() as conn:
-        cursor = conn.cursor()
-    
-        # Get total count
-        cursor.execute('SELECT COUNT(*) as count FROM task_logs')
-        total = cursor.fetchone()['count']
-    
-        # Get paginated logs
-        offset = (page - 1) * per_page
-        cursor.execute('''
-            SELECT * FROM task_logs 
-            ORDER BY started_at DESC 
-            LIMIT ? OFFSET ?
-        ''', (per_page, offset))
-        logs = cursor.fetchall()
-    
-    
-        total_pages = (total + per_page - 1) // per_page
-    
-        return render_template('admin/logs.html', 
-                               logs=logs, 
-                               page=page, 
-                               total_pages=total_pages,
-                               total=total)
+    """The run log tab of the Tasks screen (the former Task Logs page)."""
+    return _tasks_page('log')
 
 
 @admin_bp.route('/logs/<int:log_id>')
@@ -1924,7 +1916,7 @@ def log_detail(log_id):
             flash('Log entry not found', 'error')
             return redirect(url_for('admin.logs'))
     
-        return render_template('admin/log_detail.html', log=log)
+        return render_template('admin/log_detail.html', log=log, task_labels=TASK_LABELS)
 
 
 @admin_bp.route('/logs/clear', methods=['POST'])
@@ -2103,6 +2095,14 @@ def get_api_key():
 
 
 TASK_TYPES = ('update_geo', 'update_ti', 'build_ti', 'backup')
+
+# Display name and one-line description per task type
+TASK_LABELS = {
+    'update_geo': ('Update geolocation', 'Downloads the three GeoLite2 databases from MaxMind'),
+    'update_ti': ('Update threat intel', 'Fetches every configured feed and rebuilds the search index'),
+    'build_ti': ('Build threat intel', 'Rebuilds the threat database from the configured feeds'),
+    'backup': ('Back up databases', 'Copies the admin database to the backup directory'),
+}
 
 
 def claim_task(task_type, runner_id) -> bool:

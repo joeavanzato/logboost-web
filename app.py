@@ -240,10 +240,47 @@ def feed_count():
         return None
 
 
+def _as_datetime(value):
+    if isinstance(value, datetime):
+        return value
+    try:
+        return datetime.fromisoformat(str(value))
+    except ValueError:
+        return None
+
+
+@app.template_filter('ago')
+def ago(value):
+    """'5 min ago' / 'in 3 hours' for a stored server-local timestamp; the raw value if unparseable."""
+    when = _as_datetime(value)
+    if when is None:
+        return value or ''
+    seconds = (datetime.now() - when).total_seconds()
+    future, seconds = seconds < 0, abs(seconds)
+    if seconds < 60:
+        return 'in a moment' if future else 'just now'
+    for size, unit in ((86400, 'day'), (3600, 'hour'), (60, 'min')):
+        if seconds >= size:
+            count = int(seconds // size)
+            text = f"{count} {unit}{'s' if count != 1 and unit != 'min' else ''}"
+            break
+    return f'in {text}' if future else f'{text} ago'
+
+
+def duration(start, end):
+    """'1m 52s' between two stored timestamps; '' when either is missing."""
+    start, end = _as_datetime(start), _as_datetime(end)
+    if not start or not end:
+        return ''
+    seconds = max(int((end - start).total_seconds()), 0)
+    minutes, seconds = divmod(seconds, 60)
+    return f'{minutes}m {seconds:02d}s' if minutes else f'{seconds}s'
+
+
 @app.context_processor
 def inject_shell_helpers():
     """Helpers the shared layout calls; nothing is computed unless a template uses them."""
-    return {'setup_steps': setup_steps, 'feed_count': feed_count}
+    return {'setup_steps': setup_steps, 'feed_count': feed_count, 'duration': duration}
 
 
 def _get_threats_db_path():
