@@ -90,6 +90,17 @@
     </div>
     {% endif %}
 
+    <!-- Row cap notice: only the first rows are embedded in the page -->
+    {% if rows_embedded %}
+    <div class="large-file-warning" id="row-cap-banner">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/>
+            <path d="M12 16v-4M12 8h.01"/>
+        </svg>
+        <span>Showing the first {{ '{:,}'.format(rows_embedded) }} of {{ '{:,}'.format(total_rows) }} rows. Sorting, filtering and the Filtered download apply to these rows only; statistics cover the full file. <a href="/download" download>Download the full CSV</a> to work with every row.</span>
+    </div>
+    {% endif %}
+
     <!-- Results Tabs -->
     <div class="results-tabs">
         <button class="results-tab active" data-results-tab="table" onclick="window.switchResultsTab('table')">

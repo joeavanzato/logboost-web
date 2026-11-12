@@ -1095,6 +1095,7 @@ def settings():
                                max_adhoc_ips=max_adhoc_ips,
                                max_unique_values=max_unique_values,
                                large_file_warning_threshold=large_file_warning_threshold,
+                               max_embedded_rows=get_max_embedded_rows(),
                                max_url_fetch_size_mb=max_url_fetch_size_mb)
 
 
@@ -1351,6 +1352,7 @@ def save_scalability_settings():
     max_adhoc_ips = request.form.get('max_adhoc_ips', '1000').strip()
     max_unique_values = request.form.get('max_unique_values', '10000').strip()
     large_file_warning_threshold = request.form.get('large_file_warning_threshold', '10000').strip()
+    max_embedded_rows = request.form.get('max_embedded_rows', '50000').strip()
     max_url_fetch_size_mb = request.form.get('max_url_fetch_size_mb', '10').strip()
     
     # Validate ranges
@@ -1368,6 +1370,11 @@ def save_scalability_settings():
         large_file_warning_threshold = max(1000, min(1000000, int(large_file_warning_threshold)))
     except ValueError:
         large_file_warning_threshold = 10000
+
+    try:
+        max_embedded_rows = max(1000, min(1000000, int(max_embedded_rows)))
+    except ValueError:
+        max_embedded_rows = 50000
     
     try:
         max_url_fetch_size_mb = max(1, min(100, int(max_url_fetch_size_mb)))
@@ -1391,6 +1398,11 @@ def save_scalability_settings():
             INSERT OR REPLACE INTO settings (key, value, updated_at) 
             VALUES ('large_file_warning_threshold', ?, CURRENT_TIMESTAMP)
         ''', (str(large_file_warning_threshold),))
+
+        cursor.execute('''
+            INSERT OR REPLACE INTO settings (key, value, updated_at)
+            VALUES ('max_embedded_rows', ?, CURRENT_TIMESTAMP)
+        ''', (str(max_embedded_rows),))
     
         cursor.execute('''
             INSERT OR REPLACE INTO settings (key, value, updated_at) 
@@ -1403,6 +1415,7 @@ def save_scalability_settings():
             'max_adhoc_ips': max_adhoc_ips,
             'max_unique_values': max_unique_values,
             'large_file_warning_threshold': large_file_warning_threshold,
+            'max_embedded_rows': max_embedded_rows,
             'max_url_fetch_size_mb': max_url_fetch_size_mb
         })
         flash('Scalability settings saved successfully', 'success')
@@ -3132,6 +3145,14 @@ def get_large_file_warning_threshold():
         return int(get_setting('large_file_warning_threshold', '10000'))
     except (ValueError, TypeError):
         return 10000
+
+
+def get_max_embedded_rows():
+    """Most result rows embedded in the results page. Larger results show the first N rows
+    and point to the CSV download; statistics and the download always cover the whole file.
+    Default: 50000
+    """
+    return get_int_setting('max_embedded_rows', 50000, 1000, 1000000)
 
 
 def get_max_url_fetch_size_mb():

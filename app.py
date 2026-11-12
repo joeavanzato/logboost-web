@@ -404,6 +404,45 @@ def _assert_within(path: Path, base: Path) -> Path:
     return resolved
 
 
+def current_output_path():
+    """The session's result file as a Path, or None when there is none, it no longer exists,
+    or the stored value points outside OUTPUT_FOLDER."""
+    raw = session.get('current_output')
+    if not raw:
+        return None
+    try:
+        path = _assert_within(Path(raw), OUTPUT_FOLDER)
+    except (ValueError, OSError):
+        return None
+    return path if path.is_file() else None
+
+
+# LogBoost runs inside the request for up to five minutes. Two at a time leaves the remaining
+# gunicorn threads free for the rest of the app; further callers are refused straight away.
+# ponytail: in-process semaphore, correct only because gunicorn runs a single worker.
+# Background jobs with a queue are the upgrade path.
+MAX_CONCURRENT_ENRICHMENTS = 2
+_enrich_slots = threading.BoundedSemaphore(MAX_CONCURRENT_ENRICHMENTS)
+BUSY_MESSAGE = 'The server is busy with other enrichments. Please try again in a moment.'
+
+
+def limit_enrichments(as_json=False):
+    """Refuse the request immediately when MAX_CONCURRENT_ENRICHMENTS LogBoost runs are in flight."""
+    def decorator(fn):
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            if not _enrich_slots.acquire(blocking=False):
+                if as_json:
+                    return jsonify({'error': BUSY_MESSAGE}), 503
+                return render_template('partials/error.html', error=BUSY_MESSAGE)
+            try:
+                return fn(*args, **kwargs)
+            finally:
+                _enrich_slots.release()
+        return wrapper
+    return decorator
+
+
 def extract_ips(text: str) -> list[str]:
     """Extract all unique IP addresses from text, including defanged IPs."""
     # Use the IOC extraction function which handles defanged IPs and validates public IPs
@@ -578,17 +617,22 @@ def read_csv_paginated(
     }
 
 
-def read_csv_all(filepath: Path) -> dict:
-    """Read entire CSV file for client-side processing."""
+def read_csv_all(filepath: Path, max_rows=None) -> dict:
+    """Read a CSV for client-side processing. With max_rows, only that many rows are kept;
+    total_rows always counts the whole file."""
     rows = []
     headers = []
-    
+    total_rows = 0
+
     try:
         with open(filepath, 'r', newline='', encoding='utf-8', errors='replace') as f:
             reader = csv.reader(f)
             headers = next(reader, [])
-            rows = list(reader)
-            
+            for row in reader:
+                total_rows += 1
+                if max_rows is None or total_rows <= max_rows:
+                    rows.append(row)
+
     except Exception:
         app.logger.exception('Could not read results file')
         return {
@@ -597,11 +641,11 @@ def read_csv_all(filepath: Path) -> dict:
             'rows': [],
             'total_rows': 0
         }
-    
+
     return {
         'headers': headers,
         'rows': rows,
-        'total_rows': len(rows)
+        'total_rows': total_rows
     }
 
 
@@ -626,6 +670,37 @@ def cleanup_session(session_id: str) -> None:
         shutil.rmtree(session_upload)
     if session_output.exists():
         shutil.rmtree(session_output)
+
+
+def reset_session_dirs():
+    """Empty this session's upload and output directories (subdirectories included) and
+    return them as (upload, output)."""
+    session_id = session.get('session_id')
+    if not session_id:
+        session_id = session['session_id'] = str(uuid.uuid4())
+    session_upload, session_output = get_session_dir(session_id)
+    for directory in (session_upload, session_output):
+        shutil.rmtree(directory, ignore_errors=True)
+        directory.mkdir(parents=True, exist_ok=True)
+    return session_upload, session_output
+
+
+def results_payload(output_file: Path) -> dict:
+    """Template data for a result file. At most max_embedded_rows rows go into the page;
+    total_rows, statistics and the CSV download always cover the whole file."""
+    max_rows = get_max_embedded_rows()
+    data = read_csv_all(output_file, max_rows=max_rows)
+    data['filename'] = output_file.name
+    data['page_size'] = request.form.get('page_size', 50, type=int)
+    total_rows = data.get('total_rows', 0)
+    if total_rows > max_rows:
+        data['rows_embedded'] = max_rows
+    elif total_rows > get_large_file_warning_threshold():
+        data['large_file_warning'] = (
+            f"This result set has {total_rows:,} rows, which may affect browser performance. "
+            f"Consider using filters or downloading the CSV for analysis in a spreadsheet application."
+        )
+    return data
 
 
 @app.route('/')
@@ -655,17 +730,11 @@ def index():
 
 @app.route('/enrich/text', methods=['POST'])
 @login_required
+@limit_enrichments()
 def enrich_text():
     """Enrich IP addresses extracted from pasted text."""
-    session_id = session.get('session_id', str(uuid.uuid4()))
-    session_upload, session_output = get_session_dir(session_id)
-    
-    # Clean previous results
-    for f in session_upload.iterdir():
-        f.unlink()
-    for f in session_output.iterdir():
-        f.unlink()
-    
+    session_upload, session_output = reset_session_dirs()
+
     text = request.form.get('text', '')
     if not text.strip():
         return render_template('partials/error.html', error='No text provided')
@@ -728,37 +797,20 @@ def enrich_text():
     output_file = output_files[0]
     session['current_output'] = str(output_file)
     
-    # Read all results for client-side processing
-    data = read_csv_all(output_file)
+    data = results_payload(output_file)
     data['ip_count'] = len(ips)
-    data['filename'] = output_file.name
-    data['page_size'] = request.form.get('page_size', 50, type=int)
-    
-    # Add large file warning if threshold exceeded
-    large_file_threshold = get_large_file_warning_threshold()
-    if data.get('total_rows', 0) > large_file_threshold:
-        data['large_file_warning'] = (
-            f"This result set has {data['total_rows']:,} rows, which may affect browser performance. "
-            f"Consider using filters or downloading the CSV for analysis in a spreadsheet application."
-        )
-    
+
     log_audit('logboost_enrich', 'logboost', None, {'source': 'text', 'ip_count': len(ips)})
     return render_template('partials/results.html', **data)
 
 
 @app.route('/enrich/file', methods=['POST'])
 @login_required
+@limit_enrichments()
 def enrich_file():
     """Enrich uploaded log file."""
-    session_id = session.get('session_id', str(uuid.uuid4()))
-    session_upload, session_output = get_session_dir(session_id)
-    
-    # Clean previous results
-    for f in session_upload.iterdir():
-        f.unlink()
-    for f in session_output.iterdir():
-        f.unlink()
-    
+    session_upload, session_output = reset_session_dirs()
+
     if 'file' not in request.files:
         return render_template('partials/error.html', error='No file uploaded')
     
@@ -847,20 +899,9 @@ def enrich_file():
     output_file = output_files[0]
     session['current_output'] = str(output_file)
     
-    # Read all results for client-side processing
-    data = read_csv_all(output_file)
-    data['filename'] = output_file.name
+    data = results_payload(output_file)
     data['original_filename'] = filename
-    data['page_size'] = request.form.get('page_size', 50, type=int)
-    
-    # Add large file warning if threshold exceeded
-    large_file_threshold = get_large_file_warning_threshold()
-    if data.get('total_rows', 0) > large_file_threshold:
-        data['large_file_warning'] = (
-            f"This result set has {data['total_rows']:,} rows, which may affect browser performance. "
-            f"Consider using filters or downloading the CSV for analysis in a spreadsheet application."
-        )
-    
+
     log_audit('logboost_enrich', 'logboost', None, {'source': 'file', 'filename': filename, 'row_count': data.get('total_rows', 0)})
     return render_template('partials/results.html', **data)
 
@@ -869,14 +910,9 @@ def enrich_file():
 @login_required
 def results_page():
     """Get a specific page of results."""
-    output_file = session.get('current_output')
-    if not output_file or not Path(output_file).exists():
+    output_path = current_output_path()
+    if not output_path:
         return render_template('partials/error.html', error='No results available')
-
-    try:
-        output_path = _assert_within(Path(output_file), OUTPUT_FOLDER)
-    except ValueError:
-        return render_template('partials/error.html', error='Invalid results path'), 400
 
     page = max(1, request.args.get('page', 1, type=int))
     page_size = max(1, min(1000, request.args.get('page_size', 50, type=int)))
@@ -891,14 +927,9 @@ def results_page():
 @login_required
 def download():
     """Download the current result file."""
-    output_file = session.get('current_output')
-    if not output_file or not Path(output_file).exists():
+    output_path = current_output_path()
+    if not output_path:
         return 'No file available', 404
-
-    try:
-        output_path = _assert_within(Path(output_file), OUTPUT_FOLDER)
-    except ValueError:
-        return 'Invalid file path', 400
 
     return send_file(
         output_path,
@@ -983,37 +1014,63 @@ def health():
 @login_required
 def get_stats():
     """Generate statistics for the current result file."""
-    output_file = session.get('current_output')
-    if not output_file or not Path(output_file).exists():
+    output_path = current_output_path()
+    if not output_path:
         return render_template('partials/error.html', error='No results available for statistics')
-    
-    stats = compute_statistics(Path(output_file))
-    return render_template('partials/stats.html', stats=stats)
+
+    return render_template('partials/stats.html', stats=cached_statistics(output_path))
+
+
+# Summary sections whose all_* lists can be fetched for the statistics modal
+STAT_VALUE_SECTIONS = ('threat_summary', 'geo_summary', 'dns_summary', 'whois_summary', 'shodan_summary')
+
+
+@app.route('/stats/values/<section>/<name>')
+@login_required
+def get_stat_values(section: str, name: str):
+    """Full value list behind one statistics card, fetched when its modal opens."""
+    output_path = current_output_path()
+    if not output_path or section not in STAT_VALUE_SECTIONS or not name.startswith('all_'):
+        return jsonify({'values': [], 'total_rows': 0})
+
+    stats = cached_statistics(output_path)
+    return jsonify({
+        'values': stats.get(section, {}).get(name) or [],
+        'total_rows': stats.get('total_rows', 0)
+    })
 
 
 @app.route('/column-values/<column_name>')
 @login_required
 def get_column_values(column_name: str):
     """Get unique values for a specific column (for filter dropdowns)."""
-    output_file = session.get('current_output')
-    if not output_file or not Path(output_file).exists():
+    output_path = current_output_path()
+    if not output_path:
         return jsonify({'values': []})
-    
-    values = get_unique_column_values(Path(output_file), column_name, limit=100)
-    return jsonify({'values': values})
+
+    return jsonify({'values': get_unique_column_values(output_path, column_name, limit=100)})
+
+
+def _pipe_counts(pairs) -> list:
+    """Total the counts of the items inside pipe-separated values: [(item, count)], most common first."""
+    totals = {}
+    for value, count in pairs:
+        if value and value != 'none':
+            for item in value.split('|'):
+                item = item.strip()
+                if item:
+                    totals[item] = totals.get(item, 0) + count
+    return sorted(totals.items(), key=lambda x: x[1], reverse=True)
 
 
 def compute_statistics(filepath: Path) -> dict:
     """Compute comprehensive statistics for a CSV file.
-    
-    Memory-efficient version that:
-    - Streams rows instead of loading all into memory
-    - Caps unique value tracking at configurable limit (default 10,000)
-    - Adds truncation flags when limits are exceeded
+
+    Rows are streamed. Each column tracks at most max_unique_values distinct values; once a
+    column hits that limit its unique count is a lower bound (unique_count_truncated).
     """
-    # Get configurable limit for unique values per column
     max_unique = get_max_unique_values()
-    
+
     stats = {
         'total_rows': 0,
         'total_columns': 0,
@@ -1026,327 +1083,232 @@ def compute_statistics(filepath: Path) -> dict:
         'shodan_summary': {},
         'warnings': []  # Track any warnings about truncated data
     }
-    
+
     try:
         with open(filepath, 'r', newline='', encoding='utf-8', errors='replace') as f:
             reader = csv.DictReader(f)
             headers = reader.fieldnames or []
             stats['total_columns'] = len(headers)
-            
-            # Initialize column stats with memory-conscious structures
+
             column_stats = {h: {
-                'name': h,
-                'is_enrichment': h.startswith('lb_'),
                 'total_values': 0,
                 'empty_count': 0,
-                'unique_values': set(),
-                'unique_truncated': False,  # Flag if we stopped tracking uniques
                 'value_counts': {},
-                'counts_truncated': False,  # Flag if we stopped tracking counts
+                'truncated': False,  # a new value arrived after the limit was reached
                 'sample_values': []
             } for h in headers}
-            
-            # Stream rows instead of loading all into memory
+
             row_count = 0
             for row in reader:
                 row_count += 1
                 for header in headers:
-                    # Handle None values from CSV
-                    raw_value = row.get(header)
-                    value = (raw_value or '').strip()
+                    value = (row.get(header) or '').strip()
                     col_stat = column_stats[header]
                     col_stat['total_values'] += 1
-                    
+
                     if not value or value.lower() == 'none':
                         col_stat['empty_count'] += 1
+                        continue
+
+                    counts = col_stat['value_counts']
+                    if value in counts:
+                        counts[value] += 1
+                    elif len(counts) < max_unique:
+                        counts[value] = 1
                     else:
-                        # Track unique values up to the limit
-                        if not col_stat['unique_truncated']:
-                            if len(col_stat['unique_values']) < max_unique:
-                                col_stat['unique_values'].add(value)
-                            else:
-                                col_stat['unique_truncated'] = True
-                        
-                        # Track value counts up to the limit
-                        if not col_stat['counts_truncated']:
-                            if len(col_stat['value_counts']) < max_unique:
-                                col_stat['value_counts'][value] = col_stat['value_counts'].get(value, 0) + 1
-                            elif value in col_stat['value_counts']:
-                                # Still count values we're already tracking
-                                col_stat['value_counts'][value] += 1
-                            else:
-                                col_stat['counts_truncated'] = True
-                        elif value in col_stat['value_counts']:
-                            col_stat['value_counts'][value] += 1
-                        
-                        # Collect sample values
-                        if len(col_stat['sample_values']) < 5 and value not in col_stat['sample_values']:
-                            col_stat['sample_values'].append(value)
-            
+                        col_stat['truncated'] = True
+
+                    if len(col_stat['sample_values']) < 5 and value not in col_stat['sample_values']:
+                        col_stat['sample_values'].append(value)
+
             stats['total_rows'] = row_count
-            
-            # Check if any columns were truncated and add warning
-            truncated_cols = [h for h, s in column_stats.items() if s['unique_truncated'] or s['counts_truncated']]
+
+            truncated_cols = [h for h, s in column_stats.items() if s['truncated']]
             if truncated_cols:
                 stats['warnings'].append(
                     f"Statistics for {len(truncated_cols)} column(s) were limited to {max_unique:,} unique values for memory efficiency."
                 )
-            
-            # Process column stats
+
             for header in headers:
                 col_stat = column_stats[header]
-                unique_count = len(col_stat['unique_values'])
+                truncated = col_stat['truncated']
+                unique_count = len(col_stat['value_counts'])
                 total = col_stat['total_values']
                 empty = col_stat['empty_count']
-                
-                # Get ALL values sorted by count (for modal expansion)
+
+                # All tracked values, most common first
                 all_values_sorted = sorted(
                     col_stat['value_counts'].items(),
                     key=lambda x: x[1],
                     reverse=True
                 )
-                
-                # Top 10 values
-                sorted_values = all_values_sorted[:10]
-                
-                # Get rare values (appearing only once or twice)
+
+                # Rare values (appearing only once or twice)
                 rare_values = sorted(
                     [(v, c) for v, c in col_stat['value_counts'].items() if c <= 2],
                     key=lambda x: x[1]
                 )[:10]
-                
-                # Calculate entropy/diversity score
+
                 fill_rate = ((total - empty) / total * 100) if total > 0 else 0
-                uniqueness = (unique_count / (total - empty) * 100) if (total - empty) > 0 else 0
-                
+                uniqueness = round((unique_count / (total - empty) * 100) if (total - empty) > 0 else 0, 1)
+
                 stats['columns'].append({
                     'name': header,
-                    'is_enrichment': col_stat['is_enrichment'],
+                    'is_enrichment': header.startswith('lb_'),
                     'unique_count': unique_count,
-                    'unique_count_truncated': col_stat['unique_truncated'],
+                    'unique_count_truncated': truncated,
+                    # Past the limit both figures are lower bounds, and are shown as such
+                    'unique_display': f"{unique_count:,}{'+' if truncated else ''}",
+                    'uniqueness_display': f"{'≥ ' if truncated else ''}{uniqueness}%",
                     'empty_count': empty,
                     'fill_rate': round(fill_rate, 1),
-                    'uniqueness': round(uniqueness, 1),
-                    'top_values': sorted_values,
-                    'all_values': all_values_sorted,  # For modal expansion
+                    'uniqueness': uniqueness,
+                    'top_values': all_values_sorted[:10],
+                    'all_values': all_values_sorted,
                     'rare_values': rare_values,
                     'sample_values': col_stat['sample_values']
                 })
-            
-            # Generate enrichment-specific summaries
+
+            # Enrichment-specific summaries. Pipe-separated columns are aggregated from
+            # all tracked values, not just the ten most common rows.
+            threat, geo, dns = stats['threat_summary'], stats['geo_summary'], stats['dns_summary']
+            whois, shodan = stats['whois_summary'], stats['shodan_summary']
             for col in stats['columns']:
                 name = col['name']
-                
-                # Threat intelligence summary
+                top, everything = col['top_values'], col['all_values']
+
+                # Threat intelligence
                 if name == 'lb_ThreatCategories':
-                    threat_cats = {}
-                    for value, count in col['top_values']:
-                        if value and value != 'none':
-                            for cat in value.split('|'):
-                                cat = cat.strip()
-                                if cat:
-                                    threat_cats[cat] = threat_cats.get(cat, 0) + count
-                    all_categories = sorted(
-                        threat_cats.items(), key=lambda x: x[1], reverse=True
-                    )
-                    stats['threat_summary']['categories'] = all_categories[:10]
-                    stats['threat_summary']['all_categories'] = all_categories
-                
+                    threat['all_categories'] = _pipe_counts(everything)
+                    threat['categories'] = threat['all_categories'][:10]
+
                 if name == 'lb_ThreatFeedCount':
-                    stats['threat_summary']['feed_counts'] = col['top_values']
-                    stats['threat_summary']['all_feed_counts'] = col.get('all_values', col['top_values'])
-                
-                if name == 'lb_ThreatFeeds' or name == 'lb_Threat_Feeds' or name == 'lb_ThreatFeed':
-                    feed_names = {}
-                    for value, count in col['all_values']:
-                        if value and value != 'none':
-                            for feed in value.split('|'):
-                                feed = feed.strip()
-                                if feed:
-                                    feed_names[feed] = feed_names.get(feed, 0) + count
-                    all_feeds = sorted(
-                        feed_names.items(), key=lambda x: x[1], reverse=True
-                    )
-                    stats['threat_summary']['feeds'] = all_feeds[:10]
-                    stats['threat_summary']['all_feeds'] = all_feeds
-                    # Store the actual column name for filtering
-                    stats['threat_summary']['feeds_column'] = name
-                
-                # Geo summary
+                    threat['feed_counts'] = top
+                    threat['all_feed_counts'] = everything
+
+                if name in ('lb_ThreatFeeds', 'lb_Threat_Feeds', 'lb_ThreatFeed'):
+                    threat['all_feeds'] = _pipe_counts(everything)
+                    threat['feeds'] = threat['all_feeds'][:10]
+                    threat['feeds_column'] = name  # actual column name, for filtering
+
+                # Geo
                 if name == 'lb_Country':
-                    stats['geo_summary']['countries'] = col['top_values']
-                
+                    geo['countries'] = top
                 if name == 'lb_ASN':
-                    stats['geo_summary']['asns'] = col['top_values']
-                
+                    geo['asns'] = top
                 if name == 'lb_City':
-                    stats['geo_summary']['cities'] = col['top_values']
-                
+                    geo['cities'] = top
                 if name == 'lb_Org':
-                    stats['geo_summary']['orgs'] = col['top_values']
-                
-                # DNS summary
-                if name == 'lb_ReverseDNS' or name == 'lb_DNS' or name == 'lb_PTR':
-                    stats['dns_summary']['reverse_dns'] = col['top_values']
-                    stats['dns_summary']['dns_fill_rate'] = col['fill_rate']
-                    stats['dns_summary']['dns_unique'] = col['unique_count']
-                
+                    geo['orgs'] = top
+
+                # DNS and domains
+                if name in ('lb_ReverseDNS', 'lb_DNS', 'lb_PTR'):
+                    dns['reverse_dns'] = top
+                    dns['dns_fill_rate'] = col['fill_rate']
+                    dns['dns_unique'] = col['unique_count']
+
                 if name == 'lb_Hostnames':
-                    hostnames = {}
-                    for value, count in col['top_values']:
-                        if value and value != 'none':
-                            for hostname in value.split('|'):
-                                hostname = hostname.strip()
-                                if hostname:
-                                    hostnames[hostname] = hostnames.get(hostname, 0) + count
-                    stats['dns_summary']['hostnames'] = sorted(
-                        hostnames.items(), key=lambda x: x[1], reverse=True
-                    )[:10]
-                
-                # WhoIS summary
-                if name == 'lb_IPWhoIsOrg' or name == 'lb_WhoIs_OrgName' or name == 'lb_WhoIsOrg':
-                    stats['whois_summary']['orgs'] = col['top_values']
-                
-                if name == 'lb_IPWhoIsCountry' or name == 'lb_WhoIs_Country' or name == 'lb_WhoIsCountry':
-                    stats['whois_summary']['countries'] = col['top_values']
-                
-                if name == 'lb_IPWhoIsNetRange' or name == 'lb_WhoIs_NetRange' or name == 'lb_WhoIsNetRange':
-                    stats['whois_summary']['net_ranges'] = col['top_values']
-                
-                if name == 'lb_DomainWhoIsRegistrar' or name == 'lb_WhoIsRegistrar':
-                    stats['whois_summary']['registrars'] = col['top_values']
-                
-                if name == 'lb_DomainWhoIsOrg' or name == 'lb_DomainOrg':
-                    stats['whois_summary']['domain_orgs'] = col['top_values']
-                
-                # Shodan InternetDB summary
-                if name == 'lb_Ports' or name == 'lb_InternetDB_Ports' or name == 'lb_ShodanPorts':
-                    ports = {}
-                    for value, count in col['top_values']:
-                        if value and value != 'none':
-                            for port in value.split('|'):
-                                port = port.strip()
-                                if port:
-                                    ports[port] = ports.get(port, 0) + count
-                    stats['shodan_summary']['ports'] = sorted(
-                        ports.items(), key=lambda x: x[1], reverse=True
-                    )[:15]
-                
-                if name == 'lb_Tags' or name == 'lb_InternetDB_Tags' or name == 'lb_ShodanTags':
-                    tags = {}
-                    for value, count in col['top_values']:
-                        if value and value != 'none':
-                            for tag in value.split('|'):
-                                tag = tag.strip()
-                                if tag:
-                                    tags[tag] = tags.get(tag, 0) + count
-                    stats['shodan_summary']['tags'] = sorted(
-                        tags.items(), key=lambda x: x[1], reverse=True
-                    )[:10]
-                
-                if name == 'lb_CPEs' or name == 'lb_InternetDB_CPEs' or name == 'lb_ShodanCPEs':
-                    cpes = {}
-                    for value, count in col['top_values']:
-                        if value and value != 'none':
-                            for cpe in value.split('|'):
-                                cpe = cpe.strip()
-                                if cpe:
-                                    cpes[cpe] = cpes.get(cpe, 0) + count
-                    stats['shodan_summary']['cpes'] = sorted(
-                        cpes.items(), key=lambda x: x[1], reverse=True
-                    )[:10]
-                
-                if name == 'lb_Vulns' or name == 'lb_InternetDB_Vulns' or name == 'lb_ShodanVulns':
-                    vulns = {}
-                    for value, count in col['top_values']:
-                        if value and value != 'none':
-                            for vuln in value.split('|'):
-                                vuln = vuln.strip()
-                                if vuln:
-                                    vulns[vuln] = vulns.get(vuln, 0) + count
-                    stats['shodan_summary']['vulns'] = sorted(
-                        vulns.items(), key=lambda x: x[1], reverse=True
-                    )[:10]
-                
-                # Domain summary
-                if name == 'lb_Domains' or name == 'lb_Domain':
-                    domains = {}
-                    for value, count in col['all_values']:
-                        if value and value != 'none':
-                            for domain in value.split('|'):
-                                domain = domain.strip()
-                                if domain:
-                                    domains[domain] = domains.get(domain, 0) + count
-                    stats['dns_summary']['domains'] = sorted(
-                        domains.items(), key=lambda x: x[1], reverse=True
-                    )[:10]
-                    stats['dns_summary']['all_domains'] = sorted(
-                        domains.items(), key=lambda x: x[1], reverse=True
-                    )
-                
-                # TLD summary
-                if name == 'lb_TLD' or name == 'lb_TopLevelDomain':
-                    stats['dns_summary']['tlds'] = col['top_values']
-                    stats['dns_summary']['all_tlds'] = col['all_values']
-                
-                # WhoIS NETNAME
-                if name == 'lb_NetName' or name == 'lb_IPWhoIsNetName' or name == 'lb_WhoIsNetName':
-                    stats['whois_summary']['netnames'] = col['top_values']
-                    stats['whois_summary']['all_netnames'] = col['all_values']
-                
-                # Store all values for whois orgs
-                if name == 'lb_IPWhoIsOrg' or name == 'lb_WhoIs_OrgName' or name == 'lb_WhoIsOrg':
-                    stats['whois_summary']['orgs'] = col['top_values']
-                    stats['whois_summary']['all_orgs'] = col['all_values']
-            
+                    dns['hostnames'] = _pipe_counts(everything)[:10]
+
+                if name in ('lb_Domains', 'lb_Domain'):
+                    dns['all_domains'] = _pipe_counts(everything)
+                    dns['domains'] = dns['all_domains'][:10]
+
+                if name in ('lb_TLD', 'lb_TopLevelDomain'):
+                    dns['tlds'] = top
+                    dns['all_tlds'] = everything
+
+                # WhoIS
+                if name in ('lb_IPWhoIsOrg', 'lb_WhoIs_OrgName', 'lb_WhoIsOrg'):
+                    whois['orgs'] = top
+                    whois['all_orgs'] = everything
+                if name in ('lb_IPWhoIsCountry', 'lb_WhoIs_Country', 'lb_WhoIsCountry'):
+                    whois['countries'] = top
+                if name in ('lb_IPWhoIsNetRange', 'lb_WhoIs_NetRange', 'lb_WhoIsNetRange'):
+                    whois['net_ranges'] = top
+                if name in ('lb_DomainWhoIsRegistrar', 'lb_WhoIsRegistrar'):
+                    whois['registrars'] = top
+                if name in ('lb_DomainWhoIsOrg', 'lb_DomainOrg'):
+                    whois['domain_orgs'] = top
+                if name in ('lb_NetName', 'lb_IPWhoIsNetName', 'lb_WhoIsNetName'):
+                    whois['netnames'] = top
+                    whois['all_netnames'] = everything
+
+                # Shodan InternetDB
+                if name in ('lb_Ports', 'lb_InternetDB_Ports', 'lb_ShodanPorts'):
+                    shodan['ports'] = _pipe_counts(everything)[:15]
+                if name in ('lb_Tags', 'lb_InternetDB_Tags', 'lb_ShodanTags'):
+                    shodan['tags'] = _pipe_counts(everything)[:10]
+                if name in ('lb_CPEs', 'lb_InternetDB_CPEs', 'lb_ShodanCPEs'):
+                    shodan['cpes'] = _pipe_counts(everything)[:10]
+                if name in ('lb_Vulns', 'lb_InternetDB_Vulns', 'lb_ShodanVulns'):
+                    shodan['vulns'] = _pipe_counts(everything)[:10]
+
+            def first_column(*names):
+                return next((c for c in stats['columns'] if c['name'] in names), None)
+
             # Count IPs with threat indicators
-            threat_col = next((c for c in stats['columns'] if c['name'] == 'lb_ThreatCategories'), None)
+            threat_col = first_column('lb_ThreatCategories')
             if threat_col:
-                threat_count = sum(1 for v, c in threat_col['top_values'] if v and v != 'none')
                 stats['enrichment_summary']['ips_with_threats'] = stats['total_rows'] - threat_col['empty_count']
                 stats['enrichment_summary']['clean_ips'] = threat_col['empty_count']
-            
+
             # Count IPs with Shodan data
-            ports_col = next((c for c in stats['columns'] if c['name'] in ['lb_Ports', 'lb_InternetDB_Ports', 'lb_ShodanPorts']), None)
+            ports_col = first_column('lb_Ports', 'lb_InternetDB_Ports', 'lb_ShodanPorts')
             if ports_col:
-                stats['shodan_summary']['ips_with_data'] = stats['total_rows'] - ports_col['empty_count']
-            
+                shodan['ips_with_data'] = stats['total_rows'] - ports_col['empty_count']
+
             # Count IPs with DNS data
-            dns_col = next((c for c in stats['columns'] if c['name'] in ['lb_ReverseDNS', 'lb_DNS', 'lb_PTR']), None)
+            dns_col = first_column('lb_ReverseDNS', 'lb_DNS', 'lb_PTR')
             if dns_col:
-                stats['dns_summary']['ips_with_dns'] = stats['total_rows'] - dns_col['empty_count']
-            
+                dns['ips_with_dns'] = stats['total_rows'] - dns_col['empty_count']
+
             # Count IPs with WhoIS data
-            whois_col = next((c for c in stats['columns'] if c['name'] in ['lb_IPWhoIsOrg', 'lb_WhoIs_OrgName', 'lb_WhoIsOrg']), None)
+            whois_col = first_column('lb_IPWhoIsOrg', 'lb_WhoIs_OrgName', 'lb_WhoIsOrg')
             if whois_col:
-                stats['whois_summary']['ips_with_whois'] = stats['total_rows'] - whois_col['empty_count']
-    
+                whois['ips_with_whois'] = stats['total_rows'] - whois_col['empty_count']
+
     except Exception:
         app.logger.exception('Statistics computation failed')
         stats['error'] = 'Could not compute statistics'
-    
+
+    return stats
+
+
+# Statistics per result file, so the Stats tab, its value modals and /column-values read the
+# CSV once. An entry is valid while the file's mtime, size and the unique-value limit are unchanged.
+# ponytail: plain dict capped at 8 files, oldest evicted first. Stats hold up to
+# max_unique_values entries per column, so raise the cap only with memory to spare.
+_STATS_CACHE_FILES = 8
+_stats_cache = {}
+
+
+def cached_statistics(filepath: Path) -> dict:
+    """compute_statistics(), cached per result file. Callers must not modify the returned dict."""
+    filepath = Path(filepath)
+    try:
+        st = filepath.stat()
+    except OSError:
+        return compute_statistics(filepath)
+    path_key = str(filepath)
+    version = (st.st_mtime_ns, st.st_size, get_max_unique_values())
+    hit = _stats_cache.get(path_key)
+    if hit and hit[0] == version:
+        return hit[1]
+    stats = compute_statistics(filepath)
+    if 'error' not in stats:
+        _stats_cache.pop(path_key, None)
+        while len(_stats_cache) >= _STATS_CACHE_FILES:
+            _stats_cache.pop(next(iter(_stats_cache)), None)
+        _stats_cache[path_key] = (version, stats)
     return stats
 
 
 def get_unique_column_values(filepath: Path, column_name: str, limit: int = 100) -> list:
-    """Get unique values for a column with their counts."""
-    values = {}
-    
-    try:
-        with open(filepath, 'r', newline='', encoding='utf-8', errors='replace') as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                raw_value = row.get(column_name)
-                value = (raw_value or '').strip()
-                if value:
-                    values[value] = values.get(value, 0) + 1
-        
-        # Sort by count descending
-        sorted_values = sorted(values.items(), key=lambda x: x[1], reverse=True)[:limit]
-        return [{'value': v, 'count': c} for v, c in sorted_values]
-    
-    except Exception:
-        return []
+    """Most common values of a column with their counts, from the cached statistics."""
+    columns = cached_statistics(filepath)['columns']
+    col = next((c for c in columns if c['name'] == column_name), None)
+    return [{'value': v, 'count': c} for v, c in col['all_values'][:limit]] if col else []
 
 
 # ============================================
@@ -1363,7 +1325,7 @@ from admin import (
     get_circl_settings, get_cached_circl_pdns, set_cached_circl_pdns,
     get_hackertarget_settings, get_cached_hackertarget, set_cached_hackertarget,
     get_viewdns_settings, get_cached_viewdns, set_cached_viewdns,
-    get_max_unique_values, get_max_adhoc_ips, get_large_file_warning_threshold
+    get_max_unique_values, get_max_adhoc_ips, get_large_file_warning_threshold, get_max_embedded_rows
 )
 
 
@@ -1521,6 +1483,115 @@ def api_ioc_extract():
     })
 
 
+GRAPH_IP_COLUMNS = ('ip', 'ip_address', 'ipaddress', 'src_ip', 'dst_ip', 'lb_ip')
+
+
+def _geo_columns(headers) -> dict:
+    """Locate the IP and geo columns of a LogBoost result. lb_ASN holds the AS name,
+    lb_ASN_Number the number."""
+    def first(match):
+        return next((h for h in headers if match(h)), None)
+
+    return {
+        'ip': first(lambda h: h.lower() in GRAPH_IP_COLUMNS),
+        'asn_name': first(lambda h: h == 'lb_ASN'),
+        'asn_num': first(lambda h: h == 'lb_ASN_Number'),
+        'country': first(lambda h: h == 'lb_Country')
+                   or first(lambda h: 'country' in h.lower() and h.startswith('lb_') and 'whois' not in h.lower()),
+        'city': first(lambda h: h == 'lb_City')
+                or first(lambda h: 'city' in h.lower() and h.startswith('lb_')),
+        # Prefer the IP WhoIs organisation for IP lookups
+        'org': first(lambda h: h == 'lb_IPWhois_Organization')
+               or first(lambda h: h in ('lb_Org', 'lb_ISP')),
+    }
+
+
+def _geo_from_row(row: dict, cols: dict) -> dict:
+    """ASN / country / city / org of one result row, or {} when it has neither ASN nor country."""
+    def cell(key):
+        return (row.get(cols[key]) or '').strip() if cols[key] else ''
+
+    asn_name, asn_num = cell('asn_name'), cell('asn_num')
+    if not (asn_name or asn_num or cell('country')):
+        return {}
+
+    geo = {}
+    if asn_num:
+        geo['asn_id'] = f'AS{asn_num}'
+        geo['asn_name'] = asn_name
+        geo['asn'] = f'AS{asn_num} {asn_name}'.strip()
+    elif asn_name:
+        geo['asn_name'] = asn_name
+        geo['asn'] = asn_name
+    for key in ('country', 'city', 'org'):
+        if cell(key):
+            geo[key] = cell(key)
+    return geo
+
+
+def _graph_ips(data: dict):
+    """The `ips` of a graph lookup request as (ips, None), or (None, message) when it is not
+    a list of IP addresses within the ad-hoc limit."""
+    ips = data.get('ips')
+    if not ips:
+        return None, 'No IPs provided'
+    if not isinstance(ips, list):
+        return None, 'ips must be a list of IP addresses'
+    limit = get_max_adhoc_ips()
+    if len(ips) > limit:
+        return None, f'Too many IP addresses ({len(ips):,}). Graph lookups are limited to {limit:,} IPs.'
+    clean = []
+    for ip in ips:
+        ip = ip.strip() if isinstance(ip, str) else ''
+        try:
+            if '%' in ip:  # an IPv6 zone ID may carry arbitrary text
+                raise ValueError
+            ipaddress.ip_address(ip)
+        except ValueError:
+            return None, 'ips must be a list of IP addresses'
+        clean.append(ip)
+    return clean, None
+
+
+def graph_lookup(ips: list, options: dict):
+    """Run LogBoost over `ips` in a throwaway directory and return (rows, None), or
+    (None, message) when LogBoost fails. The session's files and current_output are never touched."""
+    with tempfile.TemporaryDirectory(prefix='lb-graph-') as tmp:
+        in_dir, out_dir = Path(tmp, 'in'), Path(tmp, 'out')
+        in_dir.mkdir()
+        out_dir.mkdir()
+        with open(in_dir / 'graph_ips.csv', 'w', newline='', encoding='utf-8') as f:
+            f.write('ip\n' + ''.join(f'{ip}\n' for ip in ips))
+
+        cmd = build_logboost_command(str(in_dir), str(out_dir), {**options, 'ipcol': 'ip'})
+        success, _, stderr = run_logboost(cmd)
+        if not success:
+            return None, stderr or 'LogBoost execution failed'
+
+        output_files = list(out_dir.glob('**/*.csv'))
+        if not output_files:
+            return None, 'No output file generated'
+        with open(output_files[0], 'r', newline='', encoding='utf-8', errors='replace') as f:
+            return list(csv.DictReader(f)), None
+
+
+def _graph_lookup_request(options: dict):
+    """Shared front half of the graph lookup endpoints: (ips, rows, None) or (None, None, response)."""
+    data = json_body()
+    if not data:
+        return None, None, (jsonify({'error': 'No JSON data provided'}), 400)
+    ips, error = _graph_ips(data)
+    if error:
+        return None, None, (jsonify({'error': error}), 400)
+    try:
+        rows, error = graph_lookup(ips, options)
+    except Exception as e:
+        return None, None, internal_error(e)
+    if error:
+        return None, None, (jsonify({'error': error}), 500)
+    return ips, rows, None
+
+
 @app.route('/api/graph/related', methods=['POST'])
 @login_required
 def api_graph_related():
@@ -1528,289 +1599,94 @@ def api_graph_related():
     data = json_body()
     if not data:
         return jsonify({'error': 'No JSON data provided'}), 400
-    
+
     value = str_field(data, 'value')
     value_type = data.get('type', 'ip')  # 'ip' or 'domain'
-    
+    value_lower = value.lower()
+
     related = {
         'ips': [],
         'domains': [],
         'tlds': [],
         'asns': [],
         'countries': [],
-        'geo_data': {},  # IP -> {asn, asn_name, asn_org, country, city}
+        'geo_data': {},  # IP -> {asn, asn_name, asn_id, country, city, org}
         'sources': {}
     }
-    
-    output_file = session.get('current_output')
-    if not output_file or not Path(output_file).exists():
+
+    output_path = current_output_path()
+    if not output_path:
         # Return empty results if no enrichment data available
         return jsonify(related)
-    
+
+    def add(kind, item):
+        if item and item not in related[kind]:
+            related[kind].append(item)
+            related['sources'][item] = 'enrichment'
+
     try:
-        with open(output_file, 'r', newline='', encoding='utf-8', errors='replace') as f:
+        with open(output_path, 'r', newline='', encoding='utf-8', errors='replace') as f:
             reader = csv.DictReader(f)
             headers = reader.fieldnames or []
-            
-            # Find relevant columns
-            ip_col = next((h for h in headers if h.lower() in ('ip', 'ip_address', 'ipaddress', 'src_ip', 'dst_ip', 'lb_ip')), None)
+            cols = _geo_columns(headers)
             domain_cols = [h for h in headers if h in ('lb_Domains', 'LB_Domains', 'lb_IDB_HOSTNAMES', 'LB_IDB_HOSTNAMES', 'lb_IDB_hostnames')]
             tld_col = next((h for h in headers if h in ('lb_TLD', 'LB_TLD')), None)
-            
-            # Geo columns - LogBoost standard column names
-            # ASN columns - lb_ASN has name only, lb_ASN_Number has the number only
-            asn_name_col = next((h for h in headers if h == 'lb_ASN'), None)
-            asn_num_col = next((h for h in headers if h == 'lb_ASN_Number'), None)
-            
-            country_col = next((h for h in headers if h == 'lb_Country'), None)
-            if not country_col:
-                country_col = next((h for h in headers if 'country' in h.lower() and h.startswith('lb_') and 'whois' not in h.lower()), None)
-            
-            city_col = next((h for h in headers if h == 'lb_City'), None)
-            if not city_col:
-                city_col = next((h for h in headers if 'city' in h.lower() and h.startswith('lb_')), None)
-            
-            # For org, prefer IPWhois_Organization for IP lookups
-            org_col = next((h for h in headers if h == 'lb_IPWhois_Organization'), None)
-            if not org_col:
-                org_col = next((h for h in headers if h in ('lb_Org', 'lb_ISP')), None)
-            
+
+            def add_geo(row_ip, row):
+                geo = _geo_from_row(row, cols)
+                if geo:
+                    add('asns', geo.get('asn'))
+                    add('countries', geo.get('country'))
+                    related['geo_data'][row_ip] = geo
+
             for row in reader:
-                row_ip = row.get(ip_col, '') if ip_col else ''
-                
-                # Collect domains from all domain columns
-                row_domains = set()
-                for dc in domain_cols:
-                    val = row.get(dc, '')
-                    if val:
-                        for d in val.split('|'):
-                            d = d.strip()
-                            if d:
-                                row_domains.add(d)
-                
-                row_tld = row.get(tld_col, '') if tld_col else ''
-                
-                # Geo data - lb_ASN = name, lb_ASN_Number = number
-                row_asn_name = row.get(asn_name_col, '').strip() if asn_name_col else ''
-                row_asn_num = row.get(asn_num_col, '').strip() if asn_num_col else ''
-                row_country = row.get(country_col, '') if country_col else ''
-                row_city = row.get(city_col, '') if city_col else ''
-                row_org = row.get(org_col, '') if org_col else ''
-                
+                row_ip = (row.get(cols['ip']) or '') if cols['ip'] else ''
+                row_tld = (row.get(tld_col) or '') if tld_col else ''
+                row_domains = {
+                    d.strip() for dc in domain_cols
+                    for d in (row.get(dc) or '').split('|') if d.strip()
+                }
+
                 if value_type == 'ip':
-                    # Looking for IP - find its domains and geo data
-                    if row_ip.lower() == value.lower():
+                    # Looking for an IP: its domains, TLD and geo data
+                    if row_ip.lower() == value_lower:
                         for d in row_domains:
-                            if d not in related['domains']:
-                                related['domains'].append(d)
-                                related['sources'][d] = 'enrichment'
-                        if row_tld and row_tld not in related['tlds']:
-                            related['tlds'].append(row_tld)
-                            related['sources'][row_tld] = 'enrichment'
-                        
-                        # Add geo data for this IP
-                        if row_asn_name or row_asn_num or row_country:
-                            geo_info = {}
-                            
-                            # Build ASN from lb_ASN (name) and lb_ASN_Number (number)
-                            if row_asn_num:
-                                asn_id = f"AS{row_asn_num}"
-                                geo_info['asn_id'] = asn_id
-                                geo_info['asn_name'] = row_asn_name
-                                # Full ASN string for display
-                                full_asn = f"{asn_id} {row_asn_name}".strip() if row_asn_name else asn_id
-                                geo_info['asn'] = full_asn
-                                if full_asn not in related['asns']:
-                                    related['asns'].append(full_asn)
-                                    related['sources'][full_asn] = 'enrichment'
-                            elif row_asn_name:
-                                # Only have name, no number (shouldn't happen but handle it)
-                                geo_info['asn_name'] = row_asn_name
-                                geo_info['asn'] = row_asn_name
-                                if row_asn_name not in related['asns']:
-                                    related['asns'].append(row_asn_name)
-                                    related['sources'][row_asn_name] = 'enrichment'
-                            
-                            if row_country:
-                                geo_info['country'] = row_country
-                                if row_country not in related['countries']:
-                                    related['countries'].append(row_country)
-                                    related['sources'][row_country] = 'enrichment'
-                            if row_city:
-                                geo_info['city'] = row_city
-                            if row_org:
-                                geo_info['org'] = row_org
-                            related['geo_data'][row_ip] = geo_info
-                else:
-                    # Looking for domain - find IPs that have this domain
-                    value_lower = value.lower()
-                    # Check if the value matches any domain in this row (exact match in pipe-separated list)
+                            add('domains', d)
+                        add('tlds', row_tld)
+                        add_geo(row_ip, row)
+                elif value_lower in {d.lower() for d in row_domains}:
+                    # Looking for a domain: the IPs that carry it, and the row's other domains
+                    if row_ip and row_ip not in related['ips']:
+                        add('ips', row_ip)
+                        add_geo(row_ip, row)
                     for d in row_domains:
-                        if d.lower() == value_lower:
-                            if row_ip and row_ip not in related['ips']:
-                                related['ips'].append(row_ip)
-                                related['sources'][row_ip] = 'enrichment'
-                                
-                                # Add geo data for discovered IPs
-                                if row_asn_name or row_asn_num or row_country:
-                                    geo_info = {}
-                                    
-                                    # Build ASN from lb_ASN (name) and lb_ASN_Number (number)
-                                    if row_asn_num:
-                                        asn_id = f"AS{row_asn_num}"
-                                        geo_info['asn_id'] = asn_id
-                                        geo_info['asn_name'] = row_asn_name
-                                        full_asn = f"{asn_id} {row_asn_name}".strip() if row_asn_name else asn_id
-                                        geo_info['asn'] = full_asn
-                                        if full_asn not in related['asns']:
-                                            related['asns'].append(full_asn)
-                                            related['sources'][full_asn] = 'enrichment'
-                                    elif row_asn_name:
-                                        geo_info['asn_name'] = row_asn_name
-                                        geo_info['asn'] = row_asn_name
-                                        if row_asn_name not in related['asns']:
-                                            related['asns'].append(row_asn_name)
-                                            related['sources'][row_asn_name] = 'enrichment'
-                                    
-                                    if row_country:
-                                        geo_info['country'] = row_country
-                                        if row_country not in related['countries']:
-                                            related['countries'].append(row_country)
-                                            related['sources'][row_country] = 'enrichment'
-                                    if row_city:
-                                        geo_info['city'] = row_city
-                                    if row_org:
-                                        geo_info['org'] = row_org
-                                    related['geo_data'][row_ip] = geo_info
-                                    
-                            # Also add other domains from this row as related
-                            for other_d in row_domains:
-                                if other_d.lower() != value_lower and other_d not in related['domains']:
-                                    related['domains'].append(other_d)
-                                    related['sources'][other_d] = 'enrichment'
-                            # Add TLD if present
-                            if row_tld and row_tld not in related['tlds']:
-                                related['tlds'].append(row_tld)
-                                related['sources'][row_tld] = 'enrichment'
-                            break
-    
+                        if d.lower() != value_lower:
+                            add('domains', d)
+                    add('tlds', row_tld)
+
     except Exception as e:
         return internal_error(e)
-    
+
     return jsonify(related)
 
 
 @app.route('/api/graph/enrich', methods=['POST'])
 @login_required
+@limit_enrichments(as_json=True)
 def api_graph_enrich():
-    """Enrich IPs on-demand using LogBoost for the graph feature."""
-    data = json_body()
-    if not data:
-        return jsonify({'error': 'No JSON data provided'}), 400
-    
-    ips = data.get('ips', [])
-    if not ips:
-        return jsonify({'error': 'No IPs provided'}), 400
-    
-    # Get or create session directories
-    session_id = session.get('session_id')
-    if not session_id:
-        session_id = str(uuid.uuid4())
-        session['session_id'] = session_id
-    
-    session_upload, session_output = get_session_dir(session_id)
-    
-    # Clean previous results in these directories
-    for f in session_upload.iterdir():
-        f.unlink()
-    for f in session_output.iterdir():
-        f.unlink()
-    
-    # Create a simple CSV with just IP addresses
-    input_file = session_upload / 'graph_ips.csv'
-    with open(input_file, 'w', newline='', encoding='utf-8') as f:
-        f.write('ip\n')
-        for ip in ips:
-            f.write(f'{ip}\n')
-    
-    # Build LogBoost command - MaxMind geo enrichment only (fast)
-    # IDB (ports/tags) is done separately via /api/graph/enrich-idb
-    options = {
-        'dbdir': MAXMIND_DIR,
-        'ipcol': 'ip'
-    }
-    
-    cmd = build_logboost_command(str(session_upload), str(session_output), options)
-    success, stdout, stderr = run_logboost(cmd)
-    
-    if not success:
-        return jsonify({'error': stderr or 'LogBoost execution failed'}), 500
-    
-    # Find output file
-    output_files = list(session_output.glob('*.csv'))
-    if not output_files:
-        return jsonify({'error': 'No output file generated'}), 500
-    
-    output_file = output_files[0]
-    session['current_output'] = str(output_file)
-    
-    # Now read the enriched data and return geo info
+    """Geo-enrich IPs on demand for the graph (MaxMind only; InternetDB is /api/graph/enrich-idb)."""
+    ips, rows, error_response = _graph_lookup_request({})
+    if error_response:
+        return error_response
+
+    cols = _geo_columns(list(rows[0].keys()) if rows else [])
     geo_data = {}
-    
-    try:
-        with open(output_file, 'r', newline='', encoding='utf-8', errors='replace') as f:
-            reader = csv.DictReader(f)
-            headers = reader.fieldnames or []
-            
-            # Find relevant columns
-            ip_col = next((h for h in headers if h.lower() in ('ip', 'ip_address', 'ipaddress', 'src_ip', 'dst_ip', 'lb_ip')), None)
-            
-            # ASN columns - lb_ASN has name, lb_ASN_Number has the number
-            asn_name_col = next((h for h in headers if h == 'lb_ASN'), None)
-            asn_num_col = next((h for h in headers if h == 'lb_ASN_Number'), None)
-            
-            country_col = next((h for h in headers if h == 'lb_Country'), None)
-            if not country_col:
-                country_col = next((h for h in headers if 'country' in h.lower() and h.startswith('lb_') and 'whois' not in h.lower()), None)
-            city_col = next((h for h in headers if h == 'lb_City'), None)
-            org_col = next((h for h in headers if h == 'lb_IPWhois_Organization'), None)
-            
-            for row in reader:
-                row_ip = row.get(ip_col, '') if ip_col else ''
-                if row_ip:
-                    row_asn_name = row.get(asn_name_col, '').strip() if asn_name_col else ''
-                    row_asn_num = row.get(asn_num_col, '').strip() if asn_num_col else ''
-                    row_country = row.get(country_col, '') if country_col else ''
-                    row_city = row.get(city_col, '') if city_col else ''
-                    row_org = row.get(org_col, '') if org_col else ''
-                    
-                    if row_asn_name or row_asn_num or row_country:
-                        geo_info = {'ip': row_ip}
-                        
-                        # Build ASN info from lb_ASN (name) and lb_ASN_Number (number)
-                        if row_asn_num:
-                            asn_id = f"AS{row_asn_num}"
-                            geo_info['asn_id'] = asn_id
-                            geo_info['asn_name'] = row_asn_name
-                            # Full ASN string for display
-                            geo_info['asn'] = f"{asn_id} {row_asn_name}".strip() if row_asn_name else asn_id
-                        elif row_asn_name:
-                            # Only have name, no number
-                            geo_info['asn_name'] = row_asn_name
-                            geo_info['asn'] = row_asn_name
-                        
-                        if row_country:
-                            geo_info['country'] = row_country
-                        if row_city:
-                            geo_info['city'] = row_city
-                        if row_org:
-                            geo_info['org'] = row_org
-                        
-                        geo_data[row_ip] = geo_info
-    
-    except Exception as e:
-        return internal_error(e)
-    
+    for row in rows:
+        row_ip = (row.get(cols['ip']) or '') if cols['ip'] else ''
+        geo = _geo_from_row(row, cols)
+        if row_ip and geo:
+            geo_data[row_ip] = {'ip': row_ip, **geo}
+
     return jsonify({
         'geo_data': geo_data,
         'enriched_count': len(geo_data),
@@ -1820,98 +1696,36 @@ def api_graph_enrich():
 
 @app.route('/api/graph/enrich-idb', methods=['POST'])
 @login_required
+@limit_enrichments(as_json=True)
 def api_graph_enrich_idb():
     """Enrich IPs with Shodan InternetDB data (ports and tags) via LogBoost."""
-    data = json_body()
-    if not data:
-        return jsonify({'error': 'No JSON data provided'}), 400
-    
-    ips = data.get('ips', [])
-    if not ips:
-        return jsonify({'error': 'No IPs provided'}), 400
-    
-    # Get or create session directories
-    session_id = session.get('session_id')
-    if not session_id:
-        session_id = str(uuid.uuid4())
-        session['session_id'] = session_id
-    
-    session_upload, session_output = get_session_dir(session_id)
-    
-    # Clean previous results in these directories
-    for f in session_upload.iterdir():
-        f.unlink()
-    for f in session_output.iterdir():
-        f.unlink()
-    
-    # Create a simple CSV with just IP addresses
-    input_file = session_upload / 'graph_ips_idb.csv'
-    with open(input_file, 'w', newline='', encoding='utf-8') as f:
-        f.write('ip\n')
-        for ip in ips:
-            f.write(f'{ip}\n')
-    
-    # Build LogBoost command with IDB option
-    options = {
-        'ipcol': 'ip',
-        'idb': True  # Enable Shodan InternetDB enrichment
-    }
-    
-    cmd = build_logboost_command(str(session_upload), str(session_output), options)
-    success, stdout, stderr = run_logboost(cmd)
-    
-    if not success:
-        return jsonify({'error': stderr or 'LogBoost execution failed'}), 500
-    
-    # Find output file
-    output_files = list(session_output.glob('*.csv'))
-    if not output_files:
-        return jsonify({'error': 'No output file generated'}), 500
-    
-    output_file = output_files[0]
-    
-    # Read the enriched data and return ports/tags
+    ips, rows, error_response = _graph_lookup_request({'idb': True})
+    if error_response:
+        return error_response
+
+    headers = list(rows[0].keys()) if rows else []
+    ip_col = _geo_columns(headers)['ip']
+    ports_col = next((h for h in headers if h.lower() in ('lb_idb_ports', 'lb_idb_port')), None)
+    tags_col = next((h for h in headers if h.lower() in ('lb_idb_tags', 'lb_idb_tag')), None)
+
+    def items(row, col):
+        """Pipe-separated cell as a list, without LogBoost's 'err' markers."""
+        cell = (row.get(col) or '') if col else ''
+        return [p.strip() for p in cell.split('|') if p.strip() and p.strip().lower() != 'err']
+
     idb_data = {}
-    
-    try:
-        with open(output_file, 'r', newline='', encoding='utf-8', errors='replace') as f:
-            reader = csv.DictReader(f)
-            headers = reader.fieldnames or []
-            
-            # Find relevant columns
-            ip_col = next((h for h in headers if h.lower() in ('ip', 'ip_address', 'ipaddress', 'src_ip', 'dst_ip', 'lb_ip')), None)
-            
-            # Shodan IDB columns for ports and tags
-            ports_col = next((h for h in headers if h.lower() in ('lb_idb_ports', 'lb_idb_port')), None)
-            tags_col = next((h for h in headers if h.lower() in ('lb_idb_tags', 'lb_idb_tag')), None)
-            
-            for row in reader:
-                row_ip = row.get(ip_col, '') if ip_col else ''
-                if row_ip:
-                    row_ports = row.get(ports_col, '').strip() if ports_col else ''
-                    row_tags = row.get(tags_col, '').strip() if tags_col else ''
-                    
-                    idb_info = {'ip': row_ip}
-                    
-                    # Parse ports (pipe-separated), skip 'err' values
-                    if row_ports and row_ports.lower() != 'err':
-                        ports = [p.strip() for p in row_ports.split('|') if p.strip() and p.strip().lower() != 'err']
-                        if ports:
-                            idb_info['ports'] = ports
-                    
-                    # Parse tags (pipe-separated), skip 'err' values
-                    if row_tags and row_tags.lower() != 'err':
-                        tags = [t.strip() for t in row_tags.split('|') if t.strip() and t.strip().lower() != 'err']
-                        if tags:
-                            idb_info['tags'] = tags
-                    
-                    # Only add if we got ports or tags
-                    if 'ports' in idb_info or 'tags' in idb_info:
-                        idb_data[row_ip] = idb_info
-    
-    except Exception as e:
-        return internal_error(e)
-    
+    for row in rows:
+        row_ip = (row.get(ip_col) or '') if ip_col else ''
+        if not row_ip:
+            continue
+        idb_info = {'ip': row_ip}
+        if items(row, ports_col):
+            idb_info['ports'] = items(row, ports_col)
+        if items(row, tags_col):
+            idb_info['tags'] = items(row, tags_col)
+        if len(idb_info) > 1:  # only IPs that have ports or tags
+            idb_data[row_ip] = idb_info
+
     log_audit('logboost_idb_query', 'logboost', None, {'ip_count': len(ips), 'enriched_count': len(idb_data)})
     return jsonify({
         'idb_data': idb_data,
@@ -1927,122 +1741,29 @@ def api_graph_geo():
     data = json_body()
     if not data:
         return jsonify({'error': 'No JSON data provided'}), 400
-    
-    ips = data.get('ips', [])
-    if not ips:
+
+    # Lowercased IP -> IP as requested, so results are keyed the way the caller asked
+    wanted = {ip.lower(): ip for ip in str_list(data.get('ips'))}
+    output_path = current_output_path()
+    if not wanted or not output_path:
         return jsonify({'geo_data': {}})
-    
-    output_file = session.get('current_output')
-    if not output_file or not Path(output_file).exists():
-        # Return empty results if no enrichment data available
-        return jsonify({'geo_data': {}})
-    
+
     geo_data = {}
-    debug_info = {
-        'requested_ips': ips,
-        'output_file': output_file
-    }
-    
-    # Create a mapping from lowercase IP to original IP for matching
-    ip_map = {ip.lower(): ip for ip in ips}
-    ip_set = set(ip_map.keys())
-    
     try:
-        with open(output_file, 'r', newline='', encoding='utf-8', errors='replace') as f:
+        with open(output_path, 'r', newline='', encoding='utf-8', errors='replace') as f:
             reader = csv.DictReader(f)
-            headers = reader.fieldnames or []
-            
-            # Find relevant columns
-            ip_col = next((h for h in headers if h.lower() in ('ip', 'ip_address', 'ipaddress', 'src_ip', 'dst_ip', 'lb_ip')), None)
-            
-            # Geo columns - LogBoost standard column names
-            # ASN columns - lb_ASN has name only, lb_ASN_Number has the number only
-            asn_name_col = next((h for h in headers if h == 'lb_ASN'), None)
-            asn_num_col = next((h for h in headers if h == 'lb_ASN_Number'), None)
-            
-            country_col = next((h for h in headers if h == 'lb_Country'), None)
-            if not country_col:
-                country_col = next((h for h in headers if 'country' in h.lower() and h.startswith('lb_') and 'whois' not in h.lower()), None)
-            
-            city_col = next((h for h in headers if h == 'lb_City'), None)
-            if not city_col:
-                city_col = next((h for h in headers if 'city' in h.lower() and h.startswith('lb_')), None)
-            
-            # For org, prefer IPWhois_Organization for IP lookups
-            org_col = next((h for h in headers if h == 'lb_IPWhois_Organization'), None)
-            if not org_col:
-                org_col = next((h for h in headers if h in ('lb_Org', 'lb_ISP')), None)
-            
-            debug_info['columns'] = {
-                'ip_col': ip_col,
-                'asn_name_col': asn_name_col,
-                'asn_num_col': asn_num_col,
-                'country_col': country_col,
-                'city_col': city_col,
-                'org_col': org_col,
-                'all_headers': headers[:20]  # First 20 headers for debug
-            }
-            
-            if not ip_col:
-                debug_info['error'] = 'no_ip_column_found'
-                return jsonify({'geo_data': {}})
-            
-            # Sample some IPs from the file to see what's there
-            sample_ips = []
-            matched_count = 0
-            for i, row in enumerate(reader):
-                row_ip = row.get(ip_col, '')
-                row_ip_lower = row_ip.lower()
-                
-                if i < 5:
-                    sample_ips.append({
-                        'ip': row_ip,
-                        'asn_name': row.get(asn_name_col, '') if asn_name_col else '',
-                        'asn_num': row.get(asn_num_col, '') if asn_num_col else '',
-                        'country': row.get(country_col, '') if country_col else ''
-                    })
-                
-                # Check if this IP is one we're looking for (case-insensitive)
-                if row_ip_lower in ip_set:
-                    matched_count += 1
-                    # Use the original IP from the request as the key
-                    original_ip = ip_map[row_ip_lower]
-                    
-                    if original_ip not in geo_data:
-                        row_asn_name = row.get(asn_name_col, '').strip() if asn_name_col else ''
-                        row_asn_num = row.get(asn_num_col, '').strip() if asn_num_col else ''
-                        row_country = row.get(country_col, '') if country_col else ''
-                        row_city = row.get(city_col, '') if city_col else ''
-                        row_org = row.get(org_col, '') if org_col else ''
-                        
-                        if row_asn_name or row_asn_num or row_country:
-                            geo_info = {'ip': original_ip}
-                            
-                            # Build ASN from lb_ASN (name) and lb_ASN_Number (number)
-                            if row_asn_num:
-                                asn_id = f"AS{row_asn_num}"
-                                geo_info['asn_id'] = asn_id
-                                geo_info['asn_name'] = row_asn_name
-                                geo_info['asn'] = f"{asn_id} {row_asn_name}".strip() if row_asn_name else asn_id
-                            elif row_asn_name:
-                                geo_info['asn_name'] = row_asn_name
-                                geo_info['asn'] = row_asn_name
-                            
-                            if row_country:
-                                geo_info['country'] = row_country
-                            if row_city:
-                                geo_info['city'] = row_city
-                            if row_org:
-                                geo_info['org'] = row_org
-                            geo_data[original_ip] = geo_info
-            
-            debug_info['sample_ips_from_file'] = sample_ips
-            debug_info['matched_count'] = matched_count
-            debug_info['geo_data_count'] = len(geo_data)
-    
+            cols = _geo_columns(reader.fieldnames or [])
+            if cols['ip']:
+                for row in reader:
+                    original_ip = wanted.get((row.get(cols['ip']) or '').lower())
+                    if original_ip and original_ip not in geo_data:
+                        geo = _geo_from_row(row, cols)
+                        if geo:
+                            geo_data[original_ip] = {'ip': original_ip, **geo}
+
     except Exception as e:
         return internal_error(e)
-    
+
     return jsonify({'geo_data': geo_data})
 
 
@@ -2141,10 +1862,10 @@ def api_results_share():
     import uuid
     
     # Get current results from session
-    output_file = session.get('current_output')
-    if not output_file or not Path(output_file).exists():
+    output_file = current_output_path()
+    if not output_file:
         return jsonify({'error': 'No results to share'}), 400
-    
+
     # Read the results data - use csv.reader to get list of lists (matching read_csv_all format)
     try:
         with open(output_file, 'r', newline='', encoding='utf-8', errors='replace') as f:
@@ -2161,7 +1882,7 @@ def api_results_share():
     stats_data = session.get('current_stats')
     
     # Get filename
-    filename = Path(output_file).name
+    filename = output_file.name
     
     # Generate share ID
     share_id = str(uuid.uuid4())[:12]  # Shorter ID for URLs

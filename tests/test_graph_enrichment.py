@@ -271,7 +271,7 @@ class TestGraphEnrichApi:
         
         def run_logboost_side_effect(cmd):
             # Create output file when LogBoost "runs"
-            output_file = output_dir / 'graph_ips_enriched.csv'
+            output_file = Path(cmd[cmd.index('-outputdir') + 1]) / 'graph_ips_enriched.csv'
             with open(output_file, 'w', newline='') as f:
                 writer = csv.writer(f)
                 writer.writerow(['ip', 'lb_ASN', 'lb_ASN_Number', 'lb_Country', 'lb_City'])
@@ -325,7 +325,7 @@ class TestGraphEnrichApi:
         upload_dir.mkdir()
         
         def run_logboost_side_effect(cmd):
-            output_file = output_dir / 'enriched.csv'
+            output_file = Path(cmd[cmd.index('-outputdir') + 1]) / 'enriched.csv'
             with open(output_file, 'w', newline='') as f:
                 writer = csv.writer(f)
                 writer.writerow(['ip', 'lb_Country'])
@@ -356,7 +356,7 @@ class TestGraphEnrichApi:
         upload_dir.mkdir()
         
         def run_logboost_side_effect(cmd):
-            output_file = output_dir / 'enriched.csv'
+            output_file = Path(cmd[cmd.index('-outputdir') + 1]) / 'enriched.csv'
             with open(output_file, 'w', newline='') as f:
                 writer = csv.writer(f)
                 writer.writerow(['ip', 'lb_ASN', 'lb_Country'])  # No lb_ASN_Number
@@ -422,7 +422,7 @@ class TestGraphEnrichIdbApi:
         upload_dir.mkdir()
         
         def run_logboost_side_effect(cmd):
-            output_file = output_dir / 'idb_enriched.csv'
+            output_file = Path(cmd[cmd.index('-outputdir') + 1]) / 'idb_enriched.csv'
             with open(output_file, 'w', newline='') as f:
                 writer = csv.writer(f)
                 writer.writerow(['ip', 'lb_IDB_PORTS', 'lb_IDB_TAGS'])
@@ -458,7 +458,7 @@ class TestGraphEnrichIdbApi:
         upload_dir.mkdir()
         
         def run_logboost_side_effect(cmd):
-            output_file = output_dir / 'idb_enriched.csv'
+            output_file = Path(cmd[cmd.index('-outputdir') + 1]) / 'idb_enriched.csv'
             with open(output_file, 'w', newline='') as f:
                 writer = csv.writer(f)
                 writer.writerow(['ip', 'lb_IDB_PORTS', 'lb_IDB_TAGS'])

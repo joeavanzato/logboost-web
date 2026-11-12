@@ -106,7 +106,7 @@
     </div>
 
     <!-- Macro for stat card with expand/flip controls -->
-    {% macro stat_card(title, data, column, all_data=none, card_class='', is_partial=false, bar_class='') %}
+    {% macro stat_card(title, data, column, all_data=none, card_class='', is_partial=false, bar_class='', all_key='') %}
     {% if data %}
     <div class="stats-card {{ card_class }}" data-stat-card>
         <div class="stats-card-header">
@@ -118,7 +118,7 @@
                     </svg>
                 </button>
                 {% if all_data and all_data|length > 10 %}
-                <button class="stat-control-btn expand-btn" onclick="window.expandStatCard(this, '{{ title }}', '{{ column }}')" title="View all {{ all_data|length }} values">
+                <button class="stat-control-btn expand-btn" data-values-key="{{ all_key }}" onclick="window.expandStatCard(this, '{{ title }}', '{{ column }}')" title="View all {{ all_data|length }} values">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <polyline points="15 3 21 3 21 9"/>
                         <polyline points="9 21 3 21 3 15"/>
@@ -141,10 +141,6 @@
             </div>
             {% endfor %}
         </div>
-        <!-- Hidden data for flip/expand -->
-        {% if all_data %}
-        <script type="application/json" class="all-values-data">{{ all_data | tojson }}</script>
-        {% endif %}
     </div>
     {% endif %}
     {% endmacro %}
@@ -179,9 +175,9 @@
             Threat Intelligence Summary
         </h3>
         <div class="stats-grid">
-            {{ stat_card('Threat Categories', stats.threat_summary.categories, 'lb_ThreatCategories', stats.threat_summary.get('all_categories'), 'threat-card', true, 'threat') }}
-            {{ stat_card('Threat Feeds', stats.threat_summary.feeds, stats.threat_summary.feeds_column|default('lb_ThreatFeeds'), stats.threat_summary.get('all_feeds'), 'threat-card', true, 'threat') }}
-            {{ stat_card('Feed Match Count', stats.threat_summary.feed_counts, 'lb_ThreatFeedCount', stats.threat_summary.get('all_feed_counts'), 'threat-card', false, 'threat') }}
+            {{ stat_card('Threat Categories', stats.threat_summary.categories, 'lb_ThreatCategories', stats.threat_summary.get('all_categories'), 'threat-card', true, 'threat', 'threat_summary/all_categories') }}
+            {{ stat_card('Threat Feeds', stats.threat_summary.feeds, stats.threat_summary.feeds_column|default('lb_ThreatFeeds'), stats.threat_summary.get('all_feeds'), 'threat-card', true, 'threat', 'threat_summary/all_feeds') }}
+            {{ stat_card('Feed Match Count', stats.threat_summary.feed_counts, 'lb_ThreatFeedCount', stats.threat_summary.get('all_feed_counts'), 'threat-card', false, 'threat', 'threat_summary/all_feed_counts') }}
         </div>
     </div>
     {% endif %}
@@ -197,8 +193,8 @@
             DNS & Domain Analysis
         </h3>
         <div class="stats-grid">
-            {{ stat_card('Top Domains', stats.dns_summary.domains, 'lb_Domains', stats.dns_summary.get('all_domains'), '', true, 'dns') }}
-            {{ stat_card('Top TLDs', stats.dns_summary.tlds, 'lb_TLD', stats.dns_summary.get('all_tlds'), '', false, 'dns') }}
+            {{ stat_card('Top Domains', stats.dns_summary.domains, 'lb_Domains', stats.dns_summary.get('all_domains'), '', true, 'dns', 'dns_summary/all_domains') }}
+            {{ stat_card('Top TLDs', stats.dns_summary.tlds, 'lb_TLD', stats.dns_summary.get('all_tlds'), '', false, 'dns', 'dns_summary/all_tlds') }}
             {{ stat_card('Top Reverse DNS', stats.dns_summary.reverse_dns[:7] if stats.dns_summary.reverse_dns else none, 'lb_ReverseDNS', none, '', false, 'dns') }}
             {{ stat_card('Top Hostnames', stats.dns_summary.hostnames, 'lb_Hostnames', none, '', true, 'dns') }}
         </div>
@@ -218,8 +214,8 @@
             WhoIS Information
         </h3>
         <div class="stats-grid">
-            {{ stat_card('Top WhoIS Organizations', stats.whois_summary.orgs[:7] if stats.whois_summary.orgs else none, 'lb_IPWhoIsOrg', stats.whois_summary.get('all_orgs'), '', false, 'whois') }}
-            {{ stat_card('Top Net Names', stats.whois_summary.netnames[:7] if stats.whois_summary.netnames else none, 'lb_NetName', stats.whois_summary.get('all_netnames'), '', false, 'whois') }}
+            {{ stat_card('Top WhoIS Organizations', stats.whois_summary.orgs[:7] if stats.whois_summary.orgs else none, 'lb_IPWhoIsOrg', stats.whois_summary.get('all_orgs'), '', false, 'whois', 'whois_summary/all_orgs') }}
+            {{ stat_card('Top Net Names', stats.whois_summary.netnames[:7] if stats.whois_summary.netnames else none, 'lb_NetName', stats.whois_summary.get('all_netnames'), '', false, 'whois', 'whois_summary/all_netnames') }}
             {{ stat_card('Top WhoIS Countries', stats.whois_summary.countries[:7] if stats.whois_summary.countries else none, 'lb_IPWhoIsCountry', none, '', false, 'whois') }}
             {{ stat_card('Top Registrars', stats.whois_summary.registrars[:7] if stats.whois_summary.registrars else none, 'lb_DomainWhoIsRegistrar', none, '', false, 'whois') }}
             {{ stat_card('Top Net Ranges', stats.whois_summary.net_ranges[:7] if stats.whois_summary.net_ranges else none, 'lb_IPWhoIsNetRange', none, '', false, 'whois') }}
@@ -349,7 +345,7 @@
                             <span class="enrichment-badge">LB</span>
                             {% endif %}
                         </td>
-                        <td class="col-unique">{{ col.unique_count }}</td>
+                        <td class="col-unique">{{ col.unique_display }}</td>
                         <td class="col-fill">
                             <div class="mini-bar-wrapper">
                                 <div class="mini-bar {% if col.fill_rate < 50 %}low{% elif col.fill_rate < 80 %}medium{% else %}high{% endif %}" 
@@ -357,7 +353,7 @@
                             </div>
                             <span>{{ col.fill_rate }}%</span>
                         </td>
-                        <td class="col-uniqueness">{{ col.uniqueness }}%</td>
+                        <td class="col-uniqueness">{{ col.uniqueness_display }}</td>
                         <td class="col-top">
                             {% if col.top_values %}
                             <span class="top-value clickable-stat" data-column="{{ col.name }}" data-value="{{ col.top_values[0][0] }}" onclick="window.pivotToFilter(this)" title="{{ col.top_values[0][0] }}">
@@ -395,7 +391,7 @@
             <details class="column-detail {% if col.is_enrichment %}enrichment{% endif %}">
                 <summary class="column-detail-summary">
                     <span class="col-name">{{ col.name }}</span>
-                    <span class="col-meta">{{ col.unique_count }} unique • {{ col.fill_rate }}% filled</span>
+                    <span class="col-meta">{{ col.unique_display }} unique • {{ col.fill_rate }}% filled</span>
                 </summary>
                 <div class="column-detail-content">
                     <div class="detail-section">
@@ -467,7 +463,7 @@
 
 <script>
 // Store current modal data
-let modalData = { values: [], column: '', reversed: false };
+var modalData = { values: [], column: '', reversed: false, totalRows: 0 };
 
 // Make pivotToFilter globally accessible
 window.pivotToFilter = function(element) {
@@ -588,46 +584,59 @@ window.flipTagCloud = function(btn) {
 };
 
 window.expandStatCard = function(btn, title, column) {
-    const card = btn.closest('[data-stat-card]');
-    const dataScript = card.querySelector('.all-values-data');
-    
-    if (!dataScript) return;
-    
-    try {
-        modalData.values = JSON.parse(dataScript.textContent);
-        modalData.column = column;
-        modalData.reversed = false;
-        
-        document.getElementById('stats-modal-title').textContent = title + ' (' + modalData.values.length + ' values)';
-        document.getElementById('modal-sort-label').textContent = 'Most Common';
-        renderModalValues();
-        document.getElementById('stats-expand-modal').classList.add('active');
-    } catch (e) {
-        console.error('Failed to parse values data:', e);
-    }
+    // The full list is not embedded in the page; fetch it when the modal opens
+    const key = btn.dataset.valuesKey;
+    if (!key) return;
+
+    fetch('/stats/values/' + key, { credentials: 'same-origin' })
+        .then(response => response.json())
+        .then(data => {
+            modalData.values = data.values || [];
+            modalData.totalRows = data.total_rows || 0;
+            modalData.column = column;
+            modalData.reversed = false;
+
+            document.getElementById('stats-modal-title').textContent = title + ' (' + modalData.values.length + ' values)';
+            document.getElementById('modal-sort-label').textContent = 'Most Common';
+            renderModalValues();
+            document.getElementById('stats-expand-modal').classList.add('active');
+        })
+        .catch(e => console.error('Failed to load values:', e));
 };
 
 function renderModalValues() {
+    // Built with DOM nodes: values come from log data and must never be parsed as HTML
     const body = document.getElementById('stats-modal-body');
     const values = modalData.reversed ? [...modalData.values].reverse() : modalData.values;
-    const totalRows = {{ stats.total_rows }};
-    
-    let html = '<div class="value-distribution modal-distribution">';
-    values.forEach(([value, count]) => {
-        const pct = (count / totalRows * 100).toFixed(1);
-        const truncated = value.length > 60 ? value.substring(0, 60) + '...' : value;
-        html += `
-            <div class="distribution-item clickable-stat" data-column="${modalData.column}" data-value="${value}" data-count="${count}" onclick="window.pivotToFilter(this); window.closeStatsModal();">
-                <span class="dist-label" title="${value}">${truncated}</span>
-                <div class="dist-bar-wrapper">
-                    <div class="dist-bar" style="width: ${pct}%"></div>
-                </div>
-                <span class="dist-count">${count} (${pct}%)</span>
-            </div>
-        `;
+    const el = (tag, className, text) => {
+        const node = document.createElement(tag);
+        node.className = className;
+        if (text !== undefined) node.textContent = text;
+        return node;
+    };
+
+    const list = el('div', 'value-distribution modal-distribution');
+    values.forEach(([rawValue, count]) => {
+        const value = String(rawValue);
+        const pct = modalData.totalRows ? (count / modalData.totalRows * 100).toFixed(1) : '0.0';
+
+        const item = el('div', 'distribution-item clickable-stat');
+        item.dataset.column = modalData.column;
+        item.dataset.value = value;
+        item.dataset.count = count;
+        item.addEventListener('click', () => { window.pivotToFilter(item); window.closeStatsModal(); });
+
+        const label = el('span', 'dist-label', value.length > 60 ? value.substring(0, 60) + '...' : value);
+        label.title = value;
+        const barWrapper = el('div', 'dist-bar-wrapper');
+        const bar = el('div', 'dist-bar');
+        bar.style.width = pct + '%';
+        barWrapper.appendChild(bar);
+
+        item.append(label, barWrapper, el('span', 'dist-count', count + ' (' + pct + '%)'));
+        list.appendChild(item);
     });
-    html += '</div>';
-    body.innerHTML = html;
+    body.replaceChildren(list);
 }
 
 window.flipModalValues = function() {

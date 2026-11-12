@@ -44,6 +44,14 @@ def _throwaway_runtime():
     shutil.rmtree(_TEST_DATA_DIR, ignore_errors=True)
 
 
+@pytest.fixture(autouse=True)
+def _output_folder(tmp_path, monkeypatch):
+    """Each test gets its own OUTPUT_FOLDER. Result files must live under it to be served,
+    so tests can keep writing them to tmp_path."""
+    import app as app_module
+    monkeypatch.setattr(app_module, 'OUTPUT_FOLDER', tmp_path)
+
+
 @pytest.fixture(scope='function')
 def test_db(tmp_path, monkeypatch):
     """Create a temporary database for each test.

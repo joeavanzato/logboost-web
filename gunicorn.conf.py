@@ -18,9 +18,11 @@ class SSLHandshakeFilter(logging.Filter):
 
 # Worker configuration
 # workers=1 is MANDATORY — SQLite cannot handle concurrent write locks from multiple processes
-# threads=4 provides concurrency within the single process via gthread worker class
+# threads=8 provides concurrency within the single process via gthread worker class.
+# At most 2 threads run LogBoost at once (MAX_CONCURRENT_ENRICHMENTS in app.py); the rest stay
+# free for the UI, lookups and /health.
 workers = 1
-threads = 4
+threads = 8
 worker_class = "gthread"
 
 # Timeout configuration

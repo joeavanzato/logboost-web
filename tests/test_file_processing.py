@@ -452,7 +452,7 @@ class TestEnrichTextEndpoint:
         """Test handling of LogBoost execution failure."""
         with patch('app.extract_ips', return_value=['8.8.8.8']):
             with patch('app.get_max_adhoc_ips', return_value=1000):
-                with patch('app.get_session_dir', return_value=(tmp_path, tmp_path)):
+                with patch('app.get_session_dir', return_value=(tmp_path / 'session', tmp_path / 'session')):
                     with patch('app.create_ip_csv'):
                         with patch('app.run_logboost', return_value=(False, '', 'LogBoost error')):
                             response = authenticated_client.post('/enrich/text',
@@ -468,7 +468,7 @@ class TestEnrichTextEndpoint:
         
         with patch('app.extract_ips', return_value=['8.8.8.8']):
             with patch('app.get_max_adhoc_ips', return_value=1000):
-                with patch('app.get_session_dir', return_value=(tmp_path, tmp_path)):
+                with patch('app.get_session_dir', return_value=(tmp_path / 'session', tmp_path / 'session')):
                     with patch('app.create_ip_csv'):
                         with patch('app.run_logboost', return_value=(True, 'Success', '')):
                             with patch('app.log_audit'):
@@ -506,7 +506,7 @@ class TestEnrichFileEndpoint:
         """Test handling of LogBoost execution failure."""
         file_content = b'IP\n8.8.8.8\n'
         
-        with patch('app.get_session_dir', return_value=(tmp_path, tmp_path)):
+        with patch('app.get_session_dir', return_value=(tmp_path / 'session', tmp_path / 'session')):
             with patch('app.run_logboost', return_value=(False, '', 'LogBoost error')):
                 response = authenticated_client.post(
                     '/enrich/file',
@@ -520,7 +520,7 @@ class TestEnrichFileEndpoint:
         """Test error when no output file is generated."""
         file_content = b'IP\n8.8.8.8\n'
         
-        with patch('app.get_session_dir', return_value=(tmp_path, tmp_path)):
+        with patch('app.get_session_dir', return_value=(tmp_path / 'session', tmp_path / 'session')):
             with patch('app.run_logboost', return_value=(True, 'Success', '')):
                 with patch('app.get_large_file_warning_threshold', return_value=10000):
                     response = authenticated_client.post(
@@ -537,7 +537,7 @@ class TestEnrichFileEndpoint:
         output_file = tmp_path / 'output.csv'
         output_file.write_text('IP,lb_Country\n8.8.8.8,US\n')
         
-        with patch('app.get_session_dir', return_value=(tmp_path, tmp_path)):
+        with patch('app.get_session_dir', return_value=(tmp_path / 'session', tmp_path / 'session')):
             with patch('app.run_logboost', return_value=(True, 'Success', '')) as mock_run:
                 with patch('app.get_large_file_warning_threshold', return_value=10000):
                     with patch('app.log_audit'):
