@@ -159,7 +159,7 @@
                     <div class="column-selector-list" id="column-selector-list">
                         {% for header in headers %}
                         <label class="column-selector-item {% if header.startswith('lb_') %}enrichment{% endif %}">
-                            <input type="checkbox" checked data-column="{{ header }}" onchange="window.toggleColumn('{{ header }}')">
+                            <input type="checkbox" checked data-column="{{ header }}" onchange="window.toggleColumn(this.dataset.column)">
                             <span class="checkbox-custom"></span>
                             <span class="column-name">{{ header }}</span>
                             {% if header.startswith('lb_') %}
@@ -375,7 +375,6 @@
             var isLb = header.startsWith('lb_');
             var isVisible = window.visibleColumns.has(header);
             var filters = window.columnFilters[header] || [];
-            var escapedHeader = escapeHtml(header).replace(/'/g, "\\'");
             
             html += '<th class="filter-cell ' + (isLb ? 'lb-col' : '') + '" ';
             html += 'data-column="' + escapeHtml(header) + '" ';
@@ -387,7 +386,7 @@
             filters.forEach(function(val, idx) {
                 html += '<span class="filter-tag" title="' + escapeHtml(val) + '">';
                 html += '<span class="filter-tag-text">' + escapeHtml(val.length > 15 ? val.substring(0, 15) + '...' : val) + '</span>';
-                html += '<button class="filter-tag-remove" onclick="event.stopPropagation(); window.removeFilter(\'' + escapedHeader + '\', ' + idx + ')" title="Remove">&times;</button>';
+                html += '<button class="filter-tag-remove" onclick="event.stopPropagation(); window.removeFilter(this.closest(\'.filter-cell\').dataset.column, ' + idx + ')" title="Remove">&times;</button>';
                 html += '</span>';
             });
             html += '</div>';
@@ -396,8 +395,8 @@
             html += '<div class="filter-input-row">';
             html += '<input type="text" class="filter-input" data-column="' + escapeHtml(header) + '" ';
             html += 'placeholder="' + (filters.length > 0 ? 'Add filter...' : 'Filter...') + '" ';
-            html += 'onkeydown="window.handleFilterKeydown(event, \'' + escapedHeader + '\')">';
-            html += '<button class="filter-dropdown-btn" onclick="event.stopPropagation(); window.toggleFilterDropdown(\'' + escapedHeader + '\', this)" title="Select values">';
+            html += 'onkeydown="window.handleFilterKeydown(event, this.dataset.column)">';
+            html += '<button class="filter-dropdown-btn" onclick="event.stopPropagation(); window.toggleFilterDropdown(this.closest(\'.filter-cell\').dataset.column, this)" title="Select values">';
             html += '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>';
             html += '</button>';
             html += '</div>';
@@ -405,7 +404,7 @@
             // Dropdown (hidden by default)
             html += '<div class="filter-dropdown" data-column="' + escapeHtml(header) + '">';
             html += '<div class="filter-dropdown-search">';
-            html += '<input type="text" class="filter-search-input" placeholder="Search values..." oninput="window.filterDropdownSearch(\'' + escapedHeader + '\', this.value)">';
+            html += '<input type="text" class="filter-search-input" placeholder="Search values..." oninput="window.filterDropdownSearch(this.closest(\'.filter-cell\').dataset.column, this.value)">';
             html += '</div>';
             html += '<div class="filter-dropdown-list" data-column="' + escapeHtml(header) + '"></div>';
             html += '</div>';
@@ -558,7 +557,7 @@
     }
     
     function populateFilterDropdown(columnName, searchTerm) {
-        var dropdown = document.querySelector('.filter-dropdown[data-column="' + columnName + '"]');
+        var dropdown = document.querySelector('.filter-dropdown[data-column="' + CSS.escape(columnName) + '"]');
         if (!dropdown) return;
         
         var listContainer = dropdown.querySelector('.filter-dropdown-list');
@@ -582,11 +581,9 @@
         var html = '';
         filtered.forEach(function(item) {
             var isSelected = currentFilters.indexOf(item.value) !== -1;
-            var escapedCol = escapeHtml(columnName).replace(/'/g, "\\'");
-            var escapedVal = escapeHtml(item.value).replace(/'/g, "\\'");
             
             html += '<div class="filter-dropdown-item' + (isSelected ? ' selected' : '') + '" ';
-            html += 'onclick="window.toggleFilterValue(\'' + escapedCol + '\', \'' + escapedVal + '\')">';
+            html += 'data-value="' + escapeHtml(item.value) + '" onclick="window.toggleFilterValue(this.closest(\'.filter-cell\').dataset.column, this.dataset.value)">';
             html += '<span class="filter-item-check">' + (isSelected ? '✓' : '') + '</span>';
             html += '<span class="filter-item-value" title="' + escapeHtml(item.value) + '">' + escapeHtml(item.value.length > 40 ? item.value.substring(0, 40) + '...' : item.value) + '</span>';
             html += '<span class="filter-item-count">(' + item.count + ')</span>';
@@ -624,7 +621,7 @@
         }
         
         // Re-render dropdown to show selection state
-        var dropdown = document.querySelector('.filter-dropdown[data-column="' + columnName + '"]');
+        var dropdown = document.querySelector('.filter-dropdown[data-column="' + CSS.escape(columnName) + '"]');
         if (dropdown) {
             var searchInput = dropdown.querySelector('.filter-search-input');
             var searchTerm = searchInput ? searchInput.value : '';
@@ -997,10 +994,10 @@
     // ========== UTILITIES ==========
     
     function escapeHtml(str) {
-        if (str === null || str === undefined) return '';
-        var div = document.createElement('div');
-        div.textContent = str;
-        return div.innerHTML;
+        // Safe for element content and for quoted attribute values
+        return (str == null ? '' : String(str))
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
     }
     
     // ========== FULLSCREEN ==========

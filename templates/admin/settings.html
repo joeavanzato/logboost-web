@@ -33,12 +33,12 @@
             <div class="form-group">
                 <label for="maxmind_api_key">API Key</label>
                 <div class="api-key-input-wrapper">
-                    <input type="text" 
+                    <input type="password" 
                            id="maxmind_api_key" 
                            name="maxmind_api_key" 
-                           value="{{ maxmind_key }}"
-                           placeholder="ACCOUNT_ID:LICENSE_KEY"
-                           class="api-key-input">
+                           placeholder="{{ '•••••••• stored (leave blank to keep)' if maxmind_key_set else 'ACCOUNT_ID:LICENSE_KEY' }}"
+                           class="api-key-input"
+                           autocomplete="new-password">
                     <button type="button" class="test-btn" onclick="testMaxMindKey()">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
@@ -46,7 +46,7 @@
                         Test
                     </button>
                 </div>
-                <span class="form-hint">Format: ACCOUNT_ID:LICENSE_KEY (e.g., 123456:abcdef123456)</span>
+                <span class="form-hint">Format: ACCOUNT_ID:LICENSE_KEY (e.g., 123456:abcdef123456). Stored keys are never shown; Test with an empty field checks the stored key.</span>
             </div>
             
             <div id="maxmind-test-result" class="test-result hidden"></div>
@@ -76,6 +76,9 @@
                     </svg>
                     Save MaxMind Key
                 </button>
+                {% if maxmind_key_set %}
+                <button type="submit" name="remove_key" value="1" class="btn danger" onclick="return confirm('Remove the stored MaxMind key?')">Remove key</button>
+                {% endif %}
             </div>
         </form>
     </div>
@@ -105,12 +108,12 @@
             <div class="form-group">
                 <label for="shodan_api_key">API Key</label>
                 <div class="api-key-input-wrapper">
-                    <input type="text" 
+                    <input type="password" 
                            id="shodan_api_key" 
                            name="shodan_api_key" 
-                           value="{{ shodan_key }}"
-                           placeholder="Your Shodan API Key"
-                           class="api-key-input">
+                           placeholder="{{ '•••••••• stored (leave blank to keep)' if shodan_key_set else 'Your Shodan API Key' }}"
+                           class="api-key-input"
+                           autocomplete="new-password">
                     <button type="button" class="test-btn" onclick="testShodanKey()">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
@@ -123,21 +126,21 @@
             
             <div id="shodan-test-result" class="test-result hidden"></div>
             
-            {% if shodan_info %}
-            <div class="api-info-box">
+            {% if shodan_key_set %}
+            <div class="api-info-box" id="shodan-info-box" style="display: none;">
                 <h4>Account Information</h4>
                 <div class="api-info-grid">
                     <div class="api-info-item">
                         <span class="info-label">Plan</span>
-                        <span class="info-value">{{ shodan_info.plan }}</span>
+                        <span class="info-value" data-shodan-info="plan"></span>
                     </div>
                     <div class="api-info-item">
                         <span class="info-label">Query Credits</span>
-                        <span class="info-value">{{ shodan_info.query_credits }}</span>
+                        <span class="info-value" data-shodan-info="query_credits"></span>
                     </div>
                     <div class="api-info-item">
                         <span class="info-label">Scan Credits</span>
-                        <span class="info-value">{{ shodan_info.scan_credits }}</span>
+                        <span class="info-value" data-shodan-info="scan_credits"></span>
                     </div>
                 </div>
             </div>
@@ -168,6 +171,9 @@
                     </svg>
                     Save Shodan Key
                 </button>
+                {% if shodan_key_set %}
+                <button type="submit" name="remove_key" value="1" class="btn danger" onclick="return confirm('Remove the stored Shodan key?')">Remove key</button>
+                {% endif %}
             </div>
         </form>
     </div>
@@ -575,13 +581,12 @@
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <div class="form-group">
                 <label for="hackertarget_api_key">API Key (Optional)</label>
-                <input type="text" 
+                <input type="password" 
                        id="hackertarget_api_key" 
                        name="hackertarget_api_key" 
-                       value="{{ hackertarget_api_key }}"
-                       placeholder="Leave blank for free tier"
+                       placeholder="{{ '•••••••• stored (leave blank to keep)' if hackertarget_api_key_set else 'Leave blank for free tier' }}"
                        class="api-key-input"
-                       autocomplete="off">
+                       autocomplete="new-password">
                 <span class="form-hint">Optional API key for higher rate limits. Free tier works without a key.</span>
             </div>
             
@@ -616,6 +621,9 @@
                     </svg>
                     Save HackerTarget Settings
                 </button>
+                {% if hackertarget_api_key_set %}
+                <button type="submit" name="remove_key" value="1" class="btn danger" onclick="return confirm('Remove the stored HackerTarget key?')">Remove key</button>
+                {% endif %}
             </div>
         </form>
     </div>
@@ -644,13 +652,12 @@
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <div class="form-group">
                 <label for="viewdns_api_key">API Key</label>
-                <input type="text" 
+                <input type="password" 
                        id="viewdns_api_key" 
                        name="viewdns_api_key" 
-                       value="{{ viewdns_api_key }}"
-                       placeholder="Your ViewDNS API key"
+                       placeholder="{{ '•••••••• stored (leave blank to keep)' if viewdns_api_key_set else 'Your ViewDNS API key' }}"
                        class="api-key-input"
-                       autocomplete="off">
+                       autocomplete="new-password">
                 <span class="form-hint">Required for ViewDNS lookups. Get your key at <a href="https://viewdns.info/api/" target="_blank">viewdns.info/api</a></span>
             </div>
             
@@ -710,6 +717,9 @@
                     </svg>
                     Save ViewDNS Settings
                 </button>
+                {% if viewdns_api_key_set %}
+                <button type="submit" name="remove_key" value="1" class="btn danger" onclick="return confirm('Remove the stored ViewDNS key?')">Remove key</button>
+                {% endif %}
             </div>
         </form>
     </div>
@@ -737,13 +747,12 @@
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <div class="form-group">
                 <label for="chaos_api_key">API Key</label>
-                <input type="text" 
+                <input type="password" 
                        id="chaos_api_key" 
                        name="chaos_api_key" 
-                       value="{{ chaos_api_key }}"
-                       placeholder="Your Chaos API key"
+                       placeholder="{{ '•••••••• stored (leave blank to keep)' if chaos_api_key_set else 'Your Chaos API key' }}"
                        class="api-key-input"
-                       autocomplete="off">
+                       autocomplete="new-password">
                 <span class="form-hint">Required for subdomain lookups. Get your key at <a href="https://cloud.projectdiscovery.io/" target="_blank">cloud.projectdiscovery.io</a></span>
             </div>
             
@@ -792,6 +801,9 @@
                     </svg>
                     Save Chaos Settings
                 </button>
+                {% if chaos_api_key_set %}
+                <button type="submit" name="remove_key" value="1" class="btn danger" onclick="return confirm('Remove the stored Chaos key?')">Remove key</button>
+                {% endif %}
             </div>
         </form>
     </div>
@@ -931,23 +943,36 @@
 <script>
 const csrfToken = '{{ csrf_token() }}';
 
-function testMaxMindKey() {
-    const apiKey = document.getElementById('maxmind_api_key').value;
-    const resultDiv = document.getElementById('maxmind-test-result');
-    const testBtn = event.target.closest('.test-btn');
+const TEST_ICONS = {
+    ok: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>',
+    error: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>',
+    spinner: '<svg class="spinning" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/></svg>',
+    test: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>'
+};
 
-    if (!apiKey) {
-        resultDiv.className = 'test-result error';
-        resultDiv.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg> Please enter an API key first';
+// The message comes from the server or a third-party API: it is added as text, never as HTML
+function showTestResult(resultDiv, ok, message) {
+    resultDiv.className = 'test-result ' + (ok ? 'success' : 'error');
+    resultDiv.innerHTML = ok ? TEST_ICONS.ok : TEST_ICONS.error;
+    resultDiv.appendChild(document.createTextNode(' ' + message));
+}
+
+// An empty field tests the stored key (the page never receives it)
+function testApiKey(testBtn, inputId, resultId, url, keyStored, describe) {
+    const apiKey = document.getElementById(inputId).value;
+    const resultDiv = document.getElementById(resultId);
+
+    if (!apiKey && !keyStored) {
+        showTestResult(resultDiv, false, 'Please enter an API key');
         return;
     }
 
     testBtn.disabled = true;
-    testBtn.innerHTML = '<svg class="spinning" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/></svg> Testing...';
+    testBtn.innerHTML = TEST_ICONS.spinner + ' Testing...';
     resultDiv.className = 'test-result';
-    resultDiv.innerHTML = 'Testing connection...';
+    resultDiv.textContent = 'Testing connection...';
 
-    fetch('{{ url_for("admin.test_maxmind_key") }}', {
+    fetch(url, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/x-www-form-urlencoded',
@@ -956,72 +981,42 @@ function testMaxMindKey() {
         body: 'api_key=' + encodeURIComponent(apiKey)
     })
     .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            resultDiv.className = 'test-result success';
-            resultDiv.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg> ' + data.message;
-        } else {
-            resultDiv.className = 'test-result error';
-            resultDiv.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg> ' + data.message;
-        }
-    })
-    .catch(error => {
-        resultDiv.className = 'test-result error';
-        resultDiv.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg> Connection error: ' + error.message;
-    })
+    .then(data => showTestResult(resultDiv, !!data.success, describe ? describe(data) : data.message))
+    .catch(error => showTestResult(resultDiv, false, 'Connection error: ' + error.message))
     .finally(() => {
         testBtn.disabled = false;
-        testBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg> Test';
+        testBtn.innerHTML = TEST_ICONS.test + ' Test';
     });
+}
+
+function testMaxMindKey() {
+    testApiKey(event.target.closest('.test-btn'), 'maxmind_api_key', 'maxmind-test-result',
+               '{{ url_for("admin.test_maxmind_key") }}', {{ maxmind_key_set | tojson }});
 }
 
 function testShodanKey() {
-    const apiKey = document.getElementById('shodan_api_key').value;
-    const resultDiv = document.getElementById('shodan-test-result');
-    const testBtn = event.target.closest('.test-btn');
-    
-    if (!apiKey) {
-        resultDiv.className = 'test-result error';
-        resultDiv.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg> Please enter an API key first';
-        return;
-    }
-    
-    testBtn.disabled = true;
-    testBtn.innerHTML = '<svg class="spinning" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/></svg> Testing...';
-    resultDiv.className = 'test-result';
-    resultDiv.innerHTML = 'Testing connection...';
-    
-    fetch('{{ url_for("admin.test_shodan_key") }}', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-            'X-CSRFToken': csrfToken
-        },
-        body: 'api_key=' + encodeURIComponent(apiKey)
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            resultDiv.className = 'test-result success';
-            let msg = data.message;
-            if (data.plan) {
-                msg += ` (Plan: ${data.plan}, Credits: ${data.query_credits})`;
-            }
-            resultDiv.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg> ' + msg;
-        } else {
-            resultDiv.className = 'test-result error';
-            resultDiv.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg> ' + data.message;
-        }
-    })
-    .catch(error => {
-        resultDiv.className = 'test-result error';
-        resultDiv.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg> Connection error: ' + error.message;
-    })
-    .finally(() => {
-        testBtn.disabled = false;
-        testBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg> Test';
-    });
+    testApiKey(event.target.closest('.test-btn'), 'shodan_api_key', 'shodan-test-result',
+               '{{ url_for("admin.test_shodan_key") }}', {{ shodan_key_set | tojson }},
+               data => data.success && data.plan
+                   ? `${data.message} (Plan: ${data.plan}, Credits: ${data.query_credits})`
+                   : data.message);
 }
+
+// Shodan plan and credits: one outbound call, made after the page is on screen
+(function loadShodanInfo() {
+    const box = document.getElementById('shodan-info-box');
+    if (!box) return;
+    fetch('{{ url_for("admin.shodan_account_info") }}')
+        .then(response => response.json())
+        .then(info => {
+            if (!info) return;
+            box.querySelectorAll('[data-shodan-info]').forEach(el => {
+                el.textContent = info[el.dataset.shodanInfo];
+            });
+            box.style.display = '';
+        })
+        .catch(() => {});
+})();
 
 document.addEventListener('DOMContentLoaded', function() {
     const chevronSvg = '<svg class="settings-card-toggle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>';

@@ -29,9 +29,9 @@
                                class="filter-input" 
                                data-column="{{ header }}"
                                placeholder="Filter..."
-                               oninput="window.setColumnFilter('{{ header }}', this.value, 'text')">
+                               oninput="window.setColumnFilter(this.dataset.column, this.value, 'text')">
                         <button class="filter-dropdown-btn" 
-                                onclick="window.showFilterDropdown('{{ header }}', this)"
+                                data-column="{{ header }}" onclick="window.showFilterDropdown(this.dataset.column, this)"
                                 title="Select from values">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <polyline points="6 9 12 15 18 9"/>

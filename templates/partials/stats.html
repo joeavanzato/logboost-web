@@ -529,7 +529,7 @@ window.pivotToFilter = function(element) {
     
     if (targetColumn && typeof window.setColumnFilter === 'function') {
         window.setColumnFilter(targetColumn, value, isPartial ? 'text' : 'exact');
-        const input = document.querySelector(`.filter-input[data-column="${targetColumn}"]`);
+        const input = document.querySelector(`.filter-input[data-column="${CSS.escape(targetColumn)}"]`);
         if (input) {
             input.value = value;
             console.log('Set filter input value to:', value);

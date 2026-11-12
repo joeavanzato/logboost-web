@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="csrf-token" content="{{ csrf_token() }}">
     <title>LogBoost Web UI</title>
-    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <script src="{{ url_for('static', filename='vendor/htmx-1.9.10.min.js') }}"></script>
     <script>
         // Get CSRF token from meta tag
         function getCSRFToken() {
@@ -2273,10 +2273,9 @@
                 if (items.length > 1) {
                     formattedValue = `<ul class="modal-value-list">${items.map(i => `<li>${escapeHtml(i.trim())}</li>`).join('')}</ul>`;
                     // Add download button for multi-value fields
-                    const escapedValues = items.map(i => i.trim()).join('\\n');
                     const fieldName = field.header.replace(/^lb_/, '').replace(/_/g, ' ');
                     downloadBtn = `
-                        <button class="modal-download-btn" onclick="downloadFieldValues('${escapeHtml(fieldName)}', '${escapeAttr(field.value)}')" title="Download as CSV">
+                        <button class="modal-download-btn" data-field-name="${escapeHtml(fieldName)}" data-values="${escapeHtml(field.value)}" onclick="downloadFieldValues(this.dataset.fieldName, this.dataset.values)" title="Download as CSV">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
                                 <polyline points="7 10 12 15 17 10"/>
@@ -2302,9 +2301,6 @@
             `;
         }
 
-        function escapeAttr(text) {
-            return text.replace(/'/g, "\\'").replace(/"/g, "&quot;");
-        }
 
         function downloadFieldValues(fieldName, values) {
             const items = values.split('|').filter(v => v.trim()).map(v => v.trim());
@@ -2437,7 +2433,7 @@
                     <path d="M22 11.08V12a10 10 0 11-5.93-9.14"/>
                     <polyline points="22 4 12 14.01 9 11.01"/>
                 </svg>
-                ${message}
+                ${escapeHtml(message)}
             `;
             document.body.appendChild(toast);
             
@@ -2507,10 +2503,10 @@
         }
 
         function escapeHtml(text) {
-            if (text === '—') return text;
-            const div = document.createElement('div');
-            div.textContent = text;
-            return div.innerHTML;
+            // Safe for element content and for quoted attribute values
+            return (text == null ? '' : String(text))
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
         }
 
         function navigateRow(direction) {
@@ -3157,7 +3153,7 @@
             if (multiValueFilters.length > 0 || filterCount > 1) {
                 const parts = [];
                 if (multiValueFilters.length > 0) {
-                    parts.push(`<strong>${multiValueFilters.join(', ')}</strong>`);
+                    parts.push(`<strong>${escapeHtml(multiValueFilters.join(', '))}</strong>`);
                 }
                 if (filterCount > 1) {
                     parts.push(`${filterCount} filters AND'd together`);
@@ -3376,8 +3372,8 @@
     </script>
 
     <!-- D3.js for graph visualization -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/psl/1.9.0/psl.min.js"></script>
+    <script src="{{ url_for('static', filename='vendor/d3-7.8.5.min.js') }}"></script>
+    <script src="{{ url_for('static', filename='vendor/psl-1.9.0.min.js') }}"></script>
 
     <!-- Graph Manager -->
     <script>
@@ -3410,7 +3406,7 @@
             
             toast.innerHTML = `
                 <span class="toast-icon">${iconSvg}</span>
-                <span class="toast-message">${message}</span>
+                <span class="toast-message">${escapeHtml(message)}</span>
                 <button class="toast-close" onclick="this.parentElement.remove()">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <line x1="18" y1="6" x2="6" y2="18"/>
@@ -3525,13 +3521,13 @@
                     const container = document.getElementById('saved-graphs-list');
                     if (data.graphs && data.graphs.length > 0) {
                         container.innerHTML = data.graphs.map(g => `
-                            <div class="saved-graph-item" onclick="window.graphManager.loadGraph('${g.id}')">
+                            <div class="saved-graph-item" data-graph-id="${this.escapeHtml(g.id)}" onclick="window.graphManager.loadGraph(this.dataset.graphId)">
                                 <div class="saved-graph-info">
                                     <span class="saved-graph-name">${this.escapeHtml(g.name)}</span>
-                                    <span class="saved-graph-date">${new Date(g.updated_at).toLocaleDateString()}</span>
+                                    <span class="saved-graph-date">${new Date(g.updated_at).toLocaleDateString()}${g.is_shared ? ' • shared' : ''}</span>
                                 </div>
                                 <div class="saved-graph-actions">
-                                    <button class="saved-graph-share" onclick="event.stopPropagation(); window.graphManager.shareGraph('${g.id}')" title="Copy share link">
+                                    <button class="saved-graph-share" onclick="event.stopPropagation(); window.graphManager.shareGraph(this.closest('.saved-graph-item').dataset.graphId)" title="${g.is_shared ? 'Copy share link' : 'Share and copy link'}">
                                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                             <circle cx="18" cy="5" r="3"/>
                                             <circle cx="6" cy="12" r="3"/>
@@ -3540,7 +3536,14 @@
                                             <line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>
                                         </svg>
                                     </button>
-                                    <button class="saved-graph-delete" onclick="event.stopPropagation(); window.graphManager.deleteGraph('${g.id}')" title="Delete">
+                                    ${g.is_shared ? `
+                                    <button class="saved-graph-share" onclick="event.stopPropagation(); window.graphManager.unshareGraph(this.closest('.saved-graph-item').dataset.graphId)" title="Stop sharing">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                            <circle cx="12" cy="12" r="10"/>
+                                            <line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/>
+                                        </svg>
+                                    </button>` : ''}
+                                    <button class="saved-graph-delete" onclick="event.stopPropagation(); window.graphManager.deleteGraph(this.closest('.saved-graph-item').dataset.graphId)" title="Delete">
                                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                             <polyline points="3 6 5 6 21 6"/>
                                             <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/>
@@ -3634,16 +3637,32 @@
             
             async shareGraph(graphId) {
                 try {
-                    // Build share URL
-                    const shareUrl = window.location.origin + '/?graph=' + graphId;
-                    
-                    // Copy to clipboard
-                    await navigator.clipboard.writeText(shareUrl);
-                    showToast('Share link copied to clipboard!', 'success');
-                    
+                    // Sharing is explicit: the server marks the graph, then any signed-in user can open a copy
+                    const response = await csrfFetch(`/api/graph/${encodeURIComponent(graphId)}/share`, { method: 'POST' });
+                    const result = await response.json();
+                    if (!response.ok || result.error) throw new Error(result.error || 'Share failed');
+                    this.loadSavedGraphsList();
+                    try {
+                        await navigator.clipboard.writeText(result.share_url);
+                        showToast('Graph shared and link copied. Any signed-in user can open a copy.', 'success');
+                    } catch (clipboardErr) {
+                        showToast('Graph shared: ' + result.share_url, 'success', 10000);
+                    }
                 } catch (err) {
                     console.error('Failed to share graph:', err);
-                    showToast('Failed to copy share link', 'error');
+                    showToast('Failed to share graph', 'error');
+                }
+            }
+
+            async unshareGraph(graphId) {
+                try {
+                    const response = await csrfFetch(`/api/graph/${encodeURIComponent(graphId)}/share`, { method: 'DELETE' });
+                    if (!response.ok) throw new Error('Unshare failed');
+                    this.loadSavedGraphsList();
+                    showToast('Sharing stopped. The link no longer works for other users.', 'success');
+                } catch (err) {
+                    console.error('Failed to stop sharing graph:', err);
+                    showToast('Failed to stop sharing', 'error');
                 }
             }
 
@@ -4769,7 +4788,7 @@
                 
                 // Build content
                 let html = '<div class="node-details">';
-                html += `<div class="detail-row"><span class="detail-label">Type:</span><span class="detail-value">${node.type.toUpperCase()}</span></div>`;
+                html += `<div class="detail-row"><span class="detail-label">Type:</span><span class="detail-value">${this.escapeHtml(String(node.type).toUpperCase())}</span></div>`;
                 html += `<div class="detail-row"><span class="detail-label">Origin:</span><span class="detail-value">${node.isOrigin ? 'Yes (Starting Point)' : 'No (Discovered)'}</span></div>`;
                 
                 // Show ASN details if this is an ASN node
@@ -4820,7 +4839,7 @@
                     const w = node.data.whois;
                     html += '<div class="detail-section">';
                     html += '<div class="detail-section-header"><h4>WHOIS Information</h4>';
-                    html += `<button class="detail-download-btn" onclick="window.graphManager.downloadWhoisJSON('${this.escapeHtml(node.id)}')" title="Download WHOIS JSON">`;
+                    html += `<button class="detail-download-btn" onclick="window.graphManager.downloadWhoisJSON(window.graphManager.selectedNode.id)" title="Download WHOIS JSON">`;
                     html += '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>';
                     html += '</button></div>';
                     if (w.registrant_name) html += `<div class="detail-row"><span class="detail-label">Registrant:</span><span class="detail-value">${this.escapeHtml(w.registrant_name)}</span></div>`;
@@ -4842,7 +4861,7 @@
                     const s = node.data.shodan;
                     html += '<div class="detail-section">';
                     html += '<div class="detail-section-header"><h4>Shodan Information</h4>';
-                    html += `<button class="detail-download-btn" onclick="window.graphManager.downloadShodanJSON('${this.escapeHtml(node.id)}')" title="Download Shodan JSON">`;
+                    html += `<button class="detail-download-btn" onclick="window.graphManager.downloadShodanJSON(window.graphManager.selectedNode.id)" title="Download Shodan JSON">`;
                     html += '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>';
                     html += '</button></div>';
                     
@@ -4857,7 +4876,7 @@
                     if (s.region_code) location.push(s.region_code);
                     if (s.country_name) location.push(s.country_name);
                     if (location.length > 0) html += `<div class="detail-row"><span class="detail-label">Location:</span><span class="detail-value">${this.escapeHtml(location.join(', '))}</span></div>`;
-                    if (s.latitude && s.longitude) html += `<div class="detail-row"><span class="detail-label">Coordinates:</span><span class="detail-value">${s.latitude}, ${s.longitude}</span></div>`;
+                    if (s.latitude && s.longitude) html += `<div class="detail-row"><span class="detail-label">Coordinates:</span><span class="detail-value">${this.escapeHtml(s.latitude)}, ${this.escapeHtml(s.longitude)}</span></div>`;
                     
                     // OS
                     if (s.os) html += `<div class="detail-row"><span class="detail-label">OS:</span><span class="detail-value">${this.escapeHtml(s.os)}</span></div>`;
@@ -4884,7 +4903,7 @@
                     // Services from raw Shodan 'data' array
                     const services = s.data || s.services || [];
                     if (services.length > 0) {
-                        html += '<details class="raw-data-details"><summary>View Services (' + services.length + ')</summary>';
+                        html += '<details class="raw-data-details"><summary>View Services (' + Number(services.length) + ')</summary>';
                         html += '<div class="services-list">';
                         for (const svc of services) {
                             html += '<div class="service-item">';
@@ -4920,14 +4939,14 @@
                     html += '<div class="detail-section">';
                     html += '<div class="detail-section-header"><h4>JARM Information</h4>';
                     if (node.data.pivot_results) {
-                        html += `<button class="detail-download-btn" onclick="window.graphManager.downloadJARMPivotJSON('${this.escapeHtml(node.id)}')" title="Download JARM Pivot Results">`;
+                        html += `<button class="detail-download-btn" onclick="window.graphManager.downloadJARMPivotJSON(window.graphManager.selectedNode.id)" title="Download JARM Pivot Results">`;
                         html += '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>';
                         html += '</button>';
                     }
                     html += '</div>';
-                    if (node.data.host_count !== undefined) html += `<div class="detail-row"><span class="detail-label">Hosts with JARM:</span><span class="detail-value">${node.data.host_count.toLocaleString()}</span></div>`;
+                    if (node.data.host_count !== undefined) html += `<div class="detail-row"><span class="detail-label">Hosts with JARM:</span><span class="detail-value">${this.escapeHtml(Number(node.data.host_count).toLocaleString())}</span></div>`;
                     if (node.data.source_ip) html += `<div class="detail-row"><span class="detail-label">Source IP:</span><span class="detail-value">${this.escapeHtml(node.data.source_ip)}</span></div>`;
-                    if (node.data.port) html += `<div class="detail-row"><span class="detail-label">Port:</span><span class="detail-value">${node.data.port}</span></div>`;
+                    if (node.data.port) html += `<div class="detail-row"><span class="detail-label">Port:</span><span class="detail-value">${this.escapeHtml(node.data.port)}</span></div>`;
                     if (node.data.hostnames && node.data.hostnames.length > 0) {
                         html += `<div class="detail-row"><span class="detail-label">Hostnames:</span><span class="detail-value">${node.data.hostnames.map(h => this.escapeHtml(h)).join(', ')}</span></div>`;
                     }
@@ -4949,10 +4968,10 @@
                     html += '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>';
                     html += '</button></div>';
                     
-                    html += `<div class="detail-row"><span class="detail-label">Records Found:</span><span class="detail-value">${pdns.length}</span></div>`;
+                    html += `<div class="detail-row"><span class="detail-label">Records Found:</span><span class="detail-value">${Number(pdns.length)}</span></div>`;
                     
                     if (node.data.circlPdnsFromCache) {
-                        html += `<div class="detail-row"><span class="detail-label">From Cache:</span><span class="detail-value">Yes (${node.data.circlPdnsCachedAt || 'unknown time'})</span></div>`;
+                        html += `<div class="detail-row"><span class="detail-label">From Cache:</span><span class="detail-value">Yes (${this.escapeHtml(node.data.circlPdnsCachedAt || 'unknown time')})</span></div>`;
                     }
                     
                     // Count by record type
@@ -4961,7 +4980,7 @@
                         typeCounts[r.rrtype] = (typeCounts[r.rrtype] || 0) + 1;
                     }
                     const typeStr = Object.entries(typeCounts).map(([t, c]) => `${t}: ${c}`).join(', ');
-                    html += `<div class="detail-row"><span class="detail-label">Record Types:</span><span class="detail-value">${typeStr}</span></div>`;
+                    html += `<div class="detail-row"><span class="detail-label">Record Types:</span><span class="detail-value">${this.escapeHtml(typeStr)}</span></div>`;
                     
                     // Show first/last seen from the records
                     let firstSeen = Infinity;
@@ -4997,7 +5016,7 @@
                         const sourceId = typeof conn.source === 'object' ? conn.source.id : conn.source;
                         const targetId = typeof conn.target === 'object' ? conn.target.id : conn.target;
                         const other = sourceId === node.id ? targetId : sourceId;
-                        html += `<div class="connection-item">${this.escapeHtml(other)} <span class="conn-type">(${conn.relationship})</span></div>`;
+                        html += `<div class="connection-item">${this.escapeHtml(other)} <span class="conn-type">(${this.escapeHtml(conn.relationship)})</span></div>`;
                     }
                     html += '</div>';
                 }
@@ -6762,7 +6781,7 @@
                         return `
                             <label class="filter-item ${isHidden ? 'type-hidden' : ''}" data-type="${this.escapeHtml(type)}">
                                 <input type="checkbox" ${!isHidden ? 'checked' : ''} 
-                                       onchange="window.graphManager.toggleNodeTypeVisibility('${this.escapeHtml(type)}')">
+                                       onchange="window.graphManager.toggleNodeTypeVisibility(this.closest('.filter-item').dataset.type)">
                                 <div class="filter-item-icon" style="background: ${color}; color: #000;">
                                     ${this.escapeHtml(type.substring(0, 2).toUpperCase())}
                                 </div>
@@ -6784,7 +6803,7 @@
                         return `
                             <label class="filter-item ${isHidden ? 'type-hidden' : ''}" data-type="${this.escapeHtml(type)}">
                                 <input type="checkbox" ${!isHidden ? 'checked' : ''} 
-                                       onchange="window.graphManager.toggleEdgeTypeVisibility('${this.escapeHtml(type)}')">
+                                       onchange="window.graphManager.toggleEdgeTypeVisibility(this.closest('.filter-item').dataset.type)">
                                 <div class="filter-item-icon" style="background: var(--text-muted); color: #000;">
                                     ─
                                 </div>
@@ -7651,7 +7670,7 @@
                     
                     if (data.graphs && data.graphs.length > 0) {
                         listContainer.innerHTML = data.graphs.map(g => `
-                            <div class="load-graph-item" onclick="window.graphManager.loadGraphFromModal('${g.id}')">
+                            <div class="load-graph-item" data-graph-id="${this.escapeHtml(g.id)}" onclick="window.graphManager.loadGraphFromModal(this.dataset.graphId)">
                                 <div class="load-graph-info">
                                     <span class="load-graph-name">${this.escapeHtml(g.name)}</span>
                                     <span class="load-graph-date">${new Date(g.updated_at).toLocaleDateString()} ${new Date(g.updated_at).toLocaleTimeString()}</span>
@@ -8158,11 +8177,11 @@
                     
                     html += `
                         <tr data-source="${this.escapeHtml(sourceId)}" data-target="${this.escapeHtml(targetId)}">
-                            <td><span class="node-type-badge ${sourceNode.type}">${sourceNode.type.toUpperCase()}</span> ${this.escapeHtml(sourceDisplay)}</td>
+                            <td><span class="node-type-badge ${this.escapeHtml(sourceNode.type)}">${this.escapeHtml(String(sourceNode.type).toUpperCase())}</span> ${this.escapeHtml(sourceDisplay)}</td>
                             <td><span class="relationship-badge">${this.escapeHtml(relationship)}</span></td>
-                            <td><span class="node-type-badge ${targetNode.type}">${targetNode.type.toUpperCase()}</span> ${this.escapeHtml(targetDisplay)}</td>
+                            <td><span class="node-type-badge ${this.escapeHtml(targetNode.type)}">${this.escapeHtml(String(targetNode.type).toUpperCase())}</span> ${this.escapeHtml(targetDisplay)}</td>
                             <td>
-                                <button class="table-action-btn" onclick="window.graphManager.removeEdgeFromTable('${this.escapeHtml(sourceId).replace(/'/g, "\\'")}', '${this.escapeHtml(targetId).replace(/'/g, "\\'")}')" title="Remove relationship">
+                                <button class="table-action-btn" onclick="window.graphManager.removeEdgeFromTable(this.closest('tr').dataset.source, this.closest('tr').dataset.target)" title="Remove relationship">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                         <line x1="18" y1="6" x2="6" y2="18"/>
                                         <line x1="6" y1="6" x2="18" y2="18"/>
@@ -8288,10 +8307,10 @@
             }
 
             escapeHtml(str) {
-                if (str === null || str === undefined) return '';
-                const div = document.createElement('div');
-                div.textContent = str;
-                return div.innerHTML;
+                // Safe for element content and for quoted attribute values
+                return (str == null ? '' : String(str))
+                    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
             }
 
             downloadWhoisJSON(nodeId) {
@@ -8374,10 +8393,7 @@
                 return;
             }
             
-            function escapeHtml(str) {
-                if (!str) return '';
-                return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-            }
+            const escapeHtml = (str) => gm.escapeHtml(str);
             
             // Compute statistics
             const nodes = gm.nodes;
@@ -9126,9 +9142,9 @@
                 const sources = sRes.sources || [];
                 const tags = tRes.tags || [];
                 s.innerHTML = '<option value="">All sources</option>' +
-                    sources.map(x => `<option value="${x.id}">${escapeHtml(x.name)}</option>`).join('');
+                    sources.map(x => `<option value="${escapeHtml(x.id)}">${escapeHtml(x.name)}</option>`).join('');
                 t.innerHTML = '<option value="">All tags</option>' +
-                    tags.map(x => `<option value="${x.id}">${escapeHtml(x.value)}</option>`).join('');
+                    tags.map(x => `<option value="${escapeHtml(x.id)}">${escapeHtml(x.value)}</option>`).join('');
             } catch (e) {
                 // Filter dropdowns may stay empty if threats.db is missing — table itself surfaces the error
             }
@@ -9272,7 +9288,7 @@
             return items.map(i => {
                 const label = kind === 'source' ? i.name : i.value;
                 const pct = (i.count || 0) / max * 100;
-                return `<button class="intel-stat-row" type="button" onclick="intelPivotTo('${kind}', ${i.id})" title="Filter Browser by ${kind}: ${escapeHtml(label)}">
+                return `<button class="intel-stat-row" type="button" onclick="intelPivotTo('${kind}', ${Number(i.id)})" title="Filter Browser by ${kind}: ${escapeHtml(label)}">
                     <span class="intel-stat-bar" style="width: ${pct.toFixed(1)}%"></span>
                     <span class="intel-stat-name">${escapeHtml(label)}</span>
                     <span class="intel-stat-count">${(i.count || 0).toLocaleString()}</span>

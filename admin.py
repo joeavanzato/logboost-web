@@ -951,10 +951,6 @@ def settings():
         shodan_row = cursor.fetchone()
         shodan_key = shodan_row['value'] if shodan_row else ''
     
-        # Get Shodan account info if key is set
-        shodan_info = None
-        if shodan_key:
-            shodan_info = get_shodan_account_info(shodan_key)
     
         # DNS and concurrency settings (tolerant of bad stored values)
         _dns = get_dns_settings()
@@ -1070,11 +1066,8 @@ def settings():
     
     
         return render_template('admin/settings.html',
-                               maxmind_key=maxmind_key,
                                maxmind_key_set=bool(maxmind_key),
-                               shodan_key=shodan_key,
                                shodan_key_set=bool(shodan_key),
-                               shodan_info=shodan_info,
                                dns_servers=dns_servers,
                                dns_cache_ttl=dns_cache_ttl,
                                dns_timeout=dns_timeout,
@@ -1092,15 +1085,12 @@ def settings():
                                circl_cache_ttl=circl_cache_ttl,
                                circl_concurrency=circl_concurrency,
                                circl_rate_limit=circl_rate_limit,
-                               hackertarget_api_key=hackertarget_api_key,
                                hackertarget_api_key_set=bool(hackertarget_api_key),
                                hackertarget_cache_ttl=hackertarget_cache_ttl,
-                               viewdns_api_key=viewdns_api_key,
                                viewdns_api_key_set=bool(viewdns_api_key),
                                viewdns_cache_ttl=viewdns_cache_ttl,
                                viewdns_rate_limit=viewdns_rate_limit,
                                viewdns_max_nodes=viewdns_max_nodes,
-                               chaos_api_key=chaos_api_key,
                                chaos_api_key_set=bool(chaos_api_key),
                                chaos_cache_ttl=chaos_cache_ttl,
                                chaos_rate_limit=chaos_rate_limit,
@@ -1111,11 +1101,28 @@ def settings():
                                max_url_fetch_size_mb=max_url_fetch_size_mb)
 
 
+def _submitted_secret(setting_key, form_field):
+    """Value to store for a secret after a settings form post: '' when "Remove key" was pressed,
+    the typed value when one was entered, otherwise the value already stored. The settings page
+    never shows stored secrets, so a blank field means "keep"."""
+    if request.form.get('remove_key'):
+        return ''
+    return request.form.get(form_field, '').strip() or get_setting(setting_key, '')
+
+
+@admin_bp.route('/settings/shodan-info')
+@admin_required
+def shodan_account_info():
+    """Plan and credits for the stored Shodan key; fetched by the settings page after it loads."""
+    api_key = get_setting('shodan_api_key', '')
+    return jsonify(get_shodan_account_info(api_key) if api_key else None)
+
+
 @admin_bp.route('/settings/maxmind', methods=['POST'])
 @admin_required
 def save_maxmind_key():
     """Save MaxMind API key."""
-    api_key = request.form.get('maxmind_api_key', '').strip()
+    api_key = _submitted_secret('maxmind_api_key', 'maxmind_api_key')
     
     with db() as conn:
         cursor = conn.cursor()
@@ -1184,7 +1191,7 @@ def upload_mmdb():
 @admin_required
 def save_shodan_key():
     """Save Shodan API key."""
-    api_key = request.form.get('shodan_api_key', '').strip()
+    api_key = _submitted_secret('shodan_api_key', 'shodan_api_key')
     
     with db() as conn:
         cursor = conn.cursor()
@@ -1522,7 +1529,7 @@ def save_circl_settings():
 @admin_required
 def save_hackertarget_settings():
     """Save HackerTarget settings."""
-    hackertarget_api_key = request.form.get('hackertarget_api_key', '').strip()
+    hackertarget_api_key = _submitted_secret('hackertarget_api_key', 'hackertarget_api_key')
     hackertarget_cache_ttl = request.form.get('hackertarget_cache_ttl', '86400').strip()
     
     # Validate cache TTL
@@ -1558,7 +1565,7 @@ def save_hackertarget_settings():
 @admin_required
 def save_viewdns_settings():
     """Save ViewDNS settings."""
-    viewdns_api_key = request.form.get('viewdns_api_key', '').strip()
+    viewdns_api_key = _submitted_secret('viewdns_api_key', 'viewdns_api_key')
     viewdns_cache_ttl = request.form.get('viewdns_cache_ttl', '86400').strip()
     viewdns_rate_limit = request.form.get('viewdns_rate_limit', '1.0').strip()
     viewdns_max_nodes = request.form.get('viewdns_max_nodes', '100').strip()
@@ -1618,7 +1625,7 @@ def save_viewdns_settings():
 @admin_required
 def save_chaos_settings():
     """Save Chaos (ProjectDiscovery) settings."""
-    chaos_api_key = request.form.get('chaos_api_key', '').strip()
+    chaos_api_key = _submitted_secret('chaos_api_key', 'chaos_api_key')
     chaos_cache_ttl = request.form.get('chaos_cache_ttl', '86400').strip()
     chaos_rate_limit = request.form.get('chaos_rate_limit', '5.0').strip()
     
@@ -1666,7 +1673,7 @@ def save_chaos_settings():
 @admin_required
 def test_maxmind_key():
     """Test MaxMind API key."""
-    api_key = request.form.get('api_key', '').strip()
+    api_key = request.form.get('api_key', '').strip() or get_setting('maxmind_api_key', '')
     
     if not api_key:
         return jsonify({'success': False, 'message': 'API key is required'})
@@ -1706,7 +1713,7 @@ def test_maxmind_key():
 @admin_required
 def test_shodan_key():
     """Test Shodan API key."""
-    api_key = request.form.get('api_key', '').strip()
+    api_key = request.form.get('api_key', '').strip() or get_setting('shodan_api_key', '')
     
     if not api_key:
         return jsonify({'success': False, 'message': 'API key is required'})

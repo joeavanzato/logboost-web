@@ -86,7 +86,7 @@
                 </div>
                 <div class="ti-col-tags" id="tags-{{ loop.index0 }}">
                     {% for tag in feed.type %}
-                    <span class="ti-tag">{{ tag }}<button onclick="removeTag({{ loop.index0 }}, '{{ tag }}')">&times;</button></span>
+                    <span class="ti-tag">{{ tag }}<button data-tag="{{ tag }}" onclick="removeTag({{ loop.index0 }}, this.dataset.tag)">&times;</button></span>
                     {% endfor %}
                     <button class="ti-add-tag" onclick="showTagInput({{ loop.index0 }})" title="Add tag">+</button>
                     <div class="ti-tag-input-wrap" id="tag-input-{{ loop.index0 }}">
@@ -103,7 +103,7 @@
                         </svg>
                     </button>
                     <span class="ti-saved" id="status-{{ loop.index0 }}">✓</span>
-                    <button class="ti-delete" onclick="deleteFeed({{ loop.index0 }}, '{{ feed.name }}')" title="Delete">
+                    <button class="ti-delete" data-name="{{ feed.name }}" onclick="deleteFeed({{ loop.index0 }}, this.dataset.name)" title="Delete">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <polyline points="3 6 5 6 21 6"/>
                             <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/>
@@ -964,7 +964,12 @@ function addTag(index, tag) {
     const addBtn = container.querySelector('.ti-add-tag');
     const tagEl = document.createElement('span');
     tagEl.className = 'ti-tag';
-    tagEl.innerHTML = `${tag}<button onclick="removeTag(${index}, '${tag}')">&times;</button>`;
+    tagEl.textContent = tag;
+    const removeBtn = document.createElement('button');
+    removeBtn.textContent = '\u00d7';
+    removeBtn.dataset.tag = tag;
+    removeBtn.setAttribute('onclick', `removeTag(${Number(index)}, this.dataset.tag)`);
+    tagEl.appendChild(removeBtn);
     container.insertBefore(tagEl, addBtn);
     
     // Update data attribute
@@ -1033,7 +1038,12 @@ function renderNewFeedTags() {
     newFeedTags.forEach((tag, i) => {
         const tagEl = document.createElement('span');
         tagEl.className = 'ti-tag';
-        tagEl.innerHTML = `${tag}<button type="button" onclick="removeNewFeedTag(${i})">&times;</button>`;
+        tagEl.textContent = tag;
+        const removeBtn = document.createElement('button');
+        removeBtn.type = 'button';
+        removeBtn.textContent = '\u00d7';
+        removeBtn.setAttribute('onclick', `removeNewFeedTag(${i})`);
+        tagEl.appendChild(removeBtn);
         container.insertBefore(tagEl, input);
     });
 }

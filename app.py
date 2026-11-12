@@ -16,6 +16,7 @@ import time
 import threading
 import ipaddress
 import logging
+import mimetypes
 import socket
 from pathlib import Path
 from datetime import datetime
@@ -75,6 +76,10 @@ if (not _raw_key or len(_raw_key) < 32
     )
     sys.exit(3)  # 3 = gunicorn's "worker failed to boot": the server stops instead of respawning forever
 
+# Some hosts (Windows registry) map .js to text/plain; with X-Content-Type-Options: nosniff the
+# browser then refuses the vendored scripts. Pin the type instead of trusting the host.
+mimetypes.add_type('text/javascript', '.js')
+
 app = Flask(__name__)
 app.secret_key = _raw_key
 
@@ -133,8 +138,9 @@ def handle_csrf_error(e):
 _CSP_POLICY = (
     "default-src 'self'; "
     # 'unsafe-inline' is required for the existing inline <script>/<style>/onclick blocks.
-    # External script hosts: unpkg (htmx), cdnjs (d3, psl).
-    "script-src 'self' 'unsafe-inline' https://unpkg.com https://cdnjs.cloudflare.com; "
+    # Scripts: htmx, d3 and psl are vendored under static/vendor, so no external hosts.
+    # 'unsafe-inline' remains until the inline JavaScript moves to static files.
+    "script-src 'self' 'unsafe-inline'; "
     # Google Fonts loads CSS from fonts.googleapis.com.
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
     "font-src 'self' https://fonts.gstatic.com; "
