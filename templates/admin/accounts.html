@@ -42,6 +42,9 @@
                             {% if account.username == session.get('username') %}
                             <span class="badge info">You</span>
                             {% endif %}
+                            {% if not account.is_active %}
+                            <span class="badge secondary">Disabled</span>
+                            {% endif %}
                         </div>
                     </td>
                     <td>
@@ -69,6 +72,11 @@
                                 Password
                             </a>
                             {% if account.id != session.get('user_id') %}
+                            <form action="{{ url_for('admin.set_account_active', account_id=account.id) }}" method="POST" class="inline-form">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <input type="hidden" name="active" value="{{ 0 if account.is_active else 1 }}">
+                                <button type="submit" class="btn small secondary">{{ 'Disable' if account.is_active else 'Enable' }}</button>
+                            </form>
                             <form action="{{ url_for('admin.delete_account', account_id=account.id) }}" method="POST" class="inline-form" onsubmit="return confirm('Are you sure you want to delete this account?');">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                 <button type="submit" class="btn small danger">

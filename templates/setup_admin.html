@@ -275,8 +275,13 @@
         <form method="POST" action="{{ url_for('auth_routes.setup') }}">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <div class="form-group">
+                <label for="setup_token">Setup token</label>
+                <input type="text" id="setup_token" name="setup_token" required autocomplete="off"
+                       placeholder="from the server log: docker logs &lt;container&gt;">
+            </div>
+            <div class="form-group">
                 <label for="username">Username</label>
-                <input type="text" id="username" name="username" required autofocus
+                <input type="text" id="username" name="username" required
                        placeholder="Choose an admin username"
                        value="{{ username | default('') }}">
                 <div class="form-hint">Minimum 3 characters</div>

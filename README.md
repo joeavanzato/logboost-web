@@ -47,7 +47,10 @@ EOF
 # 3. Start the container
 docker compose up -d
 
-# 4. Open https://localhost:8443 — accept the self-signed cert warning, then create your admin account
+# 4. Get the one-time setup token from the log
+docker compose logs logboost-web | grep "setup token"
+
+# 5. Open https://localhost:8443 — accept the self-signed cert warning, then create your admin account using the token
 ```
 
 That's it. On first visit you'll be prompted to create an admin user, then walked through MaxMind setup (upload `.mmdb` files or paste a free MaxMind API key). Threat intel feeds auto-populate from the bundled config.
@@ -308,7 +311,7 @@ All cache TTLs are configurable in **Admin Panel -> Settings**:
 
 ### First-Time Setup
 
-On first launch, you'll be prompted to create an admin account. There are no default credentials - you choose your own username and password during setup.
+On first launch, you'll be prompted to create an admin account. This requires a one-time setup token that the container writes to its log (`docker compose logs logboost-web | grep "setup token"`), so only someone with access to the host can claim the instance. There are no default credentials - you choose your own username and password during setup.
 
 ### Quick Actions
 

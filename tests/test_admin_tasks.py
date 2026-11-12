@@ -371,30 +371,6 @@ class TestAuditLogsEndpoints:
         assert response.status_code == 200
         assert 'text/csv' in response.content_type
     
-    def test_audit_clear_requires_admin(self, client, test_db):
-        """Test that clearing audit logs requires admin authentication."""
-        response = client.post('/admin/audit/clear')
-        assert response.status_code in (302, 401, 403)
-    
-    def test_audit_clear_success(self, admin_client, test_db):
-        """Test clearing audit logs."""
-        # Create some audit logs
-        from admin import log_audit, get_db
-        log_audit('test_action', 'test', 'target', {})
-        
-        response = admin_client.post('/admin/audit/clear')
-        assert response.status_code == 302  # Redirect
-        
-        # Verify logs were cleared
-        conn = get_db()
-        cursor = conn.cursor()
-        cursor.execute('SELECT COUNT(*) as count FROM audit_logs')
-        count = cursor.fetchone()['count']
-        conn.close()
-        
-        # Should have at most 1 entry (the clear action itself may be logged)
-        assert count <= 1
-    
     def test_audit_retention_requires_admin(self, client, test_db):
         """Test that setting audit retention requires admin authentication."""
         response = client.post('/admin/settings/audit-retention',

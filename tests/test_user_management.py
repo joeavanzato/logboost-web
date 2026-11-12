@@ -47,6 +47,7 @@ def admin_client(app, test_db, create_test_user):
     client = app.test_client()
     with client.session_transaction() as sess:
         sess['logged_in'] = True
+        sess['login_at'] = __import__('time').time()
         sess['user_id'] = user_id
         sess['username'] = 'adminuser'
         sess['user_role'] = 'admin'
@@ -62,6 +63,7 @@ def regular_user_client(app, test_db, create_test_user):
     client = app.test_client()
     with client.session_transaction() as sess:
         sess['logged_in'] = True
+        sess['login_at'] = __import__('time').time()
         sess['user_id'] = user_id
         sess['username'] = 'regularuser'
         sess['user_role'] = 'user'
@@ -455,6 +457,7 @@ class TestDeleteAccount:
         client = app.test_client()
         with client.session_transaction() as sess:
             sess['logged_in'] = True
+            sess['login_at'] = __import__('time').time()
             sess['user_id'] = second_admin_id
             sess['username'] = 'second_admin'
             sess['user_role'] = 'admin'

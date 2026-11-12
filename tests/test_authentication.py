@@ -20,23 +20,15 @@ class TestPasswordHashing:
     """Tests for password hashing functions."""
     
     def test_hash_password_returns_salted_hash(self, test_db):
-        """Test that hash_password returns a salted hash in correct format."""
+        """hash_password returns pbkdf2$<iterations>$<salt>$<hash>."""
         import admin
-        
-        password = 'testpassword123'
-        hashed = admin.hash_password(password)
-        
-        # Should be in format salt:hash
-        assert ':' in hashed
-        parts = hashed.split(':')
-        assert len(parts) == 2
-        
-        # Salt should be 32 hex chars (16 bytes)
-        assert len(parts[0]) == 32
-        
-        # Hash should be 64 hex chars (32 bytes SHA256)
-        assert len(parts[1]) == 64
-    
+
+        scheme, iterations, salt, digest = admin.hash_password('testpassword123').split('$')
+        assert scheme == 'pbkdf2'
+        assert int(iterations) == admin.PBKDF2_ITERATIONS
+        assert len(salt) == 32   # 16 random bytes, hex
+        assert len(digest) == 64  # SHA-256, hex
+
     def test_hash_password_unique_salts(self, test_db):
         """Test that hashing same password twice produces different hashes."""
         import admin
@@ -324,6 +316,7 @@ class TestAdminRequiredDecorator:
         # Login as regular user
         with client.session_transaction() as sess:
             sess['logged_in'] = True
+            sess['login_at'] = __import__('time').time()
             sess['user_id'] = 1
             sess['username'] = 'regularuser'
             sess['user_role'] = 'user'

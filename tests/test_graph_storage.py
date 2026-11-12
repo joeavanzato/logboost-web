@@ -681,6 +681,7 @@ class TestGraphOwnershipAPI:
         user_id = create_test_user('deletetest')
         with client.session_transaction() as sess:
             sess['logged_in'] = True
+            sess['login_at'] = __import__('time').time()
             sess['user_id'] = user_id
             sess['username'] = 'deletetest'
             sess['user_role'] = 'user'

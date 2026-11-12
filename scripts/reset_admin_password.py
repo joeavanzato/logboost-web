@@ -3,7 +3,7 @@
 reset_admin_password.py - Reset a LogBoost Web admin account password.
 
 Use this when you've forgotten the admin password and can no longer log in.
-Hashes the new password using the same PBKDF2-SHA256 (100k iterations) scheme
+Hashes the new password using the same PBKDF2-SHA256 (600k iterations) scheme
 as the live application (admin.py::hash_password) and writes it directly to
 the SQLite admin database.
 
@@ -32,16 +32,16 @@ import sys
 from pathlib import Path
 
 DEFAULT_DB_PATH = "/data/db/logboost_admin.db"
-PBKDF2_ITERATIONS = 100_000  # must match admin.py::hash_password
+PBKDF2_ITERATIONS = 600_000  # must match admin.py::PBKDF2_ITERATIONS
 MIN_PASSWORD_LEN = 8         # must match admin.py setup validation
 ADMIN_ROLE = "admin"
 
 
 def hash_password(password: str) -> str:
-    """Match admin.py::hash_password — salt:pbkdf2_sha256(100k)."""
+    """Match admin.py::hash_password — pbkdf2$<iterations>$<salt>$<hash>."""
     salt = secrets.token_hex(16)
     digest = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), PBKDF2_ITERATIONS)
-    return f"{salt}:{digest.hex()}"
+    return f"pbkdf2${PBKDF2_ITERATIONS}${salt}${digest.hex()}"
 
 
 def open_db(db_path: Path) -> sqlite3.Connection:
@@ -127,11 +127,17 @@ def main() -> int:
         "UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
         (hash_password(password), target["id"]),
     )
+    try:
+        # Sign the account out everywhere and make sure it is enabled.
+        conn.execute("UPDATE users SET session_version = session_version + 1, is_active = 1 WHERE id = ?",
+                     (target["id"],))
+    except sqlite3.OperationalError:
+        pass  # DB from before these columns existed; the app adds them on next start
     conn.commit()
     conn.close()
 
     print(f"OK: password for admin '{username}' (id={target['id']}) has been reset.")
-    print("You can log in now. Existing browser sessions are unaffected; logout to re-test.")
+    print("You can log in now. Existing sessions for this account have been signed out.")
     return 0
 
 

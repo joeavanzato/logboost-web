@@ -241,8 +241,13 @@
         </div>
 
         <div class="card">
+            {% if change_password %}
+            <div class="card-title">Change password</div>
+            <div class="card-sub">signed in as {{ session.get('username') }}</div>
+            {% else %}
             <div class="card-title">Sign in</div>
             <div class="card-sub">authenticate to continue</div>
+            {% endif %}
 
             {% with messages = get_flashed_messages(with_categories=true) %}
                 {% if messages %}
@@ -266,6 +271,28 @@
                 {% endif %}
             {% endwith %}
 
+            {% if change_password %}
+            <form method="POST" action="{{ url_for('auth_routes.account_password') }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <div class="field">
+                    <label for="current_password">Current password</label>
+                    <input type="password" id="current_password" name="current_password" required autofocus
+                           autocomplete="current-password">
+                </div>
+                <div class="field">
+                    <label for="new_password">New password</label>
+                    <input type="password" id="new_password" name="new_password" required minlength="8"
+                           autocomplete="new-password" placeholder="at least 8 characters">
+                </div>
+                <div class="field">
+                    <label for="confirm_password">Confirm new password</label>
+                    <input type="password" id="confirm_password" name="confirm_password" required minlength="8"
+                           autocomplete="new-password">
+                </div>
+                <button type="submit" class="submit">Update Password</button>
+            </form>
+            <div class="foot"><a href="{{ url_for('index') }}">Cancel</a></div>
+            {% else %}
             <form method="POST" action="{{ url_for('auth_routes.login') }}">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <div class="field">
@@ -286,6 +313,7 @@
                     </svg>
                 </button>
             </form>
+            {% endif %}
         </div>
 
         <div class="foot">

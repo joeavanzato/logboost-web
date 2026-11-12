@@ -28,18 +28,6 @@
                     Cleanup Old
                 </button>
             </form>
-            {% if logs %}
-            <form action="{{ url_for('admin.clear_audit_logs') }}" method="POST" style="display: inline;" onsubmit="return confirm('Are you sure you want to clear ALL audit logs? This cannot be undone.');">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <button type="submit" class="btn danger">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <polyline points="3 6 5 6 21 6"/>
-                        <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/>
-                    </svg>
-                    Clear All
-                </button>
-            </form>
-            {% endif %}
         </div>
     </div>
     

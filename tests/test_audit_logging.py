@@ -107,19 +107,18 @@ class TestLogAudit:
         
         assert test_log['ip_address'] == '10.20.30.40'
     
-    def test_log_audit_handles_forwarded_ip(self, app, test_db):
-        """Test that X-Forwarded-For header is used for IP."""
+    def test_log_audit_ignores_forwarded_ip_by_default(self, app, test_db):
+        """X-Forwarded-For is client-controlled; it is only honoured via TRUSTED_PROXY_COUNT."""
         import admin
-        
-        with app.test_request_context(headers={'X-Forwarded-For': '203.0.113.50, 198.51.100.1'}):
+
+        with app.test_request_context(headers={'X-Forwarded-For': '203.0.113.50'},
+                                      environ_base={'REMOTE_ADDR': '10.20.30.40'}):
             admin.log_audit('forwarded_ip_test', user_id=1, username='test')
-        
+
         logs, _ = admin.get_audit_logs(limit=10)
         test_log = next((l for l in logs if l['action'] == 'forwarded_ip_test'), None)
-        
-        # Should use first IP in chain
-        assert test_log['ip_address'] == '203.0.113.50'
-    
+        assert test_log['ip_address'] == '10.20.30.40'
+
     def test_log_audit_captures_user_agent(self, app, test_db):
         """Test that User-Agent header is captured."""
         import admin

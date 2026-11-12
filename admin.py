@@ -8,6 +8,8 @@ import io
 import json
 import sqlite3
 import hashlib
+import hmac
+import sys
 import secrets
 import subprocess
 import threading
@@ -95,6 +97,24 @@ def init_db():
             )
         ''')
     
+        # Migration: session revocation and account disabling
+        cursor.execute("PRAGMA table_info(users)")
+        user_columns = [col[1] for col in cursor.fetchall()]
+        if 'session_version' not in user_columns:
+            cursor.execute('ALTER TABLE users ADD COLUMN session_version INTEGER NOT NULL DEFAULT 0')
+        if 'is_active' not in user_columns:
+            cursor.execute('ALTER TABLE users ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1')
+
+        # Failed login attempts (throttling)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS login_attempts (
+                username TEXT NOT NULL,
+                ip TEXT NOT NULL,
+                ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_login_attempts_ip ON login_attempts(ip, ts)')
+
         # Migrate from old admin_accounts table if it exists
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='admin_accounts'")
         if cursor.fetchone():
@@ -371,21 +391,84 @@ def init_db():
             conn.commit()
 
 
+PBKDF2_ITERATIONS = 600_000  # OWASP guidance for PBKDF2-HMAC-SHA256
+_LEGACY_ITERATIONS = 100_000  # hashes stored as "salt:hash" before the format carried a count
+
+
+def _pbkdf2(password: str, salt: str, iterations: int) -> str:
+    return hashlib.pbkdf2_hmac('sha256', password.encode(), salt.encode(), iterations).hex()
+
+
 def hash_password(password: str) -> str:
-    """Hash a password with salt."""
+    """Hash a password as pbkdf2$<iterations>$<salt>$<hash>."""
     salt = secrets.token_hex(16)
-    hash_obj = hashlib.pbkdf2_hmac('sha256', password.encode(), salt.encode(), 100000)
-    return f"{salt}:{hash_obj.hex()}"
+    return f"pbkdf2${PBKDF2_ITERATIONS}${salt}${_pbkdf2(password, salt, PBKDF2_ITERATIONS)}"
 
 
 def verify_password(password: str, password_hash: str) -> bool:
-    """Verify a password against its hash."""
+    """Verify a password against a current or legacy ("salt:hash") hash, in constant time."""
     try:
-        salt, hash_value = password_hash.split(':')
-        hash_obj = hashlib.pbkdf2_hmac('sha256', password.encode(), salt.encode(), 100000)
-        return hash_obj.hex() == hash_value
+        if password_hash.startswith('pbkdf2$'):
+            _, iterations, salt, expected = password_hash.split('$')
+        else:
+            salt, expected = password_hash.split(':')
+            iterations = _LEGACY_ITERATIONS
+        return hmac.compare_digest(_pbkdf2(password, salt, int(iterations)), expected)
     except Exception:
         return False
+
+
+def needs_rehash(password_hash: str) -> bool:
+    """True if the hash was made with an older format or iteration count."""
+    return not password_hash.startswith(f'pbkdf2${PBKDF2_ITERATIONS}$')
+
+
+# ============================================
+# Login throttling
+# ============================================
+
+LOGIN_WINDOW = '-15 minutes'
+LOGIN_MAX_PER_USER_IP = 5   # failures for one username from one address
+LOGIN_MAX_PER_IP = 20       # failures from one address across all usernames (spraying)
+
+
+def login_blocked(username: str, ip: str) -> bool:
+    """True if this username+address pair, or the address alone, has too many recent failures."""
+    with db() as conn:
+        pair = conn.execute(
+            "SELECT COUNT(*) FROM login_attempts WHERE username = ? AND ip = ? AND ts > datetime('now', ?)",
+            (username, ip, LOGIN_WINDOW)).fetchone()[0]
+        per_ip = conn.execute(
+            "SELECT COUNT(*) FROM login_attempts WHERE ip = ? AND ts > datetime('now', ?)",
+            (ip, LOGIN_WINDOW)).fetchone()[0]
+    return pair >= LOGIN_MAX_PER_USER_IP or per_ip >= LOGIN_MAX_PER_IP
+
+
+def record_login_failure(username: str, ip: str) -> None:
+    with db() as conn:
+        conn.execute('INSERT INTO login_attempts (username, ip) VALUES (?, ?)', (username, ip))
+        conn.execute("DELETE FROM login_attempts WHERE ts < datetime('now', '-1 day')")
+        conn.commit()
+
+
+def clear_login_failures(username: str, ip: str) -> None:
+    with db() as conn:
+        conn.execute('DELETE FROM login_attempts WHERE username = ? AND ip = ?', (username, ip))
+        conn.commit()
+
+
+# ============================================
+# First-run setup token
+# ============================================
+
+def get_setup_token() -> str:
+    """Token required to complete /setup. Written to the server log, so only the operator has it."""
+    token = get_setting('setup_token')
+    if not token:
+        token = secrets.token_urlsafe(16)
+        set_setting('setup_token', token)
+    logger.warning("First-run setup token: %s  (enter it on the /setup page)", token)
+    return token
 
 
 # ============================================
@@ -403,16 +486,26 @@ def admin_login():
     return redirect(url_for('auth_routes.login'))
 
 
-@admin_bp.route('/logout')
-def logout():
-    """Logout and redirect to main login."""
-    session.clear()
-    return redirect(url_for('auth_routes.login'))
-
-
 # ============================================
 # Audit Logging
 # ============================================
+
+class _StdoutHandler(logging.StreamHandler):
+    """Writes to whatever sys.stdout is at emit time (same trick as logging's last-resort handler)."""
+    def __init__(self):
+        logging.Handler.__init__(self)
+
+    @property
+    def stream(self):
+        return sys.stdout
+
+
+# One JSON line per audit event on stdout, so `docker logs` / a log shipper keeps a copy outside the DB.
+_audit_stream = logging.getLogger('logboost.audit')
+_audit_stream.setLevel(logging.INFO)
+_audit_stream.propagate = False
+_audit_stream.addHandler(_StdoutHandler())
+
 
 def log_audit(action, resource_type=None, resource_id=None, details=None, success=True, user_id=None, username=None):
     """
@@ -437,11 +530,9 @@ def log_audit(action, resource_type=None, resource_id=None, details=None, succes
             if username is None:
                 username = session.get('username')
         
-            # Get client IP address
-            ip_address = request.headers.get('X-Forwarded-For', request.remote_addr)
-            if ip_address and ',' in ip_address:
-                ip_address = ip_address.split(',')[0].strip()
-        
+            # Client address. Honours X-Forwarded-For only via ProxyFix (TRUSTED_PROXY_COUNT).
+            ip_address = request.remote_addr
+
             # Get user agent
             user_agent = request.headers.get('User-Agent', '')[:500]  # Limit length
         
@@ -454,6 +545,12 @@ def log_audit(action, resource_type=None, resource_id=None, details=None, succes
             ''', (user_id, username, ip_address, user_agent, action, resource_type, resource_id, details_json, 1 if success else 0))
         
             conn.commit()
+
+        _audit_stream.info(json.dumps({
+            'audit': action, 'ts': datetime.utcnow().isoformat(timespec='seconds') + 'Z',
+            'user': username, 'ip': ip_address, 'resource_type': resource_type,
+            'resource_id': resource_id, 'details': details, 'success': bool(success),
+        }, default=str))
     except Exception as e:
         logger.error("[Audit] Failed to log audit event: %s", e)
 
@@ -622,7 +719,7 @@ def accounts():
     """List all user accounts."""
     with db() as conn:
         cursor = conn.cursor()
-        cursor.execute('SELECT id, username, role, created_at, updated_at FROM users ORDER BY role, username')
+        cursor.execute('SELECT id, username, role, is_active, created_at, updated_at FROM users ORDER BY role, username')
         accounts = cursor.fetchall()
         return render_template('admin/accounts.html', accounts=accounts)
 
@@ -663,6 +760,7 @@ def create_account():
                         (username, password_hash, role)
                     )
                     conn.commit()
+                    log_audit('account_created', 'user', username, {'role': role})
                     flash(f'Account "{username}" created successfully as {role}', 'success')
                     return redirect(url_for('admin.accounts'))
                 except sqlite3.IntegrityError:
@@ -704,6 +802,7 @@ def edit_account(account_id):
                 (role, account_id)
             )
             conn.commit()
+            log_audit('account_role_changed', 'user', account['username'], {'role': role})
             flash(f'Account "{account["username"]}" updated to {role}', 'success')
             return redirect(url_for('admin.accounts'))
     
@@ -737,11 +836,16 @@ def change_password(account_id):
         
             if not errors:
                 password_hash = hash_password(new_password)
+                # Bumping session_version signs the account out everywhere.
                 cursor.execute(
-                    'UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+                    '''UPDATE users SET password_hash = ?, session_version = session_version + 1,
+                       updated_at = CURRENT_TIMESTAMP WHERE id = ?''',
                     (password_hash, account_id)
                 )
                 conn.commit()
+                if account_id == session.get('user_id'):
+                    session['sv'] = session.get('sv', 0) + 1  # keep the admin's own session valid
+                log_audit('account_password_changed', 'user', account['username'], {'by_admin': True})
                 flash(f'Password for "{account["username"]}" updated successfully', 'success')
                 return redirect(url_for('admin.accounts'))
         
@@ -779,11 +883,38 @@ def delete_account(account_id):
         if account:
             cursor.execute('DELETE FROM users WHERE id = ?', (account_id,))
             conn.commit()
+            log_audit('account_deleted', 'user', account['username'])
             flash(f'Account "{account["username"]}" deleted', 'success')
         else:
             flash('Account not found', 'error')
     
         return redirect(url_for('admin.accounts'))
+
+
+@admin_bp.route('/accounts/<int:account_id>/active', methods=['POST'])
+@admin_required
+def set_account_active(account_id):
+    """Disable or re-enable an account without deleting it (keeps the user's graphs and shares)."""
+    active = request.form.get('active') == '1'
+    if account_id == session.get('user_id'):
+        flash('Cannot disable your own account', 'error')
+        return redirect(url_for('admin.accounts'))
+
+    with db() as conn:
+        account = conn.execute('SELECT username, role FROM users WHERE id = ?', (account_id,)).fetchone()
+        if not account:
+            flash('Account not found', 'error')
+            return redirect(url_for('admin.accounts'))
+        # Disabling also bumps session_version so existing sessions end immediately.
+        conn.execute(
+            '''UPDATE users SET is_active = ?, session_version = session_version + 1,
+               updated_at = CURRENT_TIMESTAMP WHERE id = ?''',
+            (1 if active else 0, account_id))
+        conn.commit()
+
+    log_audit('account_enabled' if active else 'account_disabled', 'user', account['username'])
+    flash(f'Account "{account["username"]}" {"enabled" if active else "disabled"}', 'success')
+    return redirect(url_for('admin.accounts'))
 
 
 # ============================================
@@ -1655,6 +1786,7 @@ def configure_task(task_type):
         ''', (interval_hours, 1 if enabled else 0, next_run, task_type))
         conn.commit()
     
+        log_audit('task_configured', 'task', task_type, {'interval_hours': interval_hours, 'enabled': enabled})
         flash(f'Task "{task_type}" configuration updated', 'success')
         return redirect(url_for('admin.tasks'))
 
@@ -1668,6 +1800,7 @@ def run_task(task_type):
     thread.daemon = True
     thread.start()
     
+    log_audit('task_run_manual', 'task', task_type)
     flash(f'Task "{task_type}" started. Check logs for progress.', 'success')
     return redirect(url_for('admin.logs'))
 
@@ -1846,26 +1979,12 @@ def export_audit_logs():
     return response
 
 
-@admin_bp.route('/audit/clear', methods=['POST'])
-@admin_required
-def clear_audit_logs():
-    """Clear all audit logs."""
-    with db() as conn:
-        cursor = conn.cursor()
-        cursor.execute('DELETE FROM audit_logs')
-        deleted = cursor.rowcount
-        conn.commit()
-    
-        log_audit('audit_logs_cleared', 'audit', None, {'deleted_count': deleted})
-        flash(f'Cleared {deleted} audit log entries', 'success')
-        return redirect(url_for('admin.audit_logs'))
-
-
 @admin_bp.route('/audit/cleanup', methods=['POST'])
 @admin_required
 def cleanup_audit_logs():
     """Manually trigger cleanup of old audit logs."""
     deleted = cleanup_old_audit_logs()
+    log_audit('audit_logs_cleanup', 'audit', None, {'deleted_count': deleted})
     flash(f'Cleaned up {deleted} old audit log entries', 'success')
     return redirect(url_for('admin.audit_logs'))
 
@@ -3172,6 +3291,7 @@ def install_logboost_update():
         LOGBOOST_BINARY = dest_path
         set_setting('logboost_override_path', dest_path)
         set_setting('logboost_installed_version', latest_tag)
+        log_audit('logboost_update_installed', 'logboost', latest_tag, {'path': dest_path})
 
         return jsonify({'success': True, 'path': dest_path, 'version': latest_tag})
     except Exception as e:
@@ -3469,6 +3589,9 @@ def start_runtime():
             logger.info(f"LogBoost binary override active: {override_path}")
     except Exception:
         pass  # DB not ready or setting absent -- use env var default
+
+    if needs_setup():
+        get_setup_token()  # logs the token the operator needs for /setup
 
     # Start scheduler
     scheduler.start()

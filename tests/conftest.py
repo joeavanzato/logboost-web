@@ -15,7 +15,7 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Set SECRET_KEY before app import — the startup validation runs at module load time
-# and will sys.exit(1) if SECRET_KEY is absent or weak.
+# and will exit if SECRET_KEY is absent or weak.
 os.environ.setdefault('SECRET_KEY', 'test-secret-key-for-pytest-minimum-32-chars')
 
 # Point every data path at a throwaway directory BEFORE the app is imported, so tests
@@ -25,6 +25,10 @@ os.environ['LOGBOOST_DB_PATH'] = os.path.join(_TEST_DATA_DIR, 'default.db')
 os.environ['THREAT_DB_DIR'] = _TEST_DATA_DIR
 os.environ['LOGBOOST_UPLOAD_DIR'] = os.path.join(_TEST_DATA_DIR, 'uploads')
 os.environ['LOGBOOST_OUTPUT_DIR'] = os.path.join(_TEST_DATA_DIR, 'output')
+
+
+import admin as _admin
+_admin.PBKDF2_ITERATIONS = 1000  # real value (600k) would add minutes of hashing to the suite
 
 
 @pytest.fixture(scope='session', autouse=True)
@@ -127,6 +131,7 @@ def authenticated_client(app, test_db):
     # Log in with correct session keys
     with client.session_transaction() as sess:
         sess['logged_in'] = True
+        sess['login_at'] = __import__('time').time()
         sess['user_id'] = user_id
         sess['username'] = 'testuser'
         sess['user_role'] = 'admin'
@@ -163,6 +168,7 @@ def admin_client(app, test_db):
     # Log in with admin role
     with client.session_transaction() as sess:
         sess['logged_in'] = True
+        sess['login_at'] = __import__('time').time()
         sess['user_id'] = user_id
         sess['username'] = 'adminuser'
         sess['user_role'] = 'admin'
@@ -199,6 +205,7 @@ def regular_user_client(app, test_db):
     # Log in with user role
     with client.session_transaction() as sess:
         sess['logged_in'] = True
+        sess['login_at'] = __import__('time').time()
         sess['user_id'] = user_id
         sess['username'] = 'regularuser'
         sess['user_role'] = 'user'

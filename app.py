@@ -60,15 +60,26 @@ _KNOWN_WEAK_KEYS = {
     'development',
     'flask-secret-key',
 }
-if not _raw_key or _raw_key.lower() in {k.lower() for k in _KNOWN_WEAK_KEYS} or len(_raw_key) < 32:
-    sys.exit(
-        "FATAL: SECRET_KEY is unset, matches a known weak default, or is shorter than "
+_PLACEHOLDER_MARKERS = ('change-me', 'changeme', 'placeholder')  # e.g. the value shipped in .env.example
+if (not _raw_key or len(_raw_key) < 32
+        or _raw_key.lower() in {k.lower() for k in _KNOWN_WEAK_KEYS}
+        or any(marker in _raw_key.lower() for marker in _PLACEHOLDER_MARKERS)):
+    sys.stderr.write(
+        "FATAL: SECRET_KEY is unset, is a known default or placeholder, or is shorter than "
         "32 characters. The application cannot start.\n"
-        "Generate a key: python -c \"import secrets; print(secrets.token_hex(32))\""
+        "Generate a key: python -c \"import secrets; print(secrets.token_hex(32))\"\n"
     )
+    sys.exit(3)  # 3 = gunicorn's "worker failed to boot": the server stops instead of respawning forever
 
 app = Flask(__name__)
 app.secret_key = _raw_key
+
+# Behind a reverse proxy, set TRUSTED_PROXY_COUNT to the number of proxies so the real client
+# address is used for audit entries and login throttling. Default 0: forwarding headers are ignored.
+_trusted_proxies = int(os.environ.get('TRUSTED_PROXY_COUNT') or 0)
+if _trusted_proxies:
+    from werkzeug.middleware.proxy_fix import ProxyFix
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=_trusted_proxies, x_proto=_trusted_proxies, x_host=_trusted_proxies)
 
 # ============================================
 # Security Configuration
@@ -616,13 +627,6 @@ def cleanup_session(session_id: str) -> None:
         shutil.rmtree(session_upload)
     if session_output.exists():
         shutil.rmtree(session_output)
-
-
-@app.before_request
-def ensure_session():
-    """Ensure each user has a session ID."""
-    if 'session_id' not in session:
-        session['session_id'] = str(uuid.uuid4())
 
 
 @app.route('/')
