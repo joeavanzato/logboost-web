@@ -1,58 +1,10 @@
-// Workspace page: infrastructure graph (GraphManager). Moved verbatim from templates/index.html.
+// Workspace page: infrastructure graph (GraphManager), its table view and graph statistics.
+// Markup: templates/workspace/_graph.html and _graph_dialogs.html. Styles: static/css/graph.css.
 
 (function() {
     'use strict';
 
-    // Toast notification utility
-    function showToast(message, type = 'info', duration = 4000) {
-        const container = document.getElementById('toast-container');
-        if (!container) return;
-
-        const toast = document.createElement('div');
-        toast.className = `toast ${type}`;
-
-        // Icon based on type
-        let iconSvg = '';
-        switch (type) {
-            case 'success':
-                iconSvg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>';
-                break;
-            case 'warning':
-                iconSvg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>';
-                break;
-            case 'error':
-                iconSvg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>';
-                break;
-            default: // info
-                iconSvg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>';
-        }
-
-        toast.innerHTML = `
-            <span class="toast-icon">${iconSvg}</span>
-            <span class="toast-message">${escapeHtml(message)}</span>
-            <button class="toast-close" onclick="this.parentElement.remove()">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <line x1="18" y1="6" x2="6" y2="18"/>
-                    <line x1="6" y1="6" x2="18" y2="18"/>
-                </svg>
-            </button>
-        `;
-
-        container.appendChild(toast);
-
-        // Auto-remove after duration
-        if (duration > 0) {
-            setTimeout(() => {
-                toast.classList.add('toast-exit');
-                setTimeout(() => toast.remove(), 300);
-            }, duration);
-        }
-
-        return toast;
-    }
-
-    // Make showToast globally accessible
-    window.showToast = showToast;
+    // Toasts come from workspace.js (window.showToast, same signature).
 
     class GraphManager {
         constructor() {
@@ -97,6 +49,12 @@
             this.pendingGeoIPs = new Set();
             this.geoQueueTimer = null;
 
+            // View state: is a graph on screen, and the canvas size the simulation was centred for
+            this.graphVisible = false;
+            this.lastWidth = 0;
+            this.lastHeight = 0;
+            this.palette = null;
+
             this.init();
         }
 
@@ -110,6 +68,9 @@
                 this.loadGraph(graphId);
             }
 
+            this.bindUI();
+            this.updateHeader();
+
             // Click outside to close search results
             document.addEventListener('click', (e) => {
                 const searchContainer = document.querySelector('.graph-search-container');
@@ -120,67 +81,279 @@
 
             // Keyboard shortcut for search (Ctrl+F or /)
             document.addEventListener('keydown', (e) => {
-                // Only if we're in the graph tab
-                if (document.querySelector('.tab[data-tab="graph"]')?.classList.contains('active')) {
-                    if ((e.ctrlKey && e.key === 'f') || (e.key === '/' && !e.target.matches('input, textarea'))) {
-                        e.preventDefault();
-                        const searchInput = document.getElementById('graph-search-input');
-                        if (searchInput) {
-                            searchInput.focus();
-                            searchInput.select();
-                        }
-                    }
+                // Only while the graph view is open, a graph is on the canvas and no dialog is in front
+                const panel = document.getElementById('graph-panel');
+                const searchInput = document.getElementById('graph-search-input');
+                if (!panel || !panel.classList.contains('active') || !searchInput || searchInput.offsetParent === null) return;
+                if (document.querySelector('dialog[open]')) return;
+                if ((e.ctrlKey && e.key === 'f') || (e.key === '/' && !e.target.matches('input, textarea, select'))) {
+                    e.preventDefault();
+                    searchInput.focus();
+                    searchInput.select();
                 }
             });
+
+            // Keep the simulation centred when the canvas changes size (view switch, full screen, window resize)
+            const canvas = document.getElementById('graph-visualization');
+            if (canvas && window.ResizeObserver) {
+                new ResizeObserver(() => this.handleResize()).observe(canvas);
+            }
+        }
+
+        // ========== UI wiring (the templates carry no inline handlers) ==========
+
+        bindUI() {
+            const byId = (id) => document.getElementById(id);
+            const on = (id, type, handler) => {
+                const el = byId(id);
+                if (el) el.addEventListener(type, handler);
+            };
+
+            // Header: view switch and file actions
+            document.addEventListener('click', (e) => {
+                // Canvas / Table. The copies in the Stats view are links to #graph, which then opens this view.
+                const viewSwitch = e.target.closest('[data-graph-view]');
+                if (viewSwitch) this.setView(viewSwitch.dataset.graphView);
+            });
+            on('load-graph-btn', 'click', () => this.showLoadModal());
+            on('save-graph-btn', 'click', () => this.saveGraph());
+            on('share-graph-btn', 'click', () => this.shareCurrentGraph());
+            on('export-png-btn', 'click', () => this.exportPNG());
+            on('export-json-btn', 'click', () => this.exportJSON());
+            on('new-graph-btn', 'click', () => this.newGraph());
+            on('add-node-btn', 'click', () => this.showAddNodeModal());
+            on('graph-stats-refresh-btn', 'click', () => window.refreshGraphStats());
+
+            // Drop-down menus (Export, Resolve all) and the node menu close on any click elsewhere
+            document.addEventListener('click', (e) => {
+                const trigger = e.target.closest('[data-gmenu]');
+                const target = trigger ? byId(trigger.dataset.gmenu) : null;
+                const wasOpen = !!target && target.classList.contains('open');
+                this.closeMenus();
+                if (target && !wasOpen) {
+                    target.classList.add('open');
+                    trigger.setAttribute('aria-expanded', 'true');
+                }
+                const nodeMenu = byId('node-context-menu');
+                if (nodeMenu) nodeMenu.classList.remove('active');
+            });
+
+            // Esc closes an open menu first, then leaves full screen
+            document.addEventListener('keydown', (e) => {
+                if (e.key !== 'Escape') return;
+                const nodeMenu = byId('node-context-menu');
+                if (document.querySelector('.gmenu.open') || (nodeMenu && nodeMenu.classList.contains('active'))) {
+                    this.closeMenus();
+                    this.hideContextMenu();
+                    return;
+                }
+                if (document.querySelector('dialog[open]')) return;
+                if (e.target.matches && e.target.matches('input, textarea, select')) return;
+                const container = byId('graph-container');
+                if (container && container.classList.contains('fullscreen')) this.toggleFullscreen();
+            });
+
+            // Canvas tools
+            on('graph-search-input', 'input', (e) => this.handleSearchInput(e.target.value));
+            on('graph-search-input', 'keydown', (e) => this.handleSearchKeydown(e));
+            on('graph-search-results', 'click', (e) => {
+                const item = e.target.closest('.search-result-item');
+                if (item) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    this.selectSearchResult(parseInt(item.dataset.index, 10));
+                }
+            });
+            on('graph-search-results', 'mouseover', (e) => {
+                const item = e.target.closest('.search-result-item');
+                if (!item) return;
+                const index = parseInt(item.dataset.index, 10);
+                if (index !== this.searchSelectedIndex) {
+                    this.searchSelectedIndex = index;
+                    // Update selection highlight without full re-render
+                    byId('graph-search-results').querySelectorAll('.search-result-item').forEach((el, i) => {
+                        el.classList.toggle('selected', i === index);
+                    });
+                }
+            });
+            on('freeze-all-btn', 'click', () => this.toggleFreezeAll());
+            on('resolve-all-dns-btn', 'click', () => this.resolveAllDNS());
+            on('resolve-all-whois-btn', 'click', () => this.resolveAllWhois());
+            on('resolve-all-geo-btn', 'click', () => this.resolveAllGeo());
+            on('resolve-all-idb-btn', 'click', () => this.resolveAllIDB());
+            on('filter-panel-btn', 'click', () => this.toggleFilterPanel());
+            on('filter-panel-close', 'click', () => this.toggleFilterPanel());
+            on('physics-panel-btn', 'click', () => this.togglePhysicsPanel());
+            on('physics-panel-close', 'click', () => this.togglePhysicsPanel());
+            on('edge-labels-toggle', 'click', () => this.toggleEdgeLabels());
+            on('fullscreen-toggle', 'click', () => this.toggleFullscreen());
+
+            // Layout (physics) panel: sliders carry the property name and the divisor for their value
+            on('physics-panel', 'input', (e) => {
+                const slider = e.target.closest('[data-physics]');
+                if (!slider) return;
+                const divisor = parseFloat(slider.dataset.divisor) || 1;
+                this.updatePhysics(slider.dataset.physics, parseFloat(slider.value) / divisor);
+            });
+            on('physics-panel', 'click', (e) => {
+                const preset = e.target.closest('[data-preset]');
+                if (preset) this.applyPhysicsPreset(preset.dataset.preset);
+            });
+            on('physics-reset-btn', 'click', () => this.applyPhysicsPreset('default'));
+
+            // Filter panel
+            on('filter-panel', 'click', (e) => {
+                const all = e.target.closest('[data-filter-all]');
+                const none = e.target.closest('[data-filter-none]');
+                if (all) {
+                    if (all.dataset.filterAll === 'node') this.showAllNodeTypes(); else this.showAllEdgeTypes();
+                } else if (none) {
+                    if (none.dataset.filterNone === 'node') this.hideAllNodeTypes(); else this.hideAllEdgeTypes();
+                }
+            });
+            on('filter-node-types', 'change', (e) => {
+                const item = e.target.closest('.filter-item');
+                if (item) this.toggleNodeTypeVisibility(item.dataset.type);
+            });
+            on('filter-edge-types', 'change', (e) => {
+                const item = e.target.closest('.filter-item');
+                if (item) this.toggleEdgeTypeVisibility(item.dataset.type);
+            });
+
+            // Node panel
+            on('graph-node-close', 'click', () => this.clearSelection());
+            on('enrich-node-btn', 'click', () => this.enrichNode());
+            on('whois-node-btn', 'click', () => this.resolveWhois());
+            on('geo-node-btn', 'click', () => this.resolveGeoFromModal());
+            on('circl-download-btn', 'click', () => { if (this.selectedNode) this.downloadCirclPDNS(this.selectedNode); });
+            on('remove-node-btn', 'click', () => this.removeNode());
+            on('graph-node-content', 'click', (e) => {
+                const button = e.target.closest('[data-node-action]');
+                if (!button || !this.selectedNode) return;
+                switch (button.dataset.nodeAction) {
+                    case 'download-whois': this.downloadWhoisJSON(this.selectedNode.id); break;
+                    case 'download-shodan': this.downloadShodanJSON(this.selectedNode.id); break;
+                    case 'download-jarm': this.downloadJARMPivotJSON(this.selectedNode.id); break;
+                    case 'download-pdns': this.downloadCirclPDNS(this.selectedNode); break;
+                }
+            });
+
+            // Node right-click menu
+            on('node-context-menu', 'click', (e) => {
+                const trigger = e.target.closest('.submenu-trigger');
+                if (trigger) {
+                    // Open the ViewDNS submenu on click too (hover and keyboard focus open it through CSS)
+                    e.stopPropagation();
+                    const open = trigger.parentElement.classList.toggle('open');
+                    trigger.setAttribute('aria-expanded', open ? 'true' : 'false');
+                    return;
+                }
+                const item = e.target.closest('[data-action]');
+                if (item) this.contextMenuAction(item.dataset.action);
+            });
+
+            // Empty state
+            on('graph-start-btn', 'click', () => this.startFromInput());
+            on('graph-start-input', 'keydown', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    this.startFromInput();
+                }
+            });
+            on('graph-bulk-btn', 'click', () => showBulkGraphModal());
+            on('saved-graphs-list', 'click', (e) => {
+                const button = e.target.closest('[data-saved-action]');
+                const row = e.target.closest('.saved-graph-item');
+                if (!button || !row) return;
+                const graphId = row.dataset.graphId;
+                switch (button.dataset.savedAction) {
+                    case 'open': this.loadGraph(graphId); break;
+                    case 'share': this.shareGraph(graphId); break;
+                    case 'unshare': this.unshareGraph(graphId); break;
+                    case 'delete': this.deleteGraph(graphId); break;
+                }
+            });
+
+            // Table view
+            on('graph-table-search', 'input', (e) => this.filterTable(e.target.value));
+            on('graph-table-csv-btn', 'click', () => this.downloadTableCSV());
+            on('graph-table-body', 'click', (e) => {
+                const button = e.target.closest('[data-remove-edge]');
+                const row = button && button.closest('tr');
+                if (row) this.removeEdgeFromTable(row.dataset.source, row.dataset.target);
+            });
+        }
+
+        closeMenus() {
+            document.querySelectorAll('.gmenu.open').forEach(menu => menu.classList.remove('open'));
+            document.querySelectorAll('[data-gmenu]').forEach(trigger => trigger.setAttribute('aria-expanded', 'false'));
+        }
+
+        // A one-line note for lists that are empty, loading or failed
+        noteElement(text, className = 'empty') {
+            const note = document.createElement('div');
+            note.className = className;
+            note.textContent = text;
+            return note;
         }
 
         // ========== Saved Graphs ==========
 
         async loadSavedGraphsList() {
+            const container = document.getElementById('saved-graphs-list');
             try {
                 const response = await csrfFetch('/api/graph/list');
                 const data = await response.json();
 
-                const container = document.getElementById('saved-graphs-list');
                 if (data.graphs && data.graphs.length > 0) {
-                    container.innerHTML = data.graphs.map(g => `
-                        <div class="saved-graph-item" data-graph-id="${this.escapeHtml(g.id)}" onclick="window.graphManager.loadGraph(this.dataset.graphId)">
-                            <div class="saved-graph-info">
-                                <span class="saved-graph-name">${this.escapeHtml(g.name)}</span>
-                                <span class="saved-graph-date">${new Date(g.updated_at).toLocaleDateString()}${g.is_shared ? ' • shared' : ''}</span>
-                            </div>
-                            <div class="saved-graph-actions">
-                                <button class="saved-graph-share" onclick="event.stopPropagation(); window.graphManager.shareGraph(this.closest('.saved-graph-item').dataset.graphId)" title="${g.is_shared ? 'Copy share link' : 'Share and copy link'}">
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                        <circle cx="18" cy="5" r="3"/>
-                                        <circle cx="6" cy="12" r="3"/>
-                                        <circle cx="18" cy="19" r="3"/>
-                                        <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/>
-                                        <line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>
-                                    </svg>
-                                </button>
-                                ${g.is_shared ? `
-                                <button class="saved-graph-share" onclick="event.stopPropagation(); window.graphManager.unshareGraph(this.closest('.saved-graph-item').dataset.graphId)" title="Stop sharing">
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                        <circle cx="12" cy="12" r="10"/>
-                                        <line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/>
-                                    </svg>
-                                </button>` : ''}
-                                <button class="saved-graph-delete" onclick="event.stopPropagation(); window.graphManager.deleteGraph(this.closest('.saved-graph-item').dataset.graphId)" title="Delete">
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                        <polyline points="3 6 5 6 21 6"/>
-                                        <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/>
-                                    </svg>
-                                </button>
-                            </div>
-                        </div>
-                    `).join('');
+                    const action = (label, name, title, extraClass = '') => {
+                        const button = document.createElement('button');
+                        button.type = 'button';
+                        button.className = `btn sm ${extraClass}`.trim();
+                        button.dataset.savedAction = name;
+                        button.textContent = label;
+                        button.title = title;
+                        return button;
+                    };
+
+                    const fragment = document.createDocumentFragment();
+                    data.graphs.forEach(g => {
+                        const row = document.createElement('div');
+                        row.className = 'line saved-graph-item';
+                        row.dataset.graphId = g.id;
+
+                        const open = document.createElement('button');
+                        open.type = 'button';
+                        open.className = 'grow saved-graph-open';
+                        open.dataset.savedAction = 'open';
+                        open.title = 'Open this graph';
+                        const name = document.createElement('b');
+                        name.className = 'saved-graph-name';
+                        name.textContent = g.name;
+                        const date = document.createElement('small');
+                        date.className = 'saved-graph-date';
+                        date.textContent = new Date(g.updated_at).toLocaleDateString();
+                        open.append(name, date);
+                        row.append(open);
+
+                        if (g.is_shared) {
+                            const shared = document.createElement('span');
+                            shared.className = 'tag green';
+                            shared.textContent = 'shared';
+                            row.append(shared);
+                        }
+                        row.append(action(g.is_shared ? 'Copy link' : 'Share', 'share', g.is_shared ? 'Copy share link' : 'Share and copy link'));
+                        if (g.is_shared) row.append(action('Stop sharing', 'unshare', 'Stop sharing'));
+                        row.append(action('Delete', 'delete', 'Delete this graph', 'danger'));
+                        fragment.append(row);
+                    });
+                    container.replaceChildren(fragment);
                 } else {
-                    container.innerHTML = '<p class="no-graphs">No saved graphs yet</p>';
+                    container.replaceChildren(this.noteElement('No saved graphs yet'));
                 }
             } catch (err) {
                 console.error('Failed to load graphs:', err);
-                document.getElementById('saved-graphs-list').innerHTML = '<p class="error">Failed to load saved graphs</p>';
+                container.replaceChildren(this.noteElement('Failed to load saved graphs', 'card-b red'));
             }
         }
 
@@ -234,8 +407,8 @@
                     window.history.replaceState({}, '', '#graph');
                 }
 
-                // Update name display
-                document.getElementById('graph-name-display').textContent = `- ${this.graphName}`;
+                // Update the header (name and counts)
+                this.updateHeader();
 
             } catch (err) {
                 console.error('Failed to load graph:', err);
@@ -298,14 +471,14 @@
             if (this.nodes.length > 0) {
                 // Show prompt modal
                 document.getElementById('graph-prompt-value').textContent = value;
-                document.getElementById('graph-prompt-modal').classList.add('active');
+                openGraphDialog('graph-prompt-modal');
             } else {
                 this.createNewGraph();
             }
         }
 
         createNewGraph() {
-            document.getElementById('graph-prompt-modal').classList.remove('active');
+            closeGraphDialog('graph-prompt-modal');
 
             this.reset();
             this.addNode(this.pendingValue, this.pendingType, true);
@@ -316,7 +489,7 @@
         }
 
         addToExistingGraph() {
-            document.getElementById('graph-prompt-modal').classList.remove('active');
+            closeGraphDialog('graph-prompt-modal');
 
             if (!this.nodeExists(this.pendingValue)) {
                 this.addNode(this.pendingValue, this.pendingType, false);
@@ -350,7 +523,6 @@
             this.knownNodeTypes.clear();
             this.knownEdgeTypes.clear();
 
-            document.getElementById('graph-name-display').textContent = '';
             window.history.replaceState({}, '', window.location.pathname);
 
             this.hideGraph();
@@ -936,7 +1108,7 @@
             const btn = document.getElementById('resolve-all-dns-btn');
             const originalHTML = btn.innerHTML;
             btn.disabled = true;
-            btn.innerHTML = '<svg class="spinning" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/></svg> Resolving...';
+            btn.textContent = 'Resolving...';
 
             this.showLoading(true);
 
@@ -946,7 +1118,7 @@
                 const domainNodes = unresolvedNodes.filter(n => n.type === 'domain');
 
                 const total = unresolvedNodes.length;
-                btn.innerHTML = `<svg class="spinning" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/></svg> DNS ${total}...`;
+                btn.textContent = `DNS ${total}...`;
 
                 // Bulk resolve domains
                 if (domainNodes.length > 0) {
@@ -1123,13 +1295,13 @@
             const btn = document.getElementById('resolve-all-whois-btn');
             const originalHTML = btn.innerHTML;
             btn.disabled = true;
-            btn.innerHTML = '<svg class="spinning" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/></svg> WHOIS...';
+            btn.textContent = 'WHOIS...';
 
             this.showLoading(true);
 
             try {
                 const domains = unresolvedDomains.map(n => n.id);
-                btn.innerHTML = `<svg class="spinning" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/></svg> WHOIS ${domains.length}...`;
+                btn.textContent = `WHOIS ${domains.length}...`;
 
                 // Use bulk endpoint for concurrent resolution
                 const response = await csrfFetch('/api/whois/resolve-bulk', {
@@ -1265,7 +1437,7 @@
             const btn = document.getElementById('resolve-all-geo-btn');
             const originalHTML = btn.innerHTML;
             btn.disabled = true;
-            btn.innerHTML = '<svg class="spinning" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/></svg> Enriching...';
+            btn.textContent = 'Enriching...';
 
             this.showLoading(true);
 
@@ -1275,7 +1447,7 @@
 
                 console.log('resolveAllGeo: Enriching IPs via LogBoost:', ips);
 
-                btn.innerHTML = `<svg class="spinning" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/></svg> Enriching ${ips.length}...`;
+                btn.textContent = `Enriching ${ips.length}...`;
 
                 const response = await csrfFetch('/api/graph/enrich', {
                     method: 'POST',
@@ -1391,9 +1563,12 @@
         showNodeDetails(node) {
             this.selectedNode = node;
 
-            const modal = document.getElementById('graph-node-modal');
-            const title = document.getElementById('graph-node-modal-value');
-            const content = document.getElementById('graph-node-modal-content');
+            const title = document.getElementById('graph-node-title');
+            const content = document.getElementById('graph-node-content');
+
+            // A refresh of the same node keeps its opened "View raw data" sections open
+            const sameNode = content.dataset.nodeId === String(node.id);
+            const openSections = sameNode ? [...content.querySelectorAll('details')].map(d => d.open) : [];
 
             title.textContent = node.id;
 
@@ -1411,29 +1586,29 @@
 
             // Build content
             let html = '<div class="node-details">';
-            html += `<div class="detail-row"><span class="detail-label">Type:</span><span class="detail-value">${this.escapeHtml(String(node.type).toUpperCase())}</span></div>`;
-            html += `<div class="detail-row"><span class="detail-label">Origin:</span><span class="detail-value">${node.isOrigin ? 'Yes (Starting Point)' : 'No (Discovered)'}</span></div>`;
+            html += `<div class="detail-row"><span class="detail-label">Type</span><span class="detail-value">${this.escapeHtml(String(node.type).toUpperCase())}</span></div>`;
+            html += `<div class="detail-row"><span class="detail-label">Origin</span><span class="detail-value">${node.isOrigin ? 'Yes (starting point)' : 'No (discovered)'}</span></div>`;
 
             // Show ASN details if this is an ASN node
             if (node.type === 'asn' && node.data) {
                 html += '<div class="detail-section"><h4>ASN Information</h4>';
-                if (node.data.asn_id) html += `<div class="detail-row"><span class="detail-label">ASN ID:</span><span class="detail-value">${this.escapeHtml(node.data.asn_id)}</span></div>`;
-                if (node.data.asn_name) html += `<div class="detail-row"><span class="detail-label">Name:</span><span class="detail-value">${this.escapeHtml(node.data.asn_name)}</span></div>`;
-                if (node.data.asn_org) html += `<div class="detail-row"><span class="detail-label">Organization:</span><span class="detail-value">${this.escapeHtml(node.data.asn_org)}</span></div>`;
+                if (node.data.asn_id) html += `<div class="detail-row"><span class="detail-label">ASN ID</span><span class="detail-value">${this.escapeHtml(node.data.asn_id)}</span></div>`;
+                if (node.data.asn_name) html += `<div class="detail-row"><span class="detail-label">Name</span><span class="detail-value">${this.escapeHtml(node.data.asn_name)}</span></div>`;
+                if (node.data.asn_org) html += `<div class="detail-row"><span class="detail-label">Organization</span><span class="detail-value">${this.escapeHtml(node.data.asn_org)}</span></div>`;
                 html += '</div>';
             }
 
             // Show Port details if this is a Port node
             if (node.type === 'port' && node.data) {
                 html += '<div class="detail-section"><h4>Port Information</h4>';
-                html += `<div class="detail-row"><span class="detail-label">Port Number:</span><span class="detail-value">${this.escapeHtml(node.data.port)}</span></div>`;
+                html += `<div class="detail-row"><span class="detail-label">Port Number</span><span class="detail-value">${this.escapeHtml(node.data.port)}</span></div>`;
                 html += '</div>';
             }
 
             // Show Tag details if this is a Tag node
             if (node.type === 'tag' && node.data) {
                 html += '<div class="detail-section"><h4>Tag Information</h4>';
-                html += `<div class="detail-row"><span class="detail-label">Tag:</span><span class="detail-value">${this.escapeHtml(node.data.tag)}</span></div>`;
+                html += `<div class="detail-row"><span class="detail-label">Tag</span><span class="detail-value">${this.escapeHtml(node.data.tag)}</span></div>`;
                 html += '</div>';
             }
 
@@ -1441,10 +1616,10 @@
             if (node.data && node.data.geo) {
                 const g = node.data.geo;
                 html += '<div class="detail-section"><h4>Geo Information</h4>';
-                if (g.country) html += `<div class="detail-row"><span class="detail-label">Country:</span><span class="detail-value">${this.escapeHtml(g.country)}</span></div>`;
-                if (g.city) html += `<div class="detail-row"><span class="detail-label">City:</span><span class="detail-value">${this.escapeHtml(g.city)}</span></div>`;
-                if (g.asn) html += `<div class="detail-row"><span class="detail-label">ASN:</span><span class="detail-value">${this.escapeHtml(g.asn)}</span></div>`;
-                if (g.org) html += `<div class="detail-row"><span class="detail-label">Organization:</span><span class="detail-value">${this.escapeHtml(g.org)}</span></div>`;
+                if (g.country) html += `<div class="detail-row"><span class="detail-label">Country</span><span class="detail-value">${this.escapeHtml(g.country)}</span></div>`;
+                if (g.city) html += `<div class="detail-row"><span class="detail-label">City</span><span class="detail-value">${this.escapeHtml(g.city)}</span></div>`;
+                if (g.asn) html += `<div class="detail-row"><span class="detail-label">ASN</span><span class="detail-value">${this.escapeHtml(g.asn)}</span></div>`;
+                if (g.org) html += `<div class="detail-row"><span class="detail-label">Organization</span><span class="detail-value">${this.escapeHtml(g.org)}</span></div>`;
                 html += '</div>';
             }
 
@@ -1452,8 +1627,8 @@
             if (node.data && node.data.idb) {
                 const idb = node.data.idb;
                 html += '<div class="detail-section"><h4>InternetDB Data</h4>';
-                if (idb.ports && idb.ports.length > 0) html += `<div class="detail-row"><span class="detail-label">Open Ports:</span><span class="detail-value">${idb.ports.map(p => this.escapeHtml(String(p))).join(', ')}</span></div>`;
-                if (idb.tags && idb.tags.length > 0) html += `<div class="detail-row"><span class="detail-label">Tags:</span><span class="detail-value">${idb.tags.map(t => this.escapeHtml(String(t))).join(', ')}</span></div>`;
+                if (idb.ports && idb.ports.length > 0) html += `<div class="detail-row"><span class="detail-label">Open Ports</span><span class="detail-value">${idb.ports.map(p => this.escapeHtml(String(p))).join(', ')}</span></div>`;
+                if (idb.tags && idb.tags.length > 0) html += `<div class="detail-row"><span class="detail-label">Tags</span><span class="detail-value">${idb.tags.map(t => this.escapeHtml(String(t))).join(', ')}</span></div>`;
                 html += '</div>';
             }
 
@@ -1462,16 +1637,16 @@
                 const w = node.data.whois;
                 html += '<div class="detail-section">';
                 html += '<div class="detail-section-header"><h4>WHOIS Information</h4>';
-                html += `<button class="detail-download-btn" onclick="window.graphManager.downloadWhoisJSON(window.graphManager.selectedNode.id)" title="Download WHOIS JSON">`;
-                html += '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>';
+                html += `<button type="button" class="linkbtn detail-download-btn" data-node-action="download-whois" title="Download WHOIS JSON">`;
+                html += 'Download';
                 html += '</button></div>';
-                if (w.registrant_name) html += `<div class="detail-row"><span class="detail-label">Registrant:</span><span class="detail-value">${this.escapeHtml(w.registrant_name)}</span></div>`;
-                if (w.registrant_email) html += `<div class="detail-row"><span class="detail-label">Email:</span><span class="detail-value">${this.escapeHtml(w.registrant_email)}</span></div>`;
-                if (w.organization) html += `<div class="detail-row"><span class="detail-label">Organization:</span><span class="detail-value">${this.escapeHtml(w.organization)}</span></div>`;
-                if (w.registrar) html += `<div class="detail-row"><span class="detail-label">Registrar:</span><span class="detail-value">${this.escapeHtml(w.registrar)}</span></div>`;
-                if (w.creation_date) html += `<div class="detail-row"><span class="detail-label">Created:</span><span class="detail-value">${this.escapeHtml(w.creation_date)}</span></div>`;
-                if (w.expiration_date) html += `<div class="detail-row"><span class="detail-label">Expires:</span><span class="detail-value">${this.escapeHtml(w.expiration_date)}</span></div>`;
-                if (w.name_servers && w.name_servers.length > 0) html += `<div class="detail-row"><span class="detail-label">Nameservers:</span><span class="detail-value">${w.name_servers.map(ns => this.escapeHtml(ns)).join(', ')}</span></div>`;
+                if (w.registrant_name) html += `<div class="detail-row"><span class="detail-label">Registrant</span><span class="detail-value">${this.escapeHtml(w.registrant_name)}</span></div>`;
+                if (w.registrant_email) html += `<div class="detail-row"><span class="detail-label">Email</span><span class="detail-value">${this.escapeHtml(w.registrant_email)}</span></div>`;
+                if (w.organization) html += `<div class="detail-row"><span class="detail-label">Organization</span><span class="detail-value">${this.escapeHtml(w.organization)}</span></div>`;
+                if (w.registrar) html += `<div class="detail-row"><span class="detail-label">Registrar</span><span class="detail-value">${this.escapeHtml(w.registrar)}</span></div>`;
+                if (w.creation_date) html += `<div class="detail-row"><span class="detail-label">Created</span><span class="detail-value">${this.escapeHtml(w.creation_date)}</span></div>`;
+                if (w.expiration_date) html += `<div class="detail-row"><span class="detail-label">Expires</span><span class="detail-value">${this.escapeHtml(w.expiration_date)}</span></div>`;
+                if (w.name_servers && w.name_servers.length > 0) html += `<div class="detail-row"><span class="detail-label">Nameservers</span><span class="detail-value">${w.name_servers.map(ns => this.escapeHtml(ns)).join(', ')}</span></div>`;
                 // Collapsible raw JSON
                 html += '<details class="raw-data-details"><summary>View Raw WHOIS Data</summary>';
                 html += `<pre class="raw-data-pre">${this.escapeHtml(JSON.stringify(w, null, 2))}</pre>`;
@@ -1484,44 +1659,44 @@
                 const s = node.data.shodan;
                 html += '<div class="detail-section">';
                 html += '<div class="detail-section-header"><h4>Shodan Information</h4>';
-                html += `<button class="detail-download-btn" onclick="window.graphManager.downloadShodanJSON(window.graphManager.selectedNode.id)" title="Download Shodan JSON">`;
-                html += '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>';
+                html += `<button type="button" class="linkbtn detail-download-btn" data-node-action="download-shodan" title="Download Shodan JSON">`;
+                html += 'Download';
                 html += '</button></div>';
 
                 // Organization & Network
-                if (s.org) html += `<div class="detail-row"><span class="detail-label">Organization:</span><span class="detail-value">${this.escapeHtml(s.org)}</span></div>`;
-                if (s.isp) html += `<div class="detail-row"><span class="detail-label">ISP:</span><span class="detail-value">${this.escapeHtml(s.isp)}</span></div>`;
-                if (s.asn) html += `<div class="detail-row"><span class="detail-label">ASN:</span><span class="detail-value">${this.escapeHtml(s.asn)}</span></div>`;
+                if (s.org) html += `<div class="detail-row"><span class="detail-label">Organization</span><span class="detail-value">${this.escapeHtml(s.org)}</span></div>`;
+                if (s.isp) html += `<div class="detail-row"><span class="detail-label">ISP</span><span class="detail-value">${this.escapeHtml(s.isp)}</span></div>`;
+                if (s.asn) html += `<div class="detail-row"><span class="detail-label">ASN</span><span class="detail-value">${this.escapeHtml(s.asn)}</span></div>`;
 
                 // Location
                 let location = [];
                 if (s.city) location.push(s.city);
                 if (s.region_code) location.push(s.region_code);
                 if (s.country_name) location.push(s.country_name);
-                if (location.length > 0) html += `<div class="detail-row"><span class="detail-label">Location:</span><span class="detail-value">${this.escapeHtml(location.join(', '))}</span></div>`;
-                if (s.latitude && s.longitude) html += `<div class="detail-row"><span class="detail-label">Coordinates:</span><span class="detail-value">${this.escapeHtml(s.latitude)}, ${this.escapeHtml(s.longitude)}</span></div>`;
+                if (location.length > 0) html += `<div class="detail-row"><span class="detail-label">Location</span><span class="detail-value">${this.escapeHtml(location.join(', '))}</span></div>`;
+                if (s.latitude && s.longitude) html += `<div class="detail-row"><span class="detail-label">Coordinates</span><span class="detail-value">${this.escapeHtml(s.latitude)}, ${this.escapeHtml(s.longitude)}</span></div>`;
 
                 // OS
-                if (s.os) html += `<div class="detail-row"><span class="detail-label">OS:</span><span class="detail-value">${this.escapeHtml(s.os)}</span></div>`;
+                if (s.os) html += `<div class="detail-row"><span class="detail-label">OS</span><span class="detail-value">${this.escapeHtml(s.os)}</span></div>`;
 
                 // Ports (numbers are safe but escape for defense in depth)
-                if (s.ports && s.ports.length > 0) html += `<div class="detail-row"><span class="detail-label">Open Ports:</span><span class="detail-value">${[...s.ports].sort((a,b) => a-b).map(p => this.escapeHtml(String(p))).join(', ')}</span></div>`;
+                if (s.ports && s.ports.length > 0) html += `<div class="detail-row"><span class="detail-label">Open Ports</span><span class="detail-value">${[...s.ports].sort((a,b) => a-b).map(p => this.escapeHtml(String(p))).join(', ')}</span></div>`;
 
                 // Hostnames & Domains
-                if (s.hostnames && s.hostnames.length > 0) html += `<div class="detail-row"><span class="detail-label">Hostnames:</span><span class="detail-value">${s.hostnames.map(h => this.escapeHtml(h)).join(', ')}</span></div>`;
-                if (s.domains && s.domains.length > 0) html += `<div class="detail-row"><span class="detail-label">Domains:</span><span class="detail-value">${s.domains.map(d => this.escapeHtml(d)).join(', ')}</span></div>`;
+                if (s.hostnames && s.hostnames.length > 0) html += `<div class="detail-row"><span class="detail-label">Hostnames</span><span class="detail-value">${s.hostnames.map(h => this.escapeHtml(h)).join(', ')}</span></div>`;
+                if (s.domains && s.domains.length > 0) html += `<div class="detail-row"><span class="detail-label">Domains</span><span class="detail-value">${s.domains.map(d => this.escapeHtml(d)).join(', ')}</span></div>`;
 
                 // Vulnerabilities (can be object keys or array)
                 const vulns = s.vulns ? (Array.isArray(s.vulns) ? s.vulns : Object.keys(s.vulns)) : [];
                 if (vulns.length > 0) {
-                    html += `<div class="detail-row"><span class="detail-label">Vulnerabilities:</span><span class="detail-value vuln-list">${vulns.map(v => `<span class="vuln-tag">${this.escapeHtml(v)}</span>`).join(' ')}</span></div>`;
+                    html += `<div class="detail-row"><span class="detail-label">Vulnerabilities</span><span class="detail-value vuln-list">${vulns.map(v => `<span class="vuln-tag">${this.escapeHtml(v)}</span>`).join(' ')}</span></div>`;
                 }
 
                 // Tags
-                if (s.tags && s.tags.length > 0) html += `<div class="detail-row"><span class="detail-label">Tags:</span><span class="detail-value">${s.tags.map(t => this.escapeHtml(t)).join(', ')}</span></div>`;
+                if (s.tags && s.tags.length > 0) html += `<div class="detail-row"><span class="detail-label">Tags</span><span class="detail-value">${s.tags.map(t => this.escapeHtml(t)).join(', ')}</span></div>`;
 
                 // Last Update
-                if (s.last_update) html += `<div class="detail-row"><span class="detail-label">Last Scan:</span><span class="detail-value">${this.escapeHtml(s.last_update)}</span></div>`;
+                if (s.last_update) html += `<div class="detail-row"><span class="detail-label">Last Scan</span><span class="detail-value">${this.escapeHtml(s.last_update)}</span></div>`;
 
                 // Services from raw Shodan 'data' array
                 const services = s.data || s.services || [];
@@ -1562,16 +1737,16 @@
                 html += '<div class="detail-section">';
                 html += '<div class="detail-section-header"><h4>JARM Information</h4>';
                 if (node.data.pivot_results) {
-                    html += `<button class="detail-download-btn" onclick="window.graphManager.downloadJARMPivotJSON(window.graphManager.selectedNode.id)" title="Download JARM Pivot Results">`;
-                    html += '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>';
+                    html += `<button type="button" class="linkbtn detail-download-btn" data-node-action="download-jarm" title="Download JARM Pivot Results">`;
+                    html += 'Download';
                     html += '</button>';
                 }
                 html += '</div>';
-                if (node.data.host_count !== undefined) html += `<div class="detail-row"><span class="detail-label">Hosts with JARM:</span><span class="detail-value">${this.escapeHtml(Number(node.data.host_count).toLocaleString())}</span></div>`;
-                if (node.data.source_ip) html += `<div class="detail-row"><span class="detail-label">Source IP:</span><span class="detail-value">${this.escapeHtml(node.data.source_ip)}</span></div>`;
-                if (node.data.port) html += `<div class="detail-row"><span class="detail-label">Port:</span><span class="detail-value">${this.escapeHtml(node.data.port)}</span></div>`;
+                if (node.data.host_count !== undefined) html += `<div class="detail-row"><span class="detail-label">Hosts with JARM</span><span class="detail-value">${this.escapeHtml(Number(node.data.host_count).toLocaleString())}</span></div>`;
+                if (node.data.source_ip) html += `<div class="detail-row"><span class="detail-label">Source IP</span><span class="detail-value">${this.escapeHtml(node.data.source_ip)}</span></div>`;
+                if (node.data.port) html += `<div class="detail-row"><span class="detail-label">Port</span><span class="detail-value">${this.escapeHtml(node.data.port)}</span></div>`;
                 if (node.data.hostnames && node.data.hostnames.length > 0) {
-                    html += `<div class="detail-row"><span class="detail-label">Hostnames:</span><span class="detail-value">${node.data.hostnames.map(h => this.escapeHtml(h)).join(', ')}</span></div>`;
+                    html += `<div class="detail-row"><span class="detail-label">Hostnames</span><span class="detail-value">${node.data.hostnames.map(h => this.escapeHtml(h)).join(', ')}</span></div>`;
                 }
                 // Collapsible raw JSON for pivot results
                 if (node.data.pivot_results) {
@@ -1587,14 +1762,14 @@
                 const pdns = node.data.circlPdns;
                 html += '<div class="detail-section">';
                 html += '<div class="detail-section-header"><h4>CIRCL Passive DNS</h4>';
-                html += `<button class="detail-download-btn" onclick="window.graphManager.downloadCirclPDNS(window.graphManager.selectedNode)" title="Download CIRCL PDNS JSON">`;
-                html += '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>';
+                html += `<button type="button" class="linkbtn detail-download-btn" data-node-action="download-pdns" title="Download CIRCL PDNS JSON">`;
+                html += 'Download';
                 html += '</button></div>';
 
-                html += `<div class="detail-row"><span class="detail-label">Records Found:</span><span class="detail-value">${Number(pdns.length)}</span></div>`;
+                html += `<div class="detail-row"><span class="detail-label">Records Found</span><span class="detail-value">${Number(pdns.length)}</span></div>`;
 
                 if (node.data.circlPdnsFromCache) {
-                    html += `<div class="detail-row"><span class="detail-label">From Cache:</span><span class="detail-value">Yes (${this.escapeHtml(node.data.circlPdnsCachedAt || 'unknown time')})</span></div>`;
+                    html += `<div class="detail-row"><span class="detail-label">From Cache</span><span class="detail-value">Yes (${this.escapeHtml(node.data.circlPdnsCachedAt || 'unknown time')})</span></div>`;
                 }
 
                 // Count by record type
@@ -1603,7 +1778,7 @@
                     typeCounts[r.rrtype] = (typeCounts[r.rrtype] || 0) + 1;
                 }
                 const typeStr = Object.entries(typeCounts).map(([t, c]) => `${t}: ${c}`).join(', ');
-                html += `<div class="detail-row"><span class="detail-label">Record Types:</span><span class="detail-value">${this.escapeHtml(typeStr)}</span></div>`;
+                html += `<div class="detail-row"><span class="detail-label">Record Types</span><span class="detail-value">${this.escapeHtml(typeStr)}</span></div>`;
 
                 // Show first/last seen from the records
                 let firstSeen = Infinity;
@@ -1613,10 +1788,10 @@
                     if (r.time_last && r.time_last > lastSeen) lastSeen = r.time_last;
                 }
                 if (firstSeen !== Infinity) {
-                    html += `<div class="detail-row"><span class="detail-label">First Seen:</span><span class="detail-value">${new Date(firstSeen * 1000).toLocaleDateString()}</span></div>`;
+                    html += `<div class="detail-row"><span class="detail-label">First Seen</span><span class="detail-value">${new Date(firstSeen * 1000).toLocaleDateString()}</span></div>`;
                 }
                 if (lastSeen !== 0) {
-                    html += `<div class="detail-row"><span class="detail-label">Last Seen:</span><span class="detail-value">${new Date(lastSeen * 1000).toLocaleDateString()}</span></div>`;
+                    html += `<div class="detail-row"><span class="detail-label">Last Seen</span><span class="detail-value">${new Date(lastSeen * 1000).toLocaleDateString()}</span></div>`;
                 }
 
                 // Collapsible raw data
@@ -1633,7 +1808,7 @@
                 return sourceId === node.id || targetId === node.id;
             });
             if (connections.length > 0) {
-                html += `<div class="detail-row"><span class="detail-label">Connections:</span><span class="detail-value">${connections.length}</span></div>`;
+                html += `<div class="detail-row"><span class="detail-label">Connections</span><span class="detail-value">${connections.length}</span></div>`;
                 html += '<div class="connection-list">';
                 for (const conn of connections) {
                     const sourceId = typeof conn.source === 'object' ? conn.source.id : conn.source;
@@ -1646,8 +1821,42 @@
 
             html += '</div>';
             content.innerHTML = html;
+            content.dataset.nodeId = String(node.id);
+            content.querySelectorAll('details').forEach((d, i) => {
+                if (openSections[i]) d.open = true;
+            });
 
-            modal.classList.add('active');
+            const count = connections.length;
+            document.getElementById('graph-node-sub').textContent =
+                `${String(node.type).toUpperCase()} \u00b7 ${node.isOrigin ? 'starting point' : 'discovered'} \u00b7 ` +
+                `${count} connection${count === 1 ? '' : 's'}${node.frozen ? ' \u00b7 frozen' : ''}`;
+
+            // Show the node in the docked panel and mark it on the canvas
+            document.getElementById('graph-node-empty').hidden = true;
+            document.getElementById('graph-node-detail').hidden = false;
+            if (this.svg) this.svg.selectAll('.node').classed('selected', d => d.id === node.id);
+        }
+
+        clearSelection() {
+            this.selectedNode = null;
+            const detail = document.getElementById('graph-node-detail');
+            if (detail) {
+                detail.hidden = true;
+                document.getElementById('graph-node-empty').hidden = false;
+            }
+            if (this.svg) this.svg.selectAll('.node').classed('selected', false);
+        }
+
+        // After a re-render: keep the panel in step with the node it shows
+        refreshNodePanel() {
+            if (!this.selectedNode) return;
+            const current = this.nodes.find(n => n.id === this.selectedNode.id);
+            if (!current) {
+                this.clearSelection();
+                return;
+            }
+            const detail = document.getElementById('graph-node-detail');
+            if (detail && !detail.hidden) this.showNodeDetails(current);
         }
 
         showContextMenu(event, node) {
@@ -1665,7 +1874,7 @@
             const circlPdnsItem = document.getElementById('context-circl-pdns-item');
 
             // Update freeze text based on current state
-            freezeText.textContent = node.frozen ? 'Unfreeze Position' : 'Freeze Position';
+            freezeText.textContent = node.frozen ? 'Unfreeze position' : 'Freeze position';
 
             // Show/hide DNS option based on node type (IP, domain, basedomain only)
             dnsItem.style.display = (node.type === 'ip' || node.type === 'domain' || node.type === 'basedomain') ? '' : 'none';
@@ -1711,6 +1920,19 @@
             const whoisPivotTypes = ['registrar', 'email', 'registrant', 'org'];
             viewdnsWhoisStandaloneItem.style.display = (viewdnsConfigured && whoisPivotTypes.includes(node.type)) ? '' : 'none';
 
+            // A heading ("Resolve", "Pivot") goes when every item under it is hidden
+            menu.querySelectorAll('.menu-group').forEach(group => {
+                const anyVisible = [...group.querySelectorAll(':scope > .context-menu-item')]
+                    .some(item => item.style.display !== 'none');
+                group.style.display = anyVisible ? '' : 'none';
+            });
+            menu.querySelectorAll('.has-submenu').forEach(wrap => {
+                wrap.classList.remove('open', 'flip');
+                const trigger = wrap.querySelector('.submenu-trigger');
+                if (trigger) trigger.setAttribute('aria-expanded', 'false');
+            });
+            this.closeMenus();
+
             // Position menu at cursor
             let x = event.clientX;
             let y = event.clientY;
@@ -1726,8 +1948,13 @@
                 y = window.innerHeight - menuRect.height - 10;
             }
 
-            menu.style.left = x + 'px';
-            menu.style.top = y + 'px';
+            menu.style.left = Math.max(x, 0) + 'px';
+            menu.style.top = Math.max(y, 0) + 'px';
+
+            // Open the ViewDNS submenu to the left when there is no room on the right
+            if (x + menuRect.width + 200 > window.innerWidth) {
+                menu.querySelectorAll('.has-submenu').forEach(wrap => wrap.classList.add('flip'));
+            }
         }
 
         hideContextMenu() {
@@ -2007,7 +2234,7 @@
 
             this.showLoading(true);
             btn.disabled = true;
-            btn.innerHTML = `<svg class="spinning" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/></svg> Resolving ${unresolvedIPs.length}...`;
+            btn.textContent = `Resolving ${unresolvedIPs.length}...`;
 
             try {
                 const ips = unresolvedIPs.map(n => n.id);
@@ -2308,17 +2535,16 @@
             const listContainer = document.getElementById('pivot-attributes-list');
             listContainer.innerHTML = queryableAttributes.map((attr, idx) => `
                 <label class="pivot-attribute-item">
-                    <input type="checkbox" class="pivot-attribute-checkbox" 
-                           data-filter="${this.escapeHtml(attr.filter)}" 
-                           data-value="${this.escapeHtml(attr.value)}"
-                           onchange="updatePivotQueryPreview()">
+                    <input type="checkbox" class="check pivot-attribute-checkbox"
+                           data-filter="${this.escapeHtml(attr.filter)}"
+                           data-value="${this.escapeHtml(attr.value)}">
                     <span class="pivot-filter-name">${this.escapeHtml(attr.filter)}:</span>
                     <span class="pivot-filter-value">${this.escapeHtml(attr.value)}</span>
                 </label>
             `).join('');
 
             // Show modal
-            document.getElementById('shodan-pivot-modal').classList.add('active');
+            openGraphDialog('shodan-pivot-modal');
         }
 
         async resolveShodan(node) {
@@ -2475,6 +2701,12 @@
                 node.fy = node.y;
             }
             this.isModified = true;
+
+            // Update the frozen ring on the canvas
+            if (this.svg) {
+                const nodeEl = this.svg.select(`.node[data-id="${CSS.escape(node.id)}"]`);
+                if (!nodeEl.empty()) this.drawFrozenRing(nodeEl, node);
+            }
 
             // Restart simulation to update
             if (this.simulation) {
@@ -3313,7 +3545,7 @@
 
             // Update button text
             const btnText = document.getElementById('freeze-all-text');
-            btnText.textContent = allFrozen ? 'Freeze All' : 'Unfreeze All';
+            btnText.textContent = allFrozen ? 'Freeze all' : 'Unfreeze all';
 
             // Restart simulation to update visual indicators
             if (this.simulation) {
@@ -3403,10 +3635,9 @@
                     const color = this.getNodeColor(type);
                     return `
                         <label class="filter-item ${isHidden ? 'type-hidden' : ''}" data-type="${this.escapeHtml(type)}">
-                            <input type="checkbox" ${!isHidden ? 'checked' : ''} 
-                                   onchange="window.graphManager.toggleNodeTypeVisibility(this.closest('.filter-item').dataset.type)">
-                            <div class="filter-item-icon" style="background: ${color}; color: #000;">
-                                ${this.escapeHtml(type.substring(0, 2).toUpperCase())}
+                            <input type="checkbox" class="check" ${!isHidden ? 'checked' : ''}>
+                            <div class="filter-item-icon" style="background: ${this.escapeHtml(color)};">
+                                ${this.escapeHtml(this.getNodeAbbr(type))}
                             </div>
                             <span class="filter-item-label">${this.escapeHtml(type)}</span>
                             <span class="filter-item-count">${this.escapeHtml(String(count))}</span>
@@ -3425,9 +3656,8 @@
                     const isHidden = this.hiddenEdgeTypes.has(type);
                     return `
                         <label class="filter-item ${isHidden ? 'type-hidden' : ''}" data-type="${this.escapeHtml(type)}">
-                            <input type="checkbox" ${!isHidden ? 'checked' : ''} 
-                                   onchange="window.graphManager.toggleEdgeTypeVisibility(this.closest('.filter-item').dataset.type)">
-                            <div class="filter-item-icon" style="background: var(--text-muted); color: #000;">
+                            <input type="checkbox" class="check" ${!isHidden ? 'checked' : ''}>
+                            <div class="filter-item-icon edge" aria-hidden="true">
                                 ─
                             </div>
                             <span class="filter-item-label">${this.escapeHtml(type)}</span>
@@ -3448,26 +3678,51 @@
             }
             document.getElementById('filter-visible-nodes').textContent = visibleCount;
             document.getElementById('filter-total-nodes').textContent = this.nodes.length;
+            this.updateFilterButton();
+        }
+
+        // Colours come from the custom properties in graph.css. They are resolved to literal values
+        // once, because the SVG gets them as plain attributes (an exported PNG has no stylesheet).
+        getPalette() {
+            if (this.palette) return this.palette;
+            const style = getComputedStyle(document.documentElement);
+            const read = (name, fallback) => (style.getPropertyValue(name) || '').trim() || fallback;
+            const fallbacks = {
+                ip: '#19e68c', domain: '#6aa9ff', basedomain: '#9cc4ff', tld: '#7d8bf0',
+                registrant: '#d58cf0', email: '#f08cc0', org: '#a7b1ba', registrar: '#b08cff',
+                asn: '#e8b04a', country: '#5fc9d6', jarm: '#c9d65f', port: '#8d98a3',
+                tag: '#f0605a', pivot: '#f08a5d'
+            };
+            const types = {};
+            for (const [type, fallback] of Object.entries(fallbacks)) {
+                types[type] = read(`--g-${type}`, fallback);
+            }
+            this.palette = {
+                types,
+                other: read('--g-other', '#6b7783'),
+                canvas: read('--bg-side', '#0d1114'),
+                edge: read('--g-edge', '#2f3a44'),
+                edgeLabel: read('--faint', '#5d6873'),
+                label: read('--text-2', '#c8d2da'),
+                highlight: read('--green', '#19e68c')
+            };
+            return this.palette;
         }
 
         getNodeColor(type) {
-            const colors = {
-                'ip': '#00ff88',
-                'domain': '#00a8ff',
-                'basedomain': '#00bcd4',
-                'tld': '#ffa500',
-                'registrant': '#9c27b0',
-                'email': '#e91e63',
-                'org': '#673ab7',
-                'registrar': '#3f51b5',
-                'asn': '#ff5722',
-                'country': '#4caf50',
-                'jarm': '#ffc107',
-                'port': '#ff9800',
-                'tag': '#cddc39',
-                'pivot': '#7c4dff'
+            const palette = this.getPalette();
+            return Object.prototype.hasOwnProperty.call(palette.types, type) ? palette.types[type] : palette.other;
+        }
+
+        // One to three letters drawn inside the node circle
+        getNodeAbbr(type) {
+            const abbreviations = {
+                ip: 'IP', domain: 'D', basedomain: 'BD', tld: 'TLD', registrant: 'RG', email: '@',
+                org: 'ORG', registrar: 'RR', asn: 'AS', country: 'CC', jarm: 'J', port: 'P',
+                tag: 'T', pivot: 'PV'
             };
-            return colors[type] || '#888888';
+            if (Object.prototype.hasOwnProperty.call(abbreviations, type)) return abbreviations[type];
+            return String(type || '?').substring(0, 2).toUpperCase();
         }
 
         toggleNodeTypeVisibility(type) {
@@ -3577,6 +3832,7 @@
             }
             document.getElementById('filter-visible-nodes').textContent = visibleCount;
             document.getElementById('filter-total-nodes').textContent = this.nodes.length;
+            this.updateFilterButton();
         }
 
         isNodeVisible(node) {
@@ -3623,13 +3879,6 @@
 
         renderSearchResults() {
             const resultsContainer = document.getElementById('graph-search-results');
-            const searchInput = document.getElementById('graph-search-input');
-            const inputRect = searchInput.getBoundingClientRect();
-
-            // Position the dropdown below the search input (fixed positioning)
-            resultsContainer.style.top = (inputRect.bottom + 4) + 'px';
-            resultsContainer.style.left = inputRect.left + 'px';
-            resultsContainer.style.width = Math.max(inputRect.width, 260) + 'px';
 
             if (this.searchResults.length === 0) {
                 resultsContainer.innerHTML = '<div class="search-no-results">No matching nodes found</div>';
@@ -3656,8 +3905,8 @@
 
                 return `
                     <div class="search-result-item ${isSelected ? 'selected' : ''}" data-index="${index}">
-                        <div class="search-result-icon" style="background: ${color}; color: #000;">
-                            ${this.escapeHtml(n.type.substring(0, 2).toUpperCase())}
+                        <div class="search-result-icon" style="background: ${this.escapeHtml(color)};">
+                            ${this.escapeHtml(this.getNodeAbbr(n.type))}
                         </div>
                         <div class="search-result-info">
                             <div class="search-result-id">${this.escapeHtml(n.id)}</div>
@@ -3668,32 +3917,7 @@
                 `;
             }).join('');
 
-            // Attach click handlers via event delegation
-            resultsContainer.onclick = (e) => {
-                const item = e.target.closest('.search-result-item');
-                if (item) {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    const index = parseInt(item.dataset.index, 10);
-                    this.selectSearchResult(index);
-                }
-            };
-
-            // Handle mouseenter for hover selection
-            resultsContainer.onmouseover = (e) => {
-                const item = e.target.closest('.search-result-item');
-                if (item) {
-                    const index = parseInt(item.dataset.index, 10);
-                    if (index !== this.searchSelectedIndex) {
-                        this.searchSelectedIndex = index;
-                        // Update selection highlight without full re-render
-                        resultsContainer.querySelectorAll('.search-result-item').forEach((el, i) => {
-                            el.classList.toggle('selected', i === index);
-                        });
-                    }
-                }
-            };
-
+            // Clicks and hover selection are delegated once, in bindUI()
             resultsContainer.classList.add('active');
         }
 
@@ -3788,28 +4012,29 @@
             const nodeEl = this.svg.select(`.node[data-id="${CSS.escape(node.id)}"]`);
             if (nodeEl.empty()) return;
 
-            // Add pulsing highlight class
-            nodeEl.select('circle')
+            // Pulse a ring on the base circle, which has no stroke of its own
+            const color = this.getPalette().highlight;
+            nodeEl.select('.node-base')
                 .transition()
                 .duration(200)
-                .attr('stroke', '#00ff88')
-                .attr('stroke-width', 4)
-                .transition()
-                .duration(200)
-                .attr('stroke', '#00ff88')
+                .attr('stroke', color)
                 .attr('stroke-width', 6)
                 .transition()
                 .duration(200)
-                .attr('stroke', '#00ff88')
-                .attr('stroke-width', 4)
+                .attr('stroke', color)
+                .attr('stroke-width', 10)
                 .transition()
                 .duration(200)
-                .attr('stroke', '#00ff88')
+                .attr('stroke', color)
                 .attr('stroke-width', 6)
+                .transition()
+                .duration(200)
+                .attr('stroke', color)
+                .attr('stroke-width', 10)
                 .transition()
                 .duration(500)
-                .attr('stroke', node.frozen ? '#ff6b6b' : 'none')
-                .attr('stroke-width', node.frozen ? 2 : 0);
+                .attr('stroke', 'none')
+                .attr('stroke-width', 0);
         }
 
         updatePhysicsUI() {
@@ -3931,9 +4156,8 @@
 
             // Update preset button states
             document.querySelectorAll('.preset-btn').forEach(btn => {
-                btn.classList.remove('active');
+                btn.classList.toggle('on', btn.dataset.preset === preset);
             });
-            event.target.classList.add('active');
 
             // Apply to simulation
             if (this.simulation) {
@@ -3977,7 +4201,7 @@
             updateAddNodePlaceholder();
 
             // Show modal
-            document.getElementById('add-node-modal').classList.add('active');
+            openGraphDialog('add-node-modal');
 
             // Focus input
             setTimeout(() => {
@@ -4000,7 +4224,7 @@
                 // Highlight existing node
                 const existingNode = this.getNode(nodeId);
                 if (existingNode) {
-                    this.selectNode(existingNode);
+                    this.showNodeDetails(existingNode);
                     this.centerOnNode(existingNode);
                 }
                 return;
@@ -4048,7 +4272,7 @@
             document.getElementById('connection-custom-relationship').value = '';
             document.getElementById('custom-relationship-group').style.display = 'none';
 
-            document.getElementById('add-connection-modal').classList.add('active');
+            openGraphDialog('add-connection-modal');
         }
 
         confirmAddConnection() {
@@ -4084,7 +4308,7 @@
             this.addEdge(sourceNode.id, targetValue, relationship);
 
             // Close modal and re-render
-            document.getElementById('add-connection-modal').classList.remove('active');
+            closeGraphDialog('add-connection-modal');
             this.connectionSourceNode = null;
             this.render();
         }
@@ -4092,20 +4316,22 @@
         async enrichNode() {
             if (!this.selectedNode) return;
 
-            document.getElementById('graph-node-modal').classList.remove('active');
+            // The panel stays open; render() refreshes it when the lookups finish
             await this.resolveAndExpand(this.selectedNode.id, this.selectedNode.type);
         }
 
         async resolveWhois(skipModal = false) {
             if (!this.selectedNode || this.selectedNode.type !== 'domain') return;
 
-            const domain = this.selectedNode.id;
+            // The selection can change while the lookup runs, so hold on to the node
+            const target = this.selectedNode;
+            const domain = target.id;
             const whoisBtn = document.getElementById('whois-node-btn');
             const originalText = whoisBtn ? whoisBtn.innerHTML : '';
 
             if (whoisBtn) {
                 whoisBtn.disabled = true;
-                whoisBtn.innerHTML = '<svg class="spinning" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/></svg> Loading...';
+                whoisBtn.textContent = 'Loading...';
             }
 
             try {
@@ -4123,9 +4349,9 @@
                 }
 
                 // Store WHOIS data in node and mark as resolved
-                this.selectedNode.data = this.selectedNode.data || {};
-                this.selectedNode.data.whois = data;
-                this.selectedNode.data.whoisResolved = true;
+                target.data = target.data || {};
+                target.data.whois = data;
+                target.data.whoisResolved = true;
                 this.isModified = true;
 
                 // Add all names as registrant nodes
@@ -4203,8 +4429,8 @@
                 }
 
                 // Refresh the modal content only if not skipping
-                if (!skipModal) {
-                    this.showNodeDetails(this.selectedNode);
+                if (!skipModal && this.selectedNode === target) {
+                    this.showNodeDetails(target);
                 }
 
                 // Re-render graph
@@ -4224,17 +4450,18 @@
         async resolveGeoFromModal() {
             if (!this.selectedNode || this.selectedNode.type !== 'ip') return;
 
+            const target = this.selectedNode;
             const geoBtn = document.getElementById('geo-node-btn');
             const originalText = geoBtn.innerHTML;
 
             geoBtn.disabled = true;
-            geoBtn.innerHTML = '<svg class="spinning" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/></svg> Loading...';
+            geoBtn.textContent = 'Loading...';
 
             try {
-                await this.resolveGeoForNode(this.selectedNode);
+                await this.resolveGeoForNode(target);
 
-                // Refresh the modal content
-                this.showNodeDetails(this.selectedNode);
+                // Refresh the panel content
+                if (this.selectedNode === target) this.showNodeDetails(target);
 
             } catch (err) {
                 console.error('Geo lookup failed:', err);
@@ -4262,8 +4489,7 @@
 
             this.isModified = true;
 
-            document.getElementById('graph-node-modal').classList.remove('active');
-            this.selectedNode = null;
+            this.clearSelection();
 
             if (this.nodes.length === 0) {
                 this.hideGraph();
@@ -4276,45 +4502,58 @@
 
         saveGraph() {
             document.getElementById('graph-save-name').value = this.graphName;
-            document.getElementById('graph-save-modal').classList.add('active');
+            openGraphDialog('graph-save-modal');
         }
 
         async showLoadModal() {
-            const modal = document.getElementById('graph-load-modal');
             const listContainer = document.getElementById('load-graphs-list');
 
-            // Show modal with loading state
-            listContainer.innerHTML = '<p class="loading-text">Loading saved graphs...</p>';
-            modal.classList.add('active');
+            // Show the dialog with a loading state
+            listContainer.replaceChildren(this.noteElement('Loading saved graphs…'));
+            openGraphDialog('graph-load-modal');
 
             try {
                 const response = await csrfFetch('/api/graph/list');
                 const data = await response.json();
 
                 if (data.graphs && data.graphs.length > 0) {
-                    listContainer.innerHTML = data.graphs.map(g => `
-                        <div class="load-graph-item" data-graph-id="${this.escapeHtml(g.id)}" onclick="window.graphManager.loadGraphFromModal(this.dataset.graphId)">
-                            <div class="load-graph-info">
-                                <span class="load-graph-name">${this.escapeHtml(g.name)}</span>
-                                <span class="load-graph-date">${new Date(g.updated_at).toLocaleDateString()} ${new Date(g.updated_at).toLocaleTimeString()}</span>
-                            </div>
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="load-graph-arrow">
-                                <polyline points="9 18 15 12 9 6"/>
-                            </svg>
-                        </div>
-                    `).join('');
+                    const fragment = document.createDocumentFragment();
+                    data.graphs.forEach(g => {
+                        const item = document.createElement('button');
+                        item.type = 'button';
+                        item.className = 'line load-graph-item';
+                        item.dataset.graphId = g.id;
+
+                        const info = document.createElement('span');
+                        info.className = 'grow load-graph-info';
+                        const name = document.createElement('b');
+                        name.className = 'load-graph-name';
+                        name.textContent = g.name;
+                        const date = document.createElement('small');
+                        date.className = 'load-graph-date';
+                        const updated = new Date(g.updated_at);
+                        date.textContent = `${updated.toLocaleDateString()} ${updated.toLocaleTimeString()}`;
+                        info.append(name, date);
+
+                        const hint = document.createElement('span');
+                        hint.className = 'faint';
+                        hint.textContent = g.is_shared ? 'shared · Open' : 'Open';
+                        item.append(info, hint);
+                        fragment.append(item);
+                    });
+                    listContainer.replaceChildren(fragment);
                 } else {
-                    listContainer.innerHTML = '<p class="no-graphs">No saved graphs found</p>';
+                    listContainer.replaceChildren(this.noteElement('No saved graphs found'));
                 }
             } catch (err) {
                 console.error('Failed to load graphs:', err);
-                listContainer.innerHTML = '<p class="error">Failed to load saved graphs</p>';
+                listContainer.replaceChildren(this.noteElement('Failed to load saved graphs', 'card-b red'));
             }
         }
 
         async loadGraphFromModal(graphId) {
             // Close the modal
-            document.getElementById('graph-load-modal').classList.remove('active');
+            closeGraphDialog('graph-load-modal');
 
             // Check if current graph has unsaved changes
             if (this.nodes.length > 0 && this.isModified) {
@@ -4369,7 +4608,7 @@
                     this.isModified = false;
 
                     window.history.replaceState({}, '', `?graph=${result.id}`);
-                    document.getElementById('graph-name-display').textContent = `- ${this.graphName}`;
+                    this.updateHeader();
 
                     this.loadSavedGraphsList();
                 }
@@ -4378,33 +4617,47 @@
                 alert('Failed to save graph');
             }
 
-            document.getElementById('graph-save-modal').classList.remove('active');
+            closeGraphDialog('graph-save-modal');
+            this.updateHeader();
         }
 
         exportPNG() {
             const svg = document.getElementById('graph-svg');
             if (!svg) return;
 
-            const serializer = new XMLSerializer();
-            const svgString = serializer.serializeToString(svg);
+            const width = svg.clientWidth;
+            const height = svg.clientHeight;
+            if (!width || !height) {
+                showToast('Open the canvas view to export a PNG', 'info');
+                return;
+            }
+
+            // Serialise a copy with an explicit pixel size. Everything the drawing needs (colours,
+            // glyph letters, fonts with generic fallbacks) is in SVG attributes, not in the stylesheet.
+            const copy = svg.cloneNode(true);
+            copy.setAttribute('width', width);
+            copy.setAttribute('height', height);
+            copy.removeAttribute('style');
+            const svgString = new XMLSerializer().serializeToString(copy);
 
             const canvas = document.createElement('canvas');
             const ctx = canvas.getContext('2d');
             const img = new Image();
 
-            canvas.width = svg.clientWidth * 2;
-            canvas.height = svg.clientHeight * 2;
+            canvas.width = width * 2;
+            canvas.height = height * 2;
             ctx.scale(2, 2);
-            ctx.fillStyle = '#0a0a0f';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = this.getPalette().canvas;
+            ctx.fillRect(0, 0, width, height);
 
             img.onload = () => {
-                ctx.drawImage(img, 0, 0);
+                ctx.drawImage(img, 0, 0, width, height);
                 const link = document.createElement('a');
                 link.download = `graph_${this.graphId || 'export'}.png`;
                 link.href = canvas.toDataURL('image/png');
                 link.click();
             };
+            img.onerror = () => showToast('PNG export failed', 'error');
 
             img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgString)));
         }
@@ -4445,25 +4698,35 @@
         // ========== View Toggle ==========
 
         toggleView() {
-            if (this.currentView === 'graph') {
-                this.currentView = 'table';
-                document.getElementById('graph-visualization').style.display = 'none';
-                document.getElementById('graph-table-view').style.display = 'flex';
-                document.querySelector('#graph-view-toggle .view-graph').style.display = 'none';
-                document.querySelector('#graph-view-toggle .view-table').style.display = '';
-                this.renderTable();
-            } else {
-                this.currentView = 'graph';
-                document.getElementById('graph-visualization').style.display = '';
-                document.getElementById('graph-table-view').style.display = 'none';
-                document.querySelector('#graph-view-toggle .view-graph').style.display = '';
-                document.querySelector('#graph-view-toggle .view-table').style.display = 'none';
-            }
+            this.setView(this.currentView === 'graph' ? 'table' : 'graph');
+        }
+
+        // 'graph' is the canvas, 'table' the relationship table (Stats is its own workspace view)
+        setView(view) {
+            if (view !== 'graph' && view !== 'table') return;
+            this.currentView = view;
+            this.updateViewVisibility();
+            if (view === 'table') this.renderTable();
+        }
+
+        updateViewVisibility() {
+            const showCanvas = this.graphVisible && this.currentView === 'graph';
+            const showTable = this.graphVisible && this.currentView === 'table';
+            document.getElementById('graph-empty-state').style.display = this.graphVisible ? 'none' : '';
+            document.getElementById('graph-canvas-view').style.display = showCanvas ? '' : 'none';
+            document.getElementById('graph-table-view').style.display = showTable ? '' : 'none';
+            document.querySelectorAll('#graph-panel [data-graph-view]').forEach(button => {
+                const on = button.dataset.graphView === this.currentView;
+                button.classList.toggle('on', on);
+                button.setAttribute('aria-pressed', on ? 'true' : 'false');
+            });
         }
 
         toggleEdgeLabels() {
             this.showEdgeLabels = !this.showEdgeLabels;
-            document.getElementById('edge-labels-toggle').classList.toggle('active', this.showEdgeLabels);
+            const button = document.getElementById('edge-labels-toggle');
+            button.classList.toggle('active', this.showEdgeLabels);
+            button.setAttribute('aria-pressed', this.showEdgeLabels ? 'true' : 'false');
 
             if (this.svg) {
                 this.svg.selectAll('.edge-label').style('display', this.showEdgeLabels ? '' : 'none');
@@ -4474,15 +4737,12 @@
             const container = document.getElementById('graph-container');
             const btn = document.getElementById('fullscreen-toggle');
 
-            if (container.classList.contains('fullscreen')) {
-                container.classList.remove('fullscreen');
-                btn.classList.remove('active');
-                document.body.style.overflow = '';
-            } else {
-                container.classList.add('fullscreen');
-                btn.classList.add('active');
-                document.body.style.overflow = 'hidden';
-            }
+            const fullscreen = !container.classList.contains('fullscreen');
+            container.classList.toggle('fullscreen', fullscreen);
+            btn.classList.toggle('active', fullscreen);
+            btn.setAttribute('aria-pressed', fullscreen ? 'true' : 'false');
+            btn.textContent = fullscreen ? 'Exit full screen' : 'Full screen';
+            document.body.style.overflow = fullscreen ? 'hidden' : '';
 
             // Re-render to adjust to new size
             if (this.simulation) {
@@ -4490,22 +4750,71 @@
             }
         }
 
+        // The canvas changed size: re-centre the simulation on it
+        handleResize() {
+            const container = document.getElementById('graph-visualization');
+            const width = container.clientWidth;
+            const height = container.clientHeight;
+            if (!width || !height || !this.svg || !this.simulation) return;
+            if (width === this.lastWidth && height === this.lastHeight) return;
+            this.lastWidth = width;
+            this.lastHeight = height;
+
+            this.svg.attr('width', width).attr('height', height);
+            this.simulation.force('center', d3.forceCenter(width / 2, height / 2).strength(this.physicsSettings.center));
+            this.simulation.alpha(0.3).restart();
+        }
+
+        // Header subtitle: graph name, node and relationship counts
+        updateHeader() {
+            const nodes = this.nodes.length;
+            const edges = this.edges.length;
+            const name = this.graphName || 'Untitled Graph';
+            const counts = ` · ${nodes} node${nodes === 1 ? '' : 's'} · ${edges} relationship${edges === 1 ? '' : 's'}` +
+                (this.isModified && nodes > 0 ? ' · unsaved changes' : '');
+
+            const nameEl = document.getElementById('graph-name-display');
+            const countsEl = document.getElementById('graph-counts');
+            const statsEl = document.getElementById('graph-stats-subtitle');
+            if (nameEl) nameEl.textContent = name;
+            if (countsEl) countsEl.textContent = counts;
+            if (statsEl) statsEl.textContent = name + counts;
+            this.updateFilterButton();
+        }
+
+        // The Filters button says how much is visible while a filter is on
+        updateFilterButton() {
+            const button = document.getElementById('filter-panel-btn');
+            if (!button) return;
+            const filtered = this.hiddenNodeTypes.size > 0 || this.hiddenEdgeTypes.size > 0;
+            const visible = this.nodes.filter(n => this.isNodeVisible(n)).length;
+            button.textContent = filtered ? `Filters · ${visible} of ${this.nodes.length}` : 'Filters';
+        }
+
+        // Header "Share": shares the saved graph that is open (the saved-graphs list has the per-graph buttons)
+        shareCurrentGraph() {
+            if (!this.graphId) {
+                showToast('Save this graph first, then share it.', 'info');
+                return;
+            }
+            this.shareGraph(this.graphId);
+        }
+
         // ========== Rendering ==========
 
         showGraph() {
-            document.getElementById('graph-empty-state').style.display = 'none';
-            document.getElementById('graph-visualization').style.display = '';
-            document.getElementById('graph-legend').style.display = 'flex';
+            this.graphVisible = true;
+            this.updateViewVisibility();
+            this.updateHeader();
         }
 
         hideGraph() {
-            document.getElementById('graph-empty-state').style.display = '';
-            document.getElementById('graph-visualization').style.display = 'none';
-            document.getElementById('graph-table-view').style.display = 'none';
-            document.getElementById('graph-legend').style.display = 'none';
+            this.graphVisible = false;
+            this.renderedNodeIds = null;
             this.currentView = 'graph';
-            document.querySelector('#graph-view-toggle .view-graph').style.display = '';
-            document.querySelector('#graph-view-toggle .view-table').style.display = 'none';
+            this.updateViewVisibility();
+            this.clearSelection();
+            this.updateHeader();
             this.loadSavedGraphsList();
         }
 
@@ -4525,6 +4834,11 @@
             const container = document.getElementById('graph-visualization');
             const width = container.clientWidth;
             const height = container.clientHeight || 500;
+            this.lastWidth = width;
+            this.lastHeight = container.clientHeight;
+            const palette = this.getPalette();
+            const monoFont = 'JetBrains Mono, Consolas, monospace';
+            const nodeRadius = 16;
 
             // Clear previous
             d3.select('#graph-svg').selectAll('*').remove();
@@ -4537,14 +4851,14 @@
             this.svg.append('defs').append('marker')
                 .attr('id', 'arrowhead')
                 .attr('viewBox', '-0 -5 10 10')
-                .attr('refX', 25)
+                .attr('refX', 19)
                 .attr('refY', 0)
                 .attr('orient', 'auto')
                 .attr('markerWidth', 6)
                 .attr('markerHeight', 6)
                 .append('path')
                 .attr('d', 'M 0,-5 L 10 ,0 L 0,5')
-                .attr('fill', '#666');
+                .attr('fill', palette.edgeLabel);
 
             // Prepare data for D3 - filter visible nodes and edges
             const nodeMap = {};
@@ -4569,7 +4883,12 @@
                 relationship: e.relationship
             }));
 
-            // Create simulation using physics settings
+            // Is this a redraw of the graph that was on screen, or a different graph?
+            const sameGraph = !!this.renderedNodeIds && visibleNodes.some(n => this.renderedNodeIds.has(n.id));
+            this.renderedNodeIds = visibleNodeIds;
+
+            // Create simulation using physics settings (the previous one must not keep ticking)
+            if (this.simulation) this.simulation.stop();
             const ps = this.physicsSettings;
             this.simulation = d3.forceSimulation(visibleNodes)
                 .force('link', d3.forceLink(links).id(d => d.id).distance(ps.linkDistance).strength(ps.linkStrength))
@@ -4586,7 +4905,7 @@
                 .enter()
                 .append('line')
                 .attr('class', 'edge')
-                .attr('stroke', '#444')
+                .attr('stroke', palette.edge)
                 .attr('stroke-width', 1.5)
                 .attr('marker-end', 'url(#arrowhead)');
 
@@ -4596,8 +4915,9 @@
                 .enter()
                 .append('text')
                 .attr('class', 'edge-label')
+                .attr('font-family', monoFont)
                 .attr('font-size', '10px')
-                .attr('fill', '#888')
+                .attr('fill', palette.edgeLabel)
                 .attr('text-anchor', 'middle')
                 .style('display', this.showEdgeLabels ? '' : 'none')
                 .text(d => d.relationship);
@@ -4631,6 +4951,8 @@
                     }))
                 .on('click', (event, d) => {
                     event.stopPropagation();
+                    this.closeMenus();
+                    this.hideContextMenu();
                     this.showNodeDetails(d);
                 })
                 .on('contextmenu', (event, d) => {
@@ -4639,112 +4961,62 @@
                     this.showContextMenu(event, d);
                 });
 
-            // Node icons using Material Symbols
+            // Node glyphs: a coloured circle with a short type abbreviation inside. Colours are written
+            // as literal attributes so the drawing survives PNG export without the stylesheet or fonts.
+            const manager = this;
             node.each(function(d) {
                 const g = d3.select(this);
+                const color = manager.getNodeColor(d.type);
+                const abbr = manager.getNodeAbbr(d.type);
 
-                // Determine colors and icon based on type
-                let bgColor, borderColor, icon;
-                if (d.type === 'ip') {
-                    bgColor = d.isOrigin ? 'rgba(0, 255, 136, 0.15)' : 'rgba(0, 255, 136, 0.08)';
-                    borderColor = d.isOrigin ? '#00ff88' : '#00cc6a';
-                    icon = 'lan';  // Network/LAN icon for IP
-                } else if (d.type === 'tld') {
-                    bgColor = 'rgba(255, 165, 0, 0.15)';
-                    borderColor = '#ffa500';
-                    icon = 'sell';  // Tag icon for TLD
-                } else if (d.type === 'registrant') {
-                    bgColor = 'rgba(156, 39, 176, 0.15)';
-                    borderColor = '#9c27b0';
-                    icon = 'person';  // Person icon for registrant
-                } else if (d.type === 'email') {
-                    bgColor = 'rgba(233, 30, 99, 0.15)';
-                    borderColor = '#e91e63';
-                    icon = 'mail';  // Email icon
-                } else if (d.type === 'org') {
-                    bgColor = 'rgba(103, 58, 183, 0.15)';
-                    borderColor = '#673ab7';
-                    icon = 'apartment';  // Building icon for organization
-                } else if (d.type === 'registrar') {
-                    bgColor = 'rgba(63, 81, 181, 0.15)';
-                    borderColor = '#3f51b5';
-                    icon = 'business';  // Business icon for registrar
-                } else if (d.type === 'asn') {
-                    bgColor = 'rgba(255, 87, 34, 0.15)';
-                    borderColor = '#ff5722';
-                    icon = 'hub';  // Hub icon for ASN
-                } else if (d.type === 'country') {
-                    bgColor = 'rgba(76, 175, 80, 0.15)';
-                    borderColor = '#4caf50';
-                    icon = 'flag';  // Flag icon for country
-                } else if (d.type === 'jarm') {
-                    bgColor = 'rgba(255, 193, 7, 0.15)';
-                    borderColor = '#ffc107';
-                    icon = 'fingerprint';  // Fingerprint icon for JARM
-                } else if (d.type === 'basedomain') {
-                    bgColor = 'rgba(0, 188, 212, 0.15)';
-                    borderColor = '#00bcd4';
-                    icon = 'domain';  // Domain icon for base domain
-                } else if (d.type === 'port') {
-                    bgColor = 'rgba(255, 152, 0, 0.15)';
-                    borderColor = '#ff9800';
-                    icon = 'settings_ethernet';  // Ethernet/port icon
-                } else if (d.type === 'tag') {
-                    bgColor = 'rgba(205, 220, 57, 0.15)';
-                    borderColor = '#cddc39';
-                    icon = 'label';  // Label/tag icon
-                } else {
-                    // domain
-                    bgColor = d.isOrigin ? 'rgba(0, 168, 255, 0.15)' : 'rgba(0, 168, 255, 0.08)';
-                    borderColor = d.isOrigin ? '#00a8ff' : '#0088cc';
-                    icon = 'language';  // Globe icon for domain
-                }
+                // Tooltip with the full value
+                g.append('title').text(`${d.id} (${d.type})`);
 
-                // Background circle
-                const circle = g.append('circle')
-                    .attr('r', 22)
-                    .attr('fill', bgColor)
-                    .attr('stroke', borderColor)
-                    .attr('stroke-width', d.frozen ? 3 : 2);
+                // Opaque base so edges do not show through; the search highlight pulses on it
+                g.append('circle')
+                    .attr('class', 'node-base')
+                    .attr('r', nodeRadius)
+                    .attr('fill', palette.canvas);
 
-                // Add dashed ring for frozen nodes
-                if (d.frozen) {
-                    g.append('circle')
-                        .attr('r', 26)
-                        .attr('fill', 'none')
-                        .attr('stroke', borderColor)
-                        .attr('stroke-width', 1)
-                        .attr('stroke-dasharray', '3,2')
-                        .attr('opacity', 0.6);
-                }
+                // Type colour; starting points get a thicker ring
+                g.append('circle')
+                    .attr('class', 'node-shape')
+                    .attr('r', nodeRadius)
+                    .attr('fill', color)
+                    .attr('fill-opacity', d.isOrigin ? 0.22 : 0.1)
+                    .attr('stroke', color)
+                    .attr('stroke-width', d.isOrigin ? 3.5 : 1.5);
 
-                // Icon using foreignObject
-                g.append('foreignObject')
-                    .attr('x', -14)
-                    .attr('y', -14)
-                    .attr('width', 28)
-                    .attr('height', 28)
-                    .append('xhtml:div')
-                    .style('width', '100%')
-                    .style('height', '100%')
-                    .style('display', 'flex')
-                    .style('align-items', 'center')
-                    .style('justify-content', 'center')
-                    .append('xhtml:span')
-                    .attr('class', 'material-symbols-outlined')
-                    .style('font-size', '20px')
-                    .style('color', borderColor)
-                    .text(icon);
+                g.append('text')
+                    .attr('class', 'node-glyph')
+                    .attr('text-anchor', 'middle')
+                    .attr('dy', '0.35em')
+                    .attr('font-family', monoFont)
+                    .attr('font-size', abbr.length > 2 ? '8px' : '10px')
+                    .attr('font-weight', 500)
+                    .attr('fill', color)
+                    .attr('pointer-events', 'none')
+                    .text(abbr);
+
+                // Dashed outer ring for frozen nodes
+                manager.drawFrozenRing(g, d);
             });
 
             // Node labels
             node.append('text')
                 .attr('class', 'node-label')
-                .attr('dy', 30)
+                .attr('dy', nodeRadius + 14)
                 .attr('text-anchor', 'middle')
-                .attr('font-size', '11px')
-                .attr('fill', '#ccc')
+                .attr('font-family', monoFont)
+                .attr('font-size', '10px')
+                .attr('fill', palette.label)
                 .text(d => d.id.length > 20 ? d.id.substring(0, 18) + '...' : d.id);
+
+            // The node shown in the panel stays marked
+            node.classed('selected', d => !!this.selectedNode && d.id === this.selectedNode.id);
+
+            // A click on the empty canvas clears the selection
+            this.svg.on('click', () => this.clearSelection());
 
             // Simulation tick
             this.simulation.on('tick', () => {
@@ -4771,17 +5043,54 @@
 
             this.svg.call(this.zoom);
 
+            // A redraw keeps the pan and zoom the user had; a different graph starts from the default view
+            if (!sameGraph) this.svg.call(this.zoom.transform, d3.zoomIdentity);
+            const currentTransform = d3.zoomTransform(this.svg.node());
+            nodeGroup.attr('transform', currentTransform);
+            edgeGroup.attr('transform', currentTransform);
+
+            this.updateHeader();
+            this.refreshNodePanel();
+
             // Also render table if in table view
             if (this.currentView === 'table') {
                 this.renderTable();
             }
         }
 
+        // Dashed outer ring that marks a frozen node (also called when a single node is frozen)
+        drawFrozenRing(g, d) {
+            g.selectAll('.node-frozen').remove();
+            if (!d.frozen) return;
+            g.append('circle')
+                .attr('class', 'node-frozen')
+                .attr('r', 21)
+                .attr('fill', 'none')
+                .attr('stroke', this.getNodeColor(d.type))
+                .attr('stroke-width', 1)
+                .attr('stroke-dasharray', '3,2')
+                .attr('opacity', 0.7)
+                .attr('pointer-events', 'none');
+        }
+
         renderTable() {
             const tbody = document.getElementById('graph-table-body');
+            const tones = { ip: 'green', asn: 'amber', tag: 'red' };
+
+            const nodeCell = (node, id) => {
+                const td = document.createElement('td');
+                const type = document.createElement('span');
+                type.className = `tag ${tones[node.type] || ''}`.trim();
+                type.textContent = String(node.type);
+                const value = document.createElement('span');
+                value.className = 'mono';
+                value.textContent = id;
+                td.append(type, ' ', value);
+                return td;
+            };
 
             // Build table data: one row per edge
-            let html = '';
+            const fragment = document.createDocumentFragment();
 
             this.edges.forEach(edge => {
                 // Handle both string IDs and D3's node object references
@@ -4793,33 +5102,46 @@
 
                 if (!sourceNode || !targetNode) return;
 
-                // Get display info
-                const sourceDisplay = sourceId;
-                const targetDisplay = targetId;
-                const relationship = edge.relationship;
+                const row = document.createElement('tr');
+                row.dataset.source = sourceId;
+                row.dataset.target = targetId;
 
-                html += `
-                    <tr data-source="${this.escapeHtml(sourceId)}" data-target="${this.escapeHtml(targetId)}">
-                        <td><span class="node-type-badge ${this.escapeHtml(sourceNode.type)}">${this.escapeHtml(String(sourceNode.type).toUpperCase())}</span> ${this.escapeHtml(sourceDisplay)}</td>
-                        <td><span class="relationship-badge">${this.escapeHtml(relationship)}</span></td>
-                        <td><span class="node-type-badge ${this.escapeHtml(targetNode.type)}">${this.escapeHtml(String(targetNode.type).toUpperCase())}</span> ${this.escapeHtml(targetDisplay)}</td>
-                        <td>
-                            <button class="table-action-btn" onclick="window.graphManager.removeEdgeFromTable(this.closest('tr').dataset.source, this.closest('tr').dataset.target)" title="Remove relationship">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                    <line x1="18" y1="6" x2="6" y2="18"/>
-                                    <line x1="6" y1="6" x2="18" y2="18"/>
-                                </svg>
-                            </button>
-                        </td>
-                    </tr>
-                `;
+                const relationshipCell = document.createElement('td');
+                const relationship = document.createElement('span');
+                relationship.className = 'code';
+                relationship.textContent = edge.relationship;
+                relationshipCell.append(relationship);
+
+                const actionCell = document.createElement('td');
+                actionCell.className = 'right';
+                const remove = document.createElement('button');
+                remove.type = 'button';
+                remove.className = 'btn sm';
+                remove.dataset.removeEdge = '';
+                remove.title = 'Remove relationship';
+                remove.textContent = 'Remove';
+                actionCell.append(remove);
+
+                row.append(nodeCell(sourceNode, sourceId), relationshipCell, nodeCell(targetNode, targetId), actionCell);
+                fragment.append(row);
             });
 
-            if (html === '') {
-                html = '<tr><td colspan="4" style="text-align:center;color:var(--text-muted);">No relationships to display</td></tr>';
+            if (!fragment.childNodes.length) {
+                const row = document.createElement('tr');
+                const td = document.createElement('td');
+                td.colSpan = 4;
+                td.className = 'muted';
+                td.style.textAlign = 'center';
+                td.textContent = 'No relationships to display';
+                row.append(td);
+                fragment.append(row);
             }
 
-            tbody.innerHTML = html;
+            tbody.replaceChildren(fragment);
+
+            // Keep the filter the user typed
+            const search = document.getElementById('graph-table-search');
+            if (search && search.value) this.filterTable(search.value);
         }
 
         filterTable(searchTerm) {
@@ -4998,29 +5320,26 @@
         const container = document.getElementById('graph-stats-content');
         if (!container) return;
 
+        const el = (tag, className, text) => {
+            const node = document.createElement(tag);
+            if (className) node.className = className;
+            if (text !== undefined) node.textContent = text;
+            return node;
+        };
+
         const gm = window.graphManager;
+        if (gm) gm.updateHeader();
         if (!gm || !gm.nodes || gm.nodes.length === 0) {
-            container.innerHTML = `
-                <div class="graph-stats-empty">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <circle cx="18" cy="5" r="3"/>
-                        <circle cx="6" cy="12" r="3"/>
-                        <circle cx="18" cy="19" r="3"/>
-                        <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/>
-                        <line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>
-                    </svg>
-                    <p>No graph data available</p>
-                    <p class="hint">Add nodes to the graph to see statistics</p>
-                </div>
-            `;
+            const card = el('div', 'card');
+            card.append(el('div', 'empty', 'No graph data yet. Add nodes to the graph to see statistics.'));
+            container.replaceChildren(card);
             return;
         }
-
-        const escapeHtml = (str) => gm.escapeHtml(str);
 
         // Compute statistics
         const nodes = gm.nodes;
         const edges = gm.edges;
+        const endId = (end) => (end && typeof end === 'object') ? end.id : end;
 
         // Node type counts
         const nodeTypeCounts = {};
@@ -5038,8 +5357,10 @@
         // Count connections per node (how many edges connect to each node)
         const nodeConnectionCounts = {};
         edges.forEach(e => {
-            nodeConnectionCounts[e.source] = (nodeConnectionCounts[e.source] || 0) + 1;
-            nodeConnectionCounts[e.target] = (nodeConnectionCounts[e.target] || 0) + 1;
+            const source = endId(e.source);
+            const target = endId(e.target);
+            nodeConnectionCounts[source] = (nodeConnectionCounts[source] || 0) + 1;
+            nodeConnectionCounts[target] = (nodeConnectionCounts[target] || 0) + 1;
         });
 
         // Helper to get display name from node ID
@@ -5066,125 +5387,77 @@
                 nodeTypeValues[n.type] = {};
             }
 
-            const displayName = getDisplayName(n.id, n.type);
+            const displayName = getDisplayName(String(n.id), n.type);
             const connectionCount = nodeConnectionCounts[n.id] || 0;
             nodeTypeValues[n.type][displayName] = (nodeTypeValues[n.type][displayName] || 0) + connectionCount;
         });
 
-        // Type display names and colors
+        // Section titles and the column heading used when a section is shown as a table
         const typeConfig = {
-            tld: { label: 'TLDs', color: '#9C27B0' },
-            email: { label: 'Emails', color: '#E91E63' },
-            registrant: { label: 'Registrants', color: '#FF9800' },
-            org: { label: 'Organizations', color: '#00BCD4' },
-            registrar: { label: 'Registrars', color: '#795548' },
-            asn: { label: 'ASNs', color: '#607D8B' },
-            country: { label: 'Countries', color: '#FFC107' },
-            jarm: { label: 'JARM Fingerprints', color: '#9E9E9E' },
-            port: { label: 'Open Ports', color: '#ff9800' },
-            tag: { label: 'Tags', color: '#cddc39' },
-            pivot: { label: 'Pivots', color: '#7c4dff' }
+            tld: { label: 'TLDs', singular: 'TLD' },
+            email: { label: 'Emails', singular: 'Email' },
+            registrant: { label: 'Registrants', singular: 'Registrant' },
+            org: { label: 'Organizations', singular: 'Organization' },
+            registrar: { label: 'Registrars', singular: 'Registrar' },
+            asn: { label: 'ASNs', singular: 'ASN' },
+            country: { label: 'Countries', singular: 'Country' },
+            jarm: { label: 'JARM fingerprints', singular: 'JARM fingerprint' },
+            port: { label: 'Open ports', singular: 'Open port' },
+            tag: { label: 'Tags', singular: 'Tag' }
         };
 
-        // Build HTML
-        let html = '<div class="graph-stats-grid">';
+        // A card with a heading and a bar per [label, count] row (app.css "barlist")
+        const sectionCard = (title, note) => {
+            const card = el('div', 'card');
+            const head = el('div', 'card-h');
+            head.append(el('h2', '', title));
+            if (note) head.append(el('span', 'muted', note));
+            card.append(head);
+            return card;
+        };
+        const barCard = (title, note, rows, colorFor) => {
+            const card = sectionCard(title, note);
+            const list = el('div', 'card-b barlist graph-barlist');
+            const max = rows.length > 0 ? rows[0][1] : 1;
+            rows.forEach(([label, count]) => {
+                const bar = el('div');
+                bar.title = label;
+                const fill = el('i');
+                fill.style.width = `${max > 0 ? (count / max * 100).toFixed(0) : 0}%`;
+                if (colorFor) {
+                    fill.className = 'typed';
+                    fill.style.background = colorFor(label);
+                }
+                bar.append(fill, el('span', '', label));
+                list.append(bar, el('em', '', String(count)));
+            });
+            card.append(list);
+            return card;
+        };
 
         // Summary cards
-        html += '<div class="stats-summary-row">';
-        html += `<div class="stats-card summary"><div class="stats-card-value">${nodes.length}</div><div class="stats-card-label">Total Nodes</div></div>`;
-        html += `<div class="stats-card summary"><div class="stats-card-value">${edges.length}</div><div class="stats-card-label">Total Edges</div></div>`;
-        html += `<div class="stats-card summary"><div class="stats-card-value">${Object.keys(nodeTypeCounts).length}</div><div class="stats-card-label">Node Types</div></div>`;
-        html += `<div class="stats-card summary"><div class="stats-card-value">${Object.keys(edgeTypeCounts).length}</div><div class="stats-card-label">Edge Types</div></div>`;
-        html += '</div>';
+        const summary = el('div', 'card graph-stat-grid');
+        [
+            [nodes.length, 'Nodes'],
+            [edges.length, 'Relationships'],
+            [Object.keys(nodeTypeCounts).length, 'Node types'],
+            [Object.keys(edgeTypeCounts).length, 'Relationship types']
+        ].forEach(([value, label]) => {
+            const stat = el('div', 'stat');
+            stat.append(el('b', '', String(value)), el('span', '', label));
+            summary.append(stat);
+        });
+
+        const grid = el('div', 'cols graph-stats-cols');
 
         // Node type distribution
-        html += '<div class="stats-section">';
-        html += '<h3>Node Types</h3>';
-        html += '<div class="stats-bar-chart">';
         const sortedNodeTypes = Object.entries(nodeTypeCounts).sort((a, b) => b[1] - a[1]);
-        const maxNodeCount = sortedNodeTypes.length > 0 ? sortedNodeTypes[0][1] : 1;
-        const typeColors = {
-            ip: '#4CAF50', domain: '#2196F3', tld: '#9C27B0', email: '#E91E63',
-            registrant: '#FF9800', org: '#00BCD4', registrar: '#795548', asn: '#607D8B',
-            country: '#FFC107', jarm: '#9E9E9E', basedomain: '#00bcd4', port: '#ff9800', tag: '#cddc39',
-            pivot: '#7c4dff'
-        };
-        sortedNodeTypes.forEach(([type, count]) => {
-            const pct = (count / maxNodeCount * 100).toFixed(0);
-            const color = typeColors[type] || '#999';
-            html += `<div class="stats-bar-row">
-                <span class="stats-bar-label">${escapeHtml(type)}</span>
-                <div class="stats-bar-container">
-                    <div class="stats-bar" style="width: ${pct}%; background: ${color};"></div>
-                </div>
-                <span class="stats-bar-value">${count}</span>
-            </div>`;
-        });
-        html += '</div></div>';
+        grid.append(barCard('Node types', '', sortedNodeTypes, (type) => gm.getNodeColor(type)));
 
         // Edge type distribution
         if (Object.keys(edgeTypeCounts).length > 0) {
-            html += '<div class="stats-section">';
-            html += '<h3>Edge Types (Relationships)</h3>';
-            html += '<div class="stats-bar-chart">';
             const sortedEdgeTypes = Object.entries(edgeTypeCounts).sort((a, b) => b[1] - a[1]);
-            const maxEdgeCount = sortedEdgeTypes.length > 0 ? sortedEdgeTypes[0][1] : 1;
-
-            // Color mapping for edge/relationship types
-            const edgeColors = {
-                // DNS record types
-                'A': '#4CAF50',
-                'AAAA': '#8BC34A',
-                'CNAME': '#2196F3',
-                'MX': '#03A9F4',
-                'NS': '#00BCD4',
-                'TXT': '#009688',
-                'PTR': '#26A69A',
-                'SOA': '#00796B',
-                // Domain structure
-                'TLD': '#9C27B0',
-                'SubDomain': '#AB47BC',
-                // Enrichment
-                'country': '#FFC107',
-                'asn': '#607D8B',
-                'org': '#00BCD4',
-                // WHOIS
-                'Registrant': '#FF9800',
-                'Registrar': '#795548',
-                'Admin Email': '#E91E63',
-                'Tech Email': '#F06292',
-                // Shodan/IDB
-                'Open Port': '#ff5722',
-                'has_tag': '#cddc39',
-                // JARM
-                'JARM': '#9E9E9E',
-                // Pivot
-                'Pivot Source': '#7c4dff',
-                'Pivot Result': '#b388ff'
-            };
-
-            // Generate color for unknown types based on hash
-            function hashColor(str) {
-                let hash = 0;
-                for (let i = 0; i < str.length; i++) {
-                    hash = str.charCodeAt(i) + ((hash << 5) - hash);
-                }
-                const hue = Math.abs(hash % 360);
-                return `hsl(${hue}, 65%, 55%)`;
-            }
-
-            sortedEdgeTypes.forEach(([type, count]) => {
-                const pct = (count / maxEdgeCount * 100).toFixed(0);
-                const color = edgeColors[type] || hashColor(type);
-                html += `<div class="stats-bar-row">
-                    <span class="stats-bar-label">${escapeHtml(type)}</span>
-                    <div class="stats-bar-container">
-                        <div class="stats-bar" style="width: ${pct}%; background: ${color};"></div>
-                    </div>
-                    <span class="stats-bar-value">${count}</span>
-                </div>`;
-            });
-            html += '</div></div>';
+            grid.append(barCard('Relationship types', '', sortedEdgeTypes));
         }
 
         // Value distribution sections for each node type
@@ -5195,49 +5468,43 @@
             const values = nodeTypeValues[nodeType];
             if (!values || Object.keys(values).length === 0) return;
 
-            const config = typeConfig[nodeType] || { label: nodeType, color: '#999' };
+            const config = typeConfig[nodeType];
             const sortedValues = Object.entries(values).sort((a, b) => b[1] - a[1]);
-            const maxVal = sortedValues.length > 0 ? sortedValues[0][1] : 1;
-
-            html += '<div class="stats-section">';
-            html += `<h3>${config.label} <small>(${sortedValues.length} unique)</small></h3>`;
+            const note = `${sortedValues.length} unique`;
 
             // Use bar chart for smaller lists, table for larger
             if (sortedValues.length <= 15) {
-                html += '<div class="stats-bar-chart">';
-                sortedValues.forEach(([value, count]) => {
-                    const pct = (count / maxVal * 100).toFixed(0);
-                    // Truncate long values
-                    const displayVal = value.length > 40 ? value.substring(0, 37) + '...' : value;
-                    html += `<div class="stats-bar-row" title="${escapeHtml(value)}">
-                        <span class="stats-bar-label">${escapeHtml(displayVal)}</span>
-                        <div class="stats-bar-container">
-                            <div class="stats-bar" style="width: ${pct}%; background: ${config.color};"></div>
-                        </div>
-                        <span class="stats-bar-value">${count}</span>
-                    </div>`;
-                });
-                html += '</div>';
-            } else {
-                // Table for larger lists
-                html += '<div class="stats-table"><table>';
-                html += `<thead><tr><th>${config.label.replace(/s$/, '')}</th><th>Connections</th></tr></thead><tbody>`;
-                sortedValues.slice(0, 25).forEach(([value, count]) => {
-                    const displayVal = value.length > 50 ? value.substring(0, 47) + '...' : value;
-                    html += `<tr title="${escapeHtml(value)}"><td>${escapeHtml(displayVal)}</td><td>${count}</td></tr>`;
-                });
-                if (sortedValues.length > 25) {
-                    html += `<tr class="more-row"><td colspan="2">... and ${sortedValues.length - 25} more</td></tr>`;
-                }
-                html += '</tbody></table></div>';
+                grid.append(barCard(config.label, note, sortedValues));
+                return;
             }
 
-            html += '</div>';
+            const card = sectionCard(config.label, note);
+            const table = el('table', 'graph-stats-table');
+            const headRow = el('tr');
+            headRow.append(el('th', '', config.singular), el('th', 'num', 'Connections'));
+            const thead = el('thead');
+            thead.append(headRow);
+            const tbody = el('tbody');
+            sortedValues.slice(0, 25).forEach(([value, count]) => {
+                const row = el('tr');
+                row.title = value;
+                const displayVal = value.length > 50 ? value.substring(0, 47) + '...' : value;
+                row.append(el('td', 'mono', displayVal), el('td', 'num', String(count)));
+                tbody.append(row);
+            });
+            if (sortedValues.length > 25) {
+                const row = el('tr', 'more-row');
+                const td = el('td', 'muted', `... and ${sortedValues.length - 25} more`);
+                td.colSpan = 2;
+                row.append(td);
+                tbody.append(row);
+            }
+            table.append(thead, tbody);
+            card.append(table);
+            grid.append(card);
         });
 
-        html += '</div>';
-
-        container.innerHTML = html;
+        container.replaceChildren(summary, grid);
     };
 
     // Initialize graph manager

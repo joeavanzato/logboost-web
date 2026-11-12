@@ -20,7 +20,7 @@ def _workspace_source():
     """templates/index.html plus the page scripts that used to be inline in it."""
     root = Path(__file__).parent.parent
     parts = [root / 'templates' / 'index.html']
-    parts += [root / 'static' / 'js' / name for name in ('workspace.js', 'graph.js', 'intel-browser.js')]
+    parts += [root / 'static' / 'js' / name for name in ('workspace.js', 'enrich.js', 'graph-dialogs.js', 'graph.js', 'intel-browser.js')]
     return '\n'.join(p.read_text(encoding='utf-8') for p in parts)
 
 class TestHealthCheckPathBug:

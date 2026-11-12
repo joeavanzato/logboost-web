@@ -20,7 +20,7 @@ HANDLER_PAYLOAD = "&#39;);alert(1);//"
 QUOTE_PAYLOAD = "');alert(1);//"
 
 
-WORKSPACE_SCRIPTS = ('workspace.js', 'graph.js', 'intel-browser.js')  # moved out of index.html
+WORKSPACE_SCRIPTS = ('workspace.js', 'enrich.js', 'graph-dialogs.js', 'graph.js', 'intel-browser.js')  # moved out of index.html
 
 
 def _read(name):
@@ -64,8 +64,15 @@ class TestResultsPartialXss:
         # no event handler has the payload in its source, in any encoding
         for handler in re.findall(r'\son[a-z]+="([^"]*)"', page):
             assert 'alert' not in handler, handler
-        # column names travel in data-column and are read back with dataset
-        assert 'onchange="window.toggleColumn(this.dataset.column)"' in page
+        # the fragment has no handlers and no executable script: column names travel in
+        # data-column, the rows in a JSON data island that static/js/results.js parses
+        assert not re.findall(r'\son[a-z]+="', page)
+        assert '<script>' not in page and page.count('<script') == 1
+        assert '<script type="application/json" id="results-data">' in page
+        assert 'data-column="x&#34; onmouseover=&#34;alert(1)"' in page
+        # nothing in the data can close the island early or open a tag
+        island = page.split('id="results-data">', 1)[1].split('</script>', 1)[0]
+        assert 'alert(1)' in island and '<' not in island and '>' not in island
 
     def test_server_side_table_keeps_headers_out_of_handlers(self, authenticated_client, tmp_path):
         path = tmp_path / 'results.csv'
@@ -83,12 +90,28 @@ class TestResultsPartialXss:
 class TestEscapers:
 
     def test_every_escaper_escapes_quotes(self):
-        for name in ('index.html', 'partials/results.html'):
-            content = _read(name)
-            # the textContent/innerHTML trick leaves " and ' alone
-            assert 'return div.innerHTML' not in content, name
-            assert content.count('.replace(/"/g, \'&quot;\').replace(/\'/g, \'&#39;\')') >= 1, name
-        assert 'escapeAttr' not in _read('index.html')
+        content = _read('index.html')
+        # the textContent/innerHTML trick leaves " and ' alone
+        assert 'return div.innerHTML' not in content
+        assert content.count('.replace(/"/g, \'&quot;\').replace(/\'/g, \'&#39;\')') >= 1
+        assert 'escapeAttr' not in content
+
+    def test_results_code_builds_dom_nodes_not_markup(self):
+        # the results table, the row drawer and the Stats tab moved out of the partials into
+        # static files; they need no escaper because they never turn data into markup
+        js = TEMPLATES.parent / 'static' / 'js'
+        for name in ('results.js', 'stats.js', 'enrich.js'):
+            script = (js / name).read_text(encoding='utf-8')
+            assert 'insertAdjacentHTML' not in script and 'outerHTML' not in script, name
+            # the one innerHTML is the shared-results loader inserting the server-rendered fragment
+            assert script.count('.innerHTML') == (1 if name == 'enrich.js' else 0), name
+        assert 'container.innerHTML = html;' in (js / 'enrich.js').read_text(encoding='utf-8')
+        for name in ('partials/results.html', 'partials/stats.html', 'partials/results_table.html',
+                     'partials/error.html', 'workspace/_enrich.html', 'workspace/_row_dialog.html'):
+            template = _read(name)
+            assert not re.findall(r'\son[a-z]+=', template), name
+            assert '<style' not in template, name
+            assert template.count('<script') == (1 if name == 'partials/results.html' else 0), name
 
     def test_handlers_are_not_built_from_data(self):
         index = _read('index.html')
@@ -102,14 +125,17 @@ class TestEscapers:
 
     def test_toasts_and_graph_fields_are_escaped(self):
         index = _read('index.html')
-        assert '<span class="toast-message">${escapeHtml(message)}</span>' in index
+        # toasts are built as DOM nodes in workspace.js; the message is a text node
+        assert 'text.textContent = message' in index
+        assert 'toast.innerHTML' not in index
         assert '(${this.escapeHtml(conn.relationship)})' in index
         assert '${this.escapeHtml(typeStr)}' in index
         assert '${this.escapeHtml(String(node.type).toUpperCase())}' in index
 
     def test_stats_modal_builds_dom_nodes(self):
-        stats = _read('partials/stats.html')
-        assert 'body.innerHTML' not in stats
+        # moved out of partials/stats.html
+        stats = (TEMPLATES.parent / 'static' / 'js' / 'stats.js').read_text(encoding='utf-8')
+        assert '.innerHTML' not in stats
         assert 'body.replaceChildren(list)' in stats
 
 

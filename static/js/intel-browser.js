@@ -1,20 +1,31 @@
-// Workspace page: Intel browser. Moved verbatim from templates/index.html.
+// Workspace page: Intel browser (templates/workspace/_intel.html).
+// Source names and tags come from external feeds, so everything is built with
+// createElement/textContent; no HTML strings and no inline handlers.
 
 (function() {
     const PAGE_SIZE = 100;
+    const COLUMNS = 4;
     let offset = 0;
     let hasMore = false;
     let initialized = false;
     let searchTimer = null;
     let inflight = null;
 
-    const $sources = () => document.getElementById('intel-source');
-    const $tags = () => document.getElementById('intel-tag');
-    const $search = () => document.getElementById('intel-search');
-    const $rows = () => document.getElementById('intel-rows');
-    const $status = () => document.getElementById('intel-status');
-    const $prev = () => document.getElementById('intel-prev');
-    const $next = () => document.getElementById('intel-next');
+    const byId = (id) => document.getElementById(id);
+    const $sources = () => byId('intel-source');
+    const $tags = () => byId('intel-tag');
+    const $search = () => byId('intel-search');
+    const $rows = () => byId('intel-rows');
+    const $status = () => byId('intel-status');
+    const $prev = () => byId('intel-prev');
+    const $next = () => byId('intel-next');
+
+    function el(tag, className, text) {
+        const node = document.createElement(tag);
+        if (className) node.className = className;
+        if (text != null) node.textContent = text;
+        return node;
+    }
 
     function currentParams() {
         const params = new URLSearchParams();
@@ -27,14 +38,48 @@
         return params;
     }
 
-    function setRowsHTML(html) {
-        $rows().innerHTML = html;
+    // One full-width row carrying a message (loading, empty, error).
+    function setRowsMessage(message) {
+        const td = el('td', 'muted', message);
+        td.colSpan = COLUMNS;
+        const tr = el('tr');
+        tr.appendChild(td);
+        $rows().replaceChildren(tr);
     }
 
-    function escapeHtml(s) {
-        return (s == null ? '' : String(s))
-            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    function splitList(value) {
+        return String(value == null ? '' : value).split(',').map(s => s.trim()).filter(Boolean);
+    }
+
+    function buildRow(r) {
+        const ip = String(r.ip == null ? '' : r.ip);
+        const selected = selectedIPs.has(ip);
+        const tr = el('tr', selected ? 'sel' : '');
+        tr.dataset.ip = ip;
+
+        const checkCell = el('td');
+        const check = el('input', 'check');
+        check.type = 'checkbox';
+        check.checked = selected;
+        check.setAttribute('aria-label', 'Select ' + ip);
+        checkCell.appendChild(check);
+
+        const sourcesCell = el('td');
+        sourcesCell.appendChild(el('span', 'intel-sources', splitList(r.sources).join(', ')));
+
+        const tagsCell = el('td');
+        const tagWrap = el('span', 'intel-tags');
+        splitList(r.tags).forEach(t => tagWrap.appendChild(el('span', 'tag', t)));
+        tagsCell.appendChild(tagWrap);
+
+        tr.append(checkCell, el('td', 'mono', ip), sourcesCell, tagsCell);
+        return tr;
+    }
+
+    function fillSelect(select, firstLabel, items, labelKey) {
+        const options = [new Option(firstLabel, '')];
+        items.forEach(x => options.push(new Option(String(x[labelKey] == null ? '' : x[labelKey]), String(x.id))));
+        select.replaceChildren(...options);
     }
 
     async function loadFilters() {
@@ -43,14 +88,8 @@
                 fetch('/api/intel/sources').then(r => r.json()),
                 fetch('/api/intel/tags').then(r => r.json()),
             ]);
-            const s = $sources();
-            const t = $tags();
-            const sources = sRes.sources || [];
-            const tags = tRes.tags || [];
-            s.innerHTML = '<option value="">All sources</option>' +
-                sources.map(x => `<option value="${escapeHtml(x.id)}">${escapeHtml(x.name)}</option>`).join('');
-            t.innerHTML = '<option value="">All tags</option>' +
-                tags.map(x => `<option value="${escapeHtml(x.id)}">${escapeHtml(x.value)}</option>`).join('');
+            fillSelect($sources(), 'All sources', sRes.sources || [], 'name');
+            fillSelect($tags(), 'All tags', tRes.tags || [], 'value');
         } catch (e) {
             // Filter dropdowns may stay empty if threats.db is missing — table itself surfaces the error
         }
@@ -65,7 +104,7 @@
         params.set('limit', PAGE_SIZE);
         params.set('offset', offset);
 
-        setRowsHTML('<tr class="intel-empty"><td colspan="3">Loading...</td></tr>');
+        setRowsMessage('Loading…');
         $prev().disabled = true;
         $next().disabled = true;
 
@@ -73,7 +112,7 @@
             const res = await fetch('/api/intel/iocs?' + params.toString(), { signal: ctrl.signal });
             const data = await res.json();
             if (data.error) {
-                setRowsHTML(`<tr class="intel-empty"><td colspan="3">Error: ${escapeHtml(data.error)}</td></tr>`);
+                setRowsMessage('Error: ' + data.error);
                 $status().textContent = '—';
                 return;
             }
@@ -81,13 +120,9 @@
             hasMore = !!data.has_more;
 
             if (rows.length === 0) {
-                const msg = offset === 0 ? 'No IOCs match the current filters.' : 'No more rows.';
-                setRowsHTML(`<tr class="intel-empty"><td colspan="3">${msg}</td></tr>`);
+                setRowsMessage(offset === 0 ? 'No IOCs match the current filters.' : 'No more rows.');
             } else {
-                setRowsHTML(rows.map(r => {
-                    const sel = selectedIPs.has(r.ip) ? ' class="selected"' : '';
-                    return `<tr data-ip="${escapeHtml(r.ip)}"${sel}><td>${escapeHtml(r.ip)}</td><td>${escapeHtml(r.sources)}</td><td>${escapeHtml(r.tags)}</td></tr>`;
-                }).join(''));
+                $rows().replaceChildren(...rows.map(buildRow));
             }
             lastClickedIP = null;
 
@@ -100,7 +135,7 @@
             $next().disabled = !hasMore;
         } catch (err) {
             if (err.name === 'AbortError') return;
-            setRowsHTML(`<tr class="intel-empty"><td colspan="3">Network error: ${escapeHtml(err.message || '')}</td></tr>`);
+            setRowsMessage('Network error: ' + (err.message || ''));
             $status().textContent = '—';
         } finally {
             if (inflight === ctrl) inflight = null;
@@ -111,98 +146,133 @@
         if (initialized) return;
         initialized = true;
         loadFilters().then(loadPage);
+        loadStats();  // totals for the subtitle; the Statistics tab reuses the result
     };
 
-    window.intelLoadFirstPage = function() {
+    function loadFirstPage() {
         offset = 0;
         clearSelection();
         loadPage();
-    };
+    }
+    window.intelLoadFirstPage = loadFirstPage;
 
-    window.intelDebouncedSearch = function() {
+    function debouncedSearch() {
         clearTimeout(searchTimer);
-        searchTimer = setTimeout(() => { offset = 0; clearSelection(); loadPage(); }, 300);
-    };
+        searchTimer = setTimeout(loadFirstPage, 300);
+    }
 
-    window.intelClearFilters = function() {
+    function clearFilters() {
         $sources().value = '';
         $tags().value = '';
         $search().value = '';
-        offset = 0;
-        clearSelection();
-        loadPage();
-    };
+        loadFirstPage();
+    }
 
-    window.intelPrev = function() {
+    function prevPage() {
         offset = Math.max(0, offset - PAGE_SIZE);
         loadPage();
-    };
+    }
 
-    window.intelNext = function() {
+    function nextPage() {
         if (!hasMore) return;
         offset += PAGE_SIZE;
         loadPage();
-    };
+    }
 
-    window.intelExport = function() {
-        const params = currentParams();
-        window.location.href = '/api/intel/export?' + params.toString();
-    };
+    function exportCsv() {
+        window.location.href = '/api/intel/export?' + currentParams().toString();
+    }
 
-    // ===== Sub-tabs (Browser / Statistics) =====
+    // ===== Sub-tabs (Browse / Statistics) =====
     let statsLoaded = false;
+    let statsLoading = null;
 
-    window.intelSwitchSubTab = function(name) {
-        document.querySelectorAll('.intel-subtab').forEach(b =>
-            b.classList.toggle('active', b.dataset.subtab === name));
-        document.querySelectorAll('.intel-sub-panel').forEach(p =>
-            p.classList.toggle('active', p.id === `intel-sub-${name}`));
+    function switchSubTab(name) {
+        document.querySelectorAll('#intel-subtabs [data-subtab]').forEach(a => {
+            const on = a.dataset.subtab === name;
+            a.classList.toggle('on', on);
+            if (on) a.setAttribute('aria-current', 'true'); else a.removeAttribute('aria-current');
+        });
+        document.querySelectorAll('#intel-browser-panel .intel-sub-panel').forEach(p =>
+            p.classList.toggle('hide', p.id !== `intel-sub-${name}`));
         if (name === 'stats' && !statsLoaded) loadStats();
-    };
+    }
+    window.intelSwitchSubTab = switchSubTab;
 
-    async function loadStats() {
-        const srcEl = document.getElementById('intel-stats-sources');
-        const tagEl = document.getElementById('intel-stats-tags');
-        srcEl.textContent = 'Loading...';
-        tagEl.textContent = 'Loading...';
+    function setStatMessage(container, message) {
+        container.replaceChildren(el('span', 'muted', message));
+    }
+
+    function loadStats() {
+        if (statsLoading) return statsLoading;
+        statsLoading = fetchStats().finally(() => { statsLoading = null; });
+        return statsLoading;
+    }
+
+    async function fetchStats() {
+        const srcEl = byId('intel-stats-sources');
+        const tagEl = byId('intel-stats-tags');
+        setStatMessage(srcEl, 'Loading…');
+        setStatMessage(tagEl, 'Loading…');
 
         try {
             const res = await fetch('/api/intel/stats');
             const data = await res.json();
             if (data.error) {
-                srcEl.textContent = 'Error: ' + data.error;
-                tagEl.textContent = 'Error: ' + data.error;
+                setStatMessage(srcEl, 'Error: ' + data.error);
+                setStatMessage(tagEl, 'Error: ' + data.error);
                 return;
             }
-            document.getElementById('stat-total-entries').textContent = (data.total_entries || 0).toLocaleString();
-            document.getElementById('stat-unique-ips').textContent = (data.unique_ips || 0).toLocaleString();
-            document.getElementById('stat-source-count').textContent = (data.sources || []).length.toLocaleString();
-            document.getElementById('stat-tag-count').textContent = (data.tags || []).length.toLocaleString();
+            const sources = data.sources || [];
+            const tags = data.tags || [];
+            const uniqueIps = (data.unique_ips || 0).toLocaleString();
+            byId('stat-total-entries').textContent = (data.total_entries || 0).toLocaleString();
+            byId('stat-unique-ips').textContent = uniqueIps;
+            byId('stat-source-count').textContent = sources.length.toLocaleString();
+            byId('stat-tag-count').textContent = tags.length.toLocaleString();
 
-            srcEl.innerHTML = renderStatList(data.sources || [], 'source');
-            tagEl.innerHTML = renderStatList(data.tags || [], 'tag');
+            const subtitle = byId('intel-subtitle');
+            if (subtitle) {
+                subtitle.textContent = `${uniqueIps} IPs from ${sources.length.toLocaleString()} sources · browse by source or tag`;
+            }
+
+            renderStatList(srcEl, sources, 'source');
+            renderStatList(tagEl, tags, 'tag');
             statsLoaded = true;
         } catch (err) {
-            srcEl.textContent = 'Network error: ' + (err.message || '');
-            tagEl.textContent = 'Network error: ' + (err.message || '');
+            setStatMessage(srcEl, 'Network error: ' + (err.message || ''));
+            setStatMessage(tagEl, 'Network error: ' + (err.message || ''));
         }
     }
 
-    function renderStatList(items, kind) {
-        if (items.length === 0) return '<div style="padding:1rem;color:var(--text-muted)">No data</div>';
+    // A barlist: one button per source or tag, then its count. Clicks are delegated (see wire()).
+    function renderStatList(container, items, kind) {
+        if (items.length === 0) {
+            setStatMessage(container, 'No data');
+            return;
+        }
         const max = Math.max(...items.map(i => i.count || 0)) || 1;
-        return items.map(i => {
-            const label = kind === 'source' ? i.name : i.value;
-            const pct = (i.count || 0) / max * 100;
-            return `<button class="intel-stat-row" type="button" onclick="intelPivotTo('${kind}', ${Number(i.id)})" title="Filter Browser by ${kind}: ${escapeHtml(label)}">
-                <span class="intel-stat-bar" style="width: ${pct.toFixed(1)}%"></span>
-                <span class="intel-stat-name">${escapeHtml(label)}</span>
-                <span class="intel-stat-count">${(i.count || 0).toLocaleString()}</span>
-            </button>`;
-        }).join('');
+        const nodes = [];
+        items.forEach(i => {
+            const label = String((kind === 'source' ? i.name : i.value) || '');
+            const bar = el('button', 'intel-bar');
+            bar.type = 'button';
+            if (i.id == null) {
+                bar.disabled = true;  // rows with no feed/category have nothing to filter by
+            } else {
+                bar.dataset.kind = kind;
+                bar.dataset.id = String(i.id);
+                bar.title = `Filter Browse by ${kind}: ${label}`;
+            }
+            const fill = el('i');
+            fill.style.width = ((i.count || 0) / max * 100).toFixed(1) + '%';
+            bar.append(fill, el('span', '', label));
+            nodes.push(bar, el('em', '', (i.count || 0).toLocaleString()));
+        });
+        container.replaceChildren(...nodes);
     }
 
-    window.intelPivotTo = function(kind, id) {
+    function pivotTo(kind, id) {
         if (kind === 'source') {
             $sources().value = String(id);
         } else {
@@ -210,11 +280,12 @@
         }
         offset = 0;
         clearSelection();
-        intelSwitchSubTab('browser');
+        switchSubTab('browser');
         loadPage();
-    };
+    }
+    window.intelPivotTo = pivotTo;
 
-    // ===== Row selection (Ctrl/Cmd+click toggle, Shift+click range) =====
+    // ===== Row selection (Ctrl/Cmd+click toggle, Shift+click range, or the row's checkbox) =====
     const SELECTION_CAP = 100;
     const selectedIPs = new Set();
     let lastClickedIP = null;
@@ -228,19 +299,24 @@
 
     function updateSelectionUI() {
         const count = selectedIPs.size;
-        const enrich = document.getElementById('intel-enrich-btn');
-        const graph = document.getElementById('intel-graph-btn');
+        const enrich = byId('intel-enrich-btn');
+        const graph = byId('intel-graph-btn');
+        const indicator = byId('intel-selected-count');
         if (enrich) {
-            enrich.innerHTML = enrich.innerHTML.replace(/Enrich \(\d+\)/, `Enrich (${count})`);
+            enrich.textContent = `Enrich (${count})`;
             enrich.disabled = count === 0;
         }
         if (graph) {
-            graph.innerHTML = graph.innerHTML.replace(/Graph \(\d+\)/, `Graph (${count})`);
+            graph.textContent = `Graph (${count})`;
             graph.disabled = count === 0;
         }
-        // Sync row classes
+        if (indicator) indicator.textContent = `${count} selected · up to ${SELECTION_CAP}`;
+        // Sync row classes and checkboxes
         $rows().querySelectorAll('tr[data-ip]').forEach(tr => {
-            tr.classList.toggle('selected', selectedIPs.has(tr.dataset.ip));
+            const selected = selectedIPs.has(tr.dataset.ip);
+            tr.classList.toggle('sel', selected);
+            const check = tr.querySelector('input[type="checkbox"]');
+            if (check) check.checked = selected;
         });
     }
 
@@ -273,21 +349,23 @@
         }
     }
 
-    // Delegated row click handler
-    document.getElementById('intel-rows').addEventListener('click', (e) => {
+    // Delegated row click handler. The checkbox toggles on a plain click; anywhere else on the
+    // row needs a modifier, as before.
+    function onRowClick(e) {
         const tr = e.target.closest('tr[data-ip]');
         if (!tr) return;
         const ip = tr.dataset.ip;
+        const onCheckbox = e.target.matches('input[type="checkbox"]');
         if (e.shiftKey && lastClickedIP) {
             rangeSelectFromCurrentPage(lastClickedIP, ip);
-        } else if (e.ctrlKey || e.metaKey) {
+        } else if (e.ctrlKey || e.metaKey || onCheckbox) {
             toggleSelection(ip);
         } else {
             return; // plain click does nothing
         }
         lastClickedIP = ip;
-        updateSelectionUI();
-    });
+        updateSelectionUI();  // also puts the checkbox back in step with the selection
+    }
 
     function showToast(msg, kind) {
         if (typeof window.showToast === 'function') {
@@ -322,6 +400,8 @@
     };
 
     // ===== Graph action with Save / Discard / Cancel prompt =====
+    const $confirm = () => byId('intel-graph-confirm');
+
     window.intelGraphSelection = function() {
         if (selectedIPs.size === 0) return;
         const gm = window.graphManager;
@@ -331,40 +411,46 @@
             return;
         }
         // Prompt
-        document.getElementById('intel-modal-node-count').textContent = gm.nodes.length;
+        byId('intel-modal-node-count').textContent = gm.nodes.length;
         pendingGraphAction = ips;
-        document.getElementById('intel-graph-confirm').classList.add('active');
+        $confirm().showModal();
     };
 
-    window.intelGraphConfirmCancel = function() {
-        pendingGraphAction = null;
-        document.getElementById('intel-graph-confirm').classList.remove('active');
-    };
-
-    window.intelGraphConfirmDiscard = function() {
+    // Takes the pending selection and closes the prompt. Cancel, Esc and a backdrop click just
+    // close the dialog (app.js / the browser); its close event drops the pending selection.
+    function takePendingGraphAction() {
         const ips = pendingGraphAction;
         pendingGraphAction = null;
-        document.getElementById('intel-graph-confirm').classList.remove('active');
+        if ($confirm().open) $confirm().close();
+        return ips;
+    }
+
+    function graphConfirmDiscard() {
+        const ips = takePendingGraphAction();
         if (ips) buildIntelGraph(ips);
-    };
+    }
 
-    window.intelGraphConfirmSave = function() {
-        const ips = pendingGraphAction;
-        pendingGraphAction = null;
-        document.getElementById('intel-graph-confirm').classList.remove('active');
+    // The save dialog belongs to the Graph view. It is open while it has class "active"
+    // (overlay) or, if it is a native <dialog>, while its `open` property is set.
+    function isSaveDialogOpen(saveModal) {
+        return saveModal.open === true || saveModal.classList.contains('active');
+    }
+
+    function graphConfirmSave() {
+        const ips = takePendingGraphAction();
         if (!ips) return;
         const gm = window.graphManager;
-        const wasModified = gm.isModified;
-        const saveModal = document.getElementById('graph-save-modal');
+        const saveModal = byId('graph-save-modal');
         if (!gm || !saveModal) {
             buildIntelGraph(ips);
             return;
         }
+        const wasModified = gm.isModified;
         // Open save modal; poll until it closes (saved or cancelled)
         gm.saveGraph();
         const start = Date.now();
         const tick = () => {
-            const stillOpen = saveModal.classList.contains('active');
+            const stillOpen = isSaveDialogOpen(saveModal);
             const justSaved = wasModified && !gm.isModified;
             if (!stillOpen) {
                 if (justSaved || !wasModified) {
@@ -378,7 +464,7 @@
             setTimeout(tick, 150);
         };
         setTimeout(tick, 250);
-    };
+    }
 
     function buildIntelGraph(ips) {
         const gm = window.graphManager;
@@ -404,4 +490,37 @@
         ips.forEach((ip, i) => gm.addNode(ip, 'ip', i === 0));
         showToast(`Loaded ${ips.length} IP(s) into graph`, 'success');
     }
+
+    // ===== Wiring (replaces the old inline handlers) =====
+    function onBarClick(e) {
+        const bar = e.target.closest('.intel-bar[data-kind]');
+        if (bar) pivotTo(bar.dataset.kind, bar.dataset.id);
+    }
+
+    function wire() {
+        if (!byId('intel-browser-panel')) return;
+        $sources().addEventListener('change', loadFirstPage);
+        $tags().addEventListener('change', loadFirstPage);
+        $search().addEventListener('input', debouncedSearch);
+        byId('intel-clear-btn').addEventListener('click', clearFilters);
+        byId('intel-export-btn').addEventListener('click', exportCsv);
+        byId('intel-enrich-btn').addEventListener('click', window.intelEnrichSelection);
+        byId('intel-graph-btn').addEventListener('click', window.intelGraphSelection);
+        $prev().addEventListener('click', prevPage);
+        $next().addEventListener('click', nextPage);
+        $rows().addEventListener('click', onRowClick);
+        byId('intel-subtabs').addEventListener('click', (e) => {
+            const tab = e.target.closest('[data-subtab]');
+            if (!tab) return;
+            e.preventDefault();
+            switchSubTab(tab.dataset.subtab);
+        });
+        byId('intel-stats-sources').addEventListener('click', onBarClick);
+        byId('intel-stats-tags').addEventListener('click', onBarClick);
+        byId('intel-graph-discard-btn').addEventListener('click', graphConfirmDiscard);
+        byId('intel-graph-save-btn').addEventListener('click', graphConfirmSave);
+        $confirm().addEventListener('close', () => { pendingGraphAction = null; });
+    }
+
+    wire();
 })();

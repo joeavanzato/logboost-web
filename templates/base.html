@@ -11,9 +11,9 @@
 {#- Child templates set `active` to the key of their sidebar item. -#}
 {%- set is_admin = session.get('user_role') == 'admin' -%}
 {%- macro nav_item(key, label, href, badge=None) -%}
-<a href="{{ href }}"{% if active == key %} class="on" aria-current="page"{% endif %}>{{ label }}{% if badge is not none %} <span>{{ badge }}</span>{% endif %}</a>
+<a href="{{ href }}" data-nav="{{ key }}"{% if active == key %} class="on" aria-current="page"{% endif %}>{{ label }}{% if badge is not none %} <span>{{ badge }}</span>{% endif %}</a>
 {%- endmacro %}
-<body>
+<body{% block body_attrs %}{% endblock %}>
 <div class="app">
   <aside class="side">
     <a class="logo" href="{{ url_for('index') }}" style="color:var(--text)"><span class="bars"><i></i><i></i><i></i></span>LogBoost</a>

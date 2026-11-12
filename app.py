@@ -2099,7 +2099,8 @@ def my_shares():
     """The user's shared result links; an admin sees everyone's."""
     admin_view = is_admin()
     shares = list_shared_results(None if admin_view else session.get('user_id'))
-    return render_template('shares.html', shares=shares, admin_view=admin_view)
+    return render_template('shares.html', shares=shares, admin_view=admin_view,
+                           graphs=list_graphs(session.get('user_id')))
 
 
 @app.route('/shares/<share_id>/delete', methods=['POST'])

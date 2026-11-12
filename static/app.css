@@ -207,3 +207,7 @@ form.stack { margin: 0; }
 dialog { background: var(--surface); color: var(--text); border: 1px solid var(--border-input); border-radius: 10px; padding: 0; width: min(520px, calc(100vw - 32px)); box-shadow: 0 24px 64px rgba(0,0,0,.5); }
 dialog::backdrop { background: rgba(4,6,9,.7); }
 td form, .line form { margin: 0; }
+.seg a { padding: 9px 15px; border-right: 1px solid var(--border-input); color: var(--text-3); font-size: 13px; }
+.seg a:last-child { border-right: 0; }
+.seg a.on { background: var(--active); color: var(--text); font-weight: 500; }
+.seg a:hover { color: var(--text); }

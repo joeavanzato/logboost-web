@@ -1,0 +1,272 @@
+{# Graph: canvas with a docked node panel, relationship table, and graph statistics.
+   Behaviour: static/js/graph.js (GraphManager). View-specific styles: static/css/graph.css. #}
+<div id="graph-panel" class="tab-panel">
+    {# Everything inside this container goes full screen together, so no action is lost there. #}
+    <div class="graph-container" id="graph-container">
+        <div class="head graph-head">
+            <div class="graph-head-title">
+                <h1>Graph</h1>
+                <div class="sub" id="graph-subtitle"><span id="graph-name-display">Untitled graph</span><span id="graph-counts"> · 0 nodes · 0 relationships</span></div>
+            </div>
+            <div class="actions">
+                <div class="seg" role="group" aria-label="Graph view">
+                    <button type="button" class="on" data-graph-view="graph" aria-pressed="true">Canvas</button>
+                    <button type="button" data-graph-view="table" aria-pressed="false">Table</button>
+                    <a href="#graph-stats" data-tab="graph-stats">Stats</a>
+                </div>
+                <button type="button" class="btn" id="load-graph-btn" title="Open a saved graph">Open</button>
+                <button type="button" class="btn" id="save-graph-btn" title="Save this graph">Save</button>
+                <button type="button" class="btn" id="share-graph-btn" title="Share this saved graph and copy its link">Share</button>
+                <div class="gmenu-wrap">
+                    <button type="button" class="btn" id="export-menu-btn" data-gmenu="export-menu" aria-haspopup="menu" aria-expanded="false">Export</button>
+                    <div class="menu gmenu" id="export-menu" role="menu" aria-label="Export">
+                        <button type="button" role="menuitem" id="export-png-btn">PNG image</button>
+                        <button type="button" role="menuitem" id="export-json-btn">JSON</button>
+                    </div>
+                </div>
+                <button type="button" class="btn" id="new-graph-btn" title="Clear the canvas and start a new graph">New</button>
+                <button type="button" class="btn primary" id="add-node-btn">+ Add node</button>
+            </div>
+        </div>
+
+        {# Empty state: no graph is open. #}
+        <div class="graph-empty-state" id="graph-empty-state">
+            <div class="card">
+                <div class="card-b stack" style="gap:16px">
+                    <div>
+                        <h2 class="graph-empty-title">Start mapping infrastructure</h2>
+                        <div class="muted">Enter an IP address or domain, import a list of IOCs, or right-click a value in the results table to add it to the graph.</div>
+                    </div>
+                    <div class="row graph-start-form">
+                        <input type="text" id="graph-start-input" class="input lg mono grow" aria-label="IP address or domain" placeholder="8.8.8.8 or example.com" autocomplete="off" spellcheck="false">
+                        <button type="button" class="btn primary" id="graph-start-btn">Start graph</button>
+                        <button type="button" class="btn" id="graph-bulk-btn" title="Extract IPs and domains from text, a URL or a file">Import IOCs</button>
+                    </div>
+                </div>
+            </div>
+            <div class="card saved-graphs-section" id="saved-graphs-section">
+                <div class="card-h"><h2>Saved graphs</h2></div>
+                <div class="saved-graphs-list" id="saved-graphs-list">
+                    <div class="empty">Loading saved graphs…</div>
+                </div>
+            </div>
+        </div>
+
+        {# Canvas view: the D3 canvas on the left, the node panel docked on the right. #}
+        <div class="graph" id="graph-canvas-view" style="display:none">
+            <div class="canvas graph-visualization" id="graph-visualization">
+                <svg id="graph-svg" role="img" aria-label="Infrastructure graph"></svg>
+
+                <div class="tools" id="graph-tools">
+                    <div class="graph-search-container">
+                        <input type="text" id="graph-search-input" class="input graph-search-input" aria-label="Search nodes" placeholder="Search nodes  /" autocomplete="off" spellcheck="false">
+                        <div class="graph-search-results" id="graph-search-results"></div>
+                    </div>
+                    <button type="button" class="btn sm" id="freeze-all-btn" title="Freeze or unfreeze every node"><span id="freeze-all-text">Freeze all</span></button>
+                    <div class="gmenu-wrap">
+                        <button type="button" class="btn sm" id="resolve-all-menu-btn" data-gmenu="resolve-all-menu" aria-haspopup="menu" aria-expanded="false">Resolve all</button>
+                        <div class="menu gmenu" id="resolve-all-menu" role="menu" aria-label="Resolve all">
+                            <button type="button" role="menuitem" id="resolve-all-dns-btn" title="Resolve DNS for all unresolved nodes">Resolve DNS</button>
+                            <button type="button" role="menuitem" id="resolve-all-whois-btn" title="Resolve WHOIS for all unresolved domains">Resolve WHOIS</button>
+                            <button type="button" role="menuitem" id="resolve-all-geo-btn" title="Resolve country and ASN for all unresolved IPs">Resolve Geo/ASN</button>
+                            <button type="button" role="menuitem" id="resolve-all-idb-btn" title="Get open ports and tags for all IPs (Shodan InternetDB)">Resolve Ports/Tags</button>
+                        </div>
+                    </div>
+                    <button type="button" class="btn sm" id="filter-panel-btn" title="Show or hide node and relationship types">Filters</button>
+                    <button type="button" class="btn sm" id="physics-panel-btn" title="Layout (physics) settings">Layout</button>
+                    <button type="button" class="btn sm active" id="edge-labels-toggle" aria-pressed="true" title="Show or hide relationship labels">Labels</button>
+                    <button type="button" class="btn sm" id="fullscreen-toggle" aria-pressed="false">Full screen</button>
+                </div>
+
+                <div class="graph-loading" id="graph-loading" role="status" style="display:none">
+                    <span class="spinner" aria-hidden="true"></span>
+                    <span id="graph-loading-text">Loading…</span>
+                </div>
+
+                {# Layout (physics) settings, shown over the canvas. #}
+                <div class="physics-panel" id="physics-panel" role="region" aria-label="Layout settings">
+                    <div class="gside-h">
+                        <b>Layout</b>
+                        <button type="button" class="x" id="physics-panel-close" aria-label="Close layout settings">&times;</button>
+                    </div>
+                    <div class="gside-b physics-panel-content">
+                        <div class="physics-section">
+                            <div class="physics-label">Presets</div>
+                            <div class="chips physics-presets">
+                                <button type="button" class="chip preset-btn" data-preset="default" title="Balanced default settings">Default</button>
+                                <button type="button" class="chip preset-btn" data-preset="compact" title="Nodes closer together">Compact</button>
+                                <button type="button" class="chip preset-btn" data-preset="spread" title="Nodes spread apart">Spread</button>
+                                <button type="button" class="chip preset-btn" data-preset="clustered" title="Strong clustering by connections">Clustered</button>
+                            </div>
+                        </div>
+                        <div class="physics-section">
+                            <label class="physics-label" for="physics-link-distance">Link distance <span class="physics-value" id="physics-link-distance-value">100</span></label>
+                            <input type="range" class="physics-slider" id="physics-link-distance" min="30" max="300" value="100" data-physics="linkDistance">
+                            <div class="physics-hint">Distance between connected nodes</div>
+                        </div>
+                        <div class="physics-section">
+                            <label class="physics-label" for="physics-link-strength">Link strength <span class="physics-value" id="physics-link-strength-value">0.3</span></label>
+                            <input type="range" class="physics-slider" id="physics-link-strength" min="0" max="100" value="30" data-physics="linkStrength" data-divisor="100">
+                            <div class="physics-hint">How strongly links pull nodes together</div>
+                        </div>
+                        <div class="physics-section">
+                            <label class="physics-label" for="physics-charge">Repulsion force <span class="physics-value" id="physics-charge-value">-300</span></label>
+                            <input type="range" class="physics-slider" id="physics-charge" min="-1000" max="-50" value="-300" data-physics="charge">
+                            <div class="physics-hint">How strongly nodes push each other away</div>
+                        </div>
+                        <div class="physics-section">
+                            <label class="physics-label" for="physics-collision">Collision radius <span class="physics-value" id="physics-collision-value">35</span></label>
+                            <input type="range" class="physics-slider" id="physics-collision" min="10" max="100" value="35" data-physics="collision">
+                            <div class="physics-hint">Minimum distance between nodes</div>
+                        </div>
+                        <div class="physics-section">
+                            <label class="physics-label" for="physics-center">Center gravity <span class="physics-value" id="physics-center-value">0.05</span></label>
+                            <input type="range" class="physics-slider" id="physics-center" min="0" max="100" value="5" data-physics="center" data-divisor="100">
+                            <div class="physics-hint">Pull toward the center of the graph</div>
+                        </div>
+                        <div class="physics-section">
+                            <label class="physics-label" for="physics-decay">Simulation speed <span class="physics-value" id="physics-decay-value">0.02</span></label>
+                            <input type="range" class="physics-slider" id="physics-decay" min="1" max="100" value="20" data-physics="decay" data-divisor="1000">
+                            <div class="physics-hint">How quickly the simulation settles</div>
+                        </div>
+                    </div>
+                    <div class="gside-f">
+                        <button type="button" class="btn sm" id="physics-reset-btn">Reset to default</button>
+                    </div>
+                </div>
+
+                {# Filters: which node and relationship types are drawn. #}
+                <div class="filter-panel" id="filter-panel" role="region" aria-label="Graph filters">
+                    <div class="gside-h">
+                        <b>Filters</b>
+                        <button type="button" class="x" id="filter-panel-close" aria-label="Close filters">&times;</button>
+                    </div>
+                    <div class="gside-b filter-panel-content">
+                        <div class="filter-section">
+                            <div class="filter-section-header">
+                                <span class="eyebrow">Node types</span>
+                                <div class="row filter-quick-actions">
+                                    <button type="button" class="linkbtn filter-quick-btn" data-filter-all="node">All</button>
+                                    <button type="button" class="linkbtn filter-quick-btn" data-filter-none="node">None</button>
+                                </div>
+                            </div>
+                            <div class="filter-list" id="filter-node-types">
+                                <div class="filter-empty">No nodes in graph</div>
+                            </div>
+                        </div>
+                        <div class="filter-section">
+                            <div class="filter-section-header">
+                                <span class="eyebrow">Edge types</span>
+                                <div class="row filter-quick-actions">
+                                    <button type="button" class="linkbtn filter-quick-btn" data-filter-all="edge">All</button>
+                                    <button type="button" class="linkbtn filter-quick-btn" data-filter-none="edge">None</button>
+                                </div>
+                            </div>
+                            <div class="filter-list" id="filter-edge-types">
+                                <div class="filter-empty">No edges in graph</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="gside-f filter-stats">
+                        <span id="filter-visible-nodes">0</span> / <span id="filter-total-nodes">0</span> nodes visible
+                    </div>
+                </div>
+            </div>
+
+            {# Node panel: details of the clicked node, or a hint and the legend. #}
+            <aside class="gpanel" id="graph-node-panel" aria-label="Node details">
+                <div class="gpanel-idle" id="graph-node-empty">
+                    <div class="drawer-h">
+                        <b>No node selected</b>
+                        <div class="muted gpanel-hint">Click a node to see its details here. Right-click a node to resolve, pivot, freeze or remove it. Drag to move a node; scroll to zoom.</div>
+                    </div>
+                    <div class="drawer-b">
+                        <div class="eyebrow">Legend</div>
+                        <div class="graph-legend" id="graph-legend">
+                            <div class="legend-item"><span class="legend-icon gt-ip origin">IP</span><span>Starting IP</span></div>
+                            <div class="legend-item"><span class="legend-icon gt-ip">IP</span><span>Discovered IP</span></div>
+                            <div class="legend-item"><span class="legend-icon gt-domain origin">D</span><span>Starting domain</span></div>
+                            <div class="legend-item"><span class="legend-icon gt-domain">D</span><span>Discovered domain</span></div>
+                            <div class="legend-item"><span class="legend-icon gt-basedomain">BD</span><span>Base domain</span></div>
+                            <div class="legend-item"><span class="legend-icon gt-tld">TLD</span><span>TLD</span></div>
+                            <div class="legend-item"><span class="legend-icon gt-registrant">RG</span><span>Registrant</span></div>
+                            <div class="legend-item"><span class="legend-icon gt-email">@</span><span>Email</span></div>
+                            <div class="legend-item"><span class="legend-icon gt-org">ORG</span><span>Organization</span></div>
+                            <div class="legend-item"><span class="legend-icon gt-registrar">RR</span><span>Registrar</span></div>
+                            <div class="legend-item"><span class="legend-icon gt-asn">AS</span><span>ASN</span></div>
+                            <div class="legend-item"><span class="legend-icon gt-country">CC</span><span>Country</span></div>
+                            <div class="legend-item"><span class="legend-icon gt-jarm">J</span><span>SSL-JARM</span></div>
+                            <div class="legend-item"><span class="legend-icon gt-port">P</span><span>Port</span></div>
+                            <div class="legend-item"><span class="legend-icon gt-tag">T</span><span>Tag</span></div>
+                            <div class="legend-item"><span class="legend-icon gt-pivot">PV</span><span>Pivot</span></div>
+                        </div>
+                        <div class="muted gpanel-hint">Thick ring = starting point · dashed outer ring = frozen position</div>
+                    </div>
+                </div>
+
+                <div class="gpanel-node" id="graph-node-detail" hidden>
+                    <div class="drawer-h">
+                        <div class="row" style="align-items:flex-start">
+                            <div class="mono grow" id="graph-node-title">Node details</div>
+                            <button type="button" class="x" id="graph-node-close" aria-label="Close node details">&times;</button>
+                        </div>
+                        <div class="muted gpanel-hint" id="graph-node-sub"></div>
+                    </div>
+                    <div class="drawer-b" id="graph-node-content"></div>
+                    <div class="drawer-f">
+                        <button type="button" class="btn sm" id="enrich-node-btn">Resolve DNS</button>
+                        <button type="button" class="btn sm" id="whois-node-btn" style="display:none">Resolve WHOIS</button>
+                        <button type="button" class="btn sm" id="geo-node-btn" style="display:none">Resolve Geo</button>
+                        <button type="button" class="btn sm" id="circl-download-btn" style="display:none">Download PDNS</button>
+                        <span class="grow"></span>
+                        <button type="button" class="btn sm danger" id="remove-node-btn">Remove</button>
+                    </div>
+                </div>
+            </aside>
+        </div>
+
+        {# Table view: one row per relationship. #}
+        <div class="graph-table-view" id="graph-table-view" style="display:none">
+            <div class="row">
+                <input type="text" class="input" id="graph-table-search" aria-label="Filter relationships" placeholder="Filter relationships" autocomplete="off" style="width:260px">
+                <span class="grow"></span>
+                <button type="button" class="btn sm" id="graph-table-csv-btn">Download CSV</button>
+            </div>
+            <div class="card graph-table-card">
+                <table class="graph-table" id="graph-table">
+                    <thead>
+                        <tr>
+                            <th>Source</th>
+                            <th>Relationship</th>
+                            <th>Target</th>
+                            <th><span class="graph-sr">Actions</span></th>
+                        </tr>
+                    </thead>
+                    <tbody id="graph-table-body"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+{# Graph statistics: its own view so that /#graph-stats keeps working. #}
+<div id="graph-stats-panel" class="tab-panel">
+    <div class="head graph-head">
+        <div class="graph-head-title">
+            <h1>Graph</h1>
+            <div class="sub" id="graph-stats-subtitle">Untitled graph · 0 nodes · 0 relationships</div>
+        </div>
+        <div class="actions">
+            <div class="seg" role="group" aria-label="Graph view">
+                <a href="#graph" data-graph-view="graph">Canvas</a>
+                <a href="#graph" data-graph-view="table">Table</a>
+                <a href="#graph-stats" data-tab="graph-stats">Stats</a>
+            </div>
+            <button type="button" class="btn" id="graph-stats-refresh-btn" title="Recalculate the statistics">Refresh</button>
+        </div>
+    </div>
+
+    <div id="graph-stats-content" class="graph-stats-content">
+        <div class="card"><div class="empty">No graph data yet. Add nodes to the graph to see statistics.</div></div>
+    </div>
+</div>

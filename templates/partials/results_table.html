@@ -1,136 +1,59 @@
-<!-- Results Table Partial - for pagination updates -->
+{# Server-paged table for GET /results/page (one page of the current result file). The results view
+   itself pages on the client (static/js/results.js); this fragment has no script and no handlers. #}
 {% if error %}
-<div class="error-container">
-    <svg class="error-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <circle cx="12" cy="12" r="10"/>
-        <line x1="15" y1="9" x2="9" y2="15"/>
-        <line x1="9" y1="9" x2="15" y2="15"/>
-    </svg>
-    <h3 class="error-title">Error Loading Results</h3>
-    <p class="error-message">{{ error }}</p>
-</div>
+<div class="notice red" role="alert"><b>Error loading results.</b> {{ error }}</div>
 {% else %}
-<div class="results-table-wrapper">
-    <table class="results-table">
-        <thead>
-            <tr>
-                {% for header in headers %}
-                <th {% if header.startswith('lb_') %}class="lb-col" title="LogBoost enrichment column"{% endif %}>
-                    {{ header }}
-                </th>
-                {% endfor %}
-            </tr>
-            <!-- Filter Row -->
-            <tr class="filter-row" style="display: none;">
-                {% for header in headers %}
-                <th class="filter-cell {% if header.startswith('lb_') %}lb-col{% endif %}">
-                    <div class="filter-input-wrapper">
-                        <input type="text" 
-                               class="filter-input" 
-                               data-column="{{ header }}"
-                               placeholder="Filter..."
-                               oninput="window.setColumnFilter(this.dataset.column, this.value, 'text')">
-                        <button class="filter-dropdown-btn" 
-                                data-column="{{ header }}" onclick="window.showFilterDropdown(this.dataset.column, this)"
-                                title="Select from values">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <polyline points="6 9 12 15 18 9"/>
-                            </svg>
-                        </button>
-                        <div class="filter-value-dropdown"></div>
-                    </div>
-                </th>
-                {% endfor %}
-            </tr>
-        </thead>
-        <tbody>
-            {% for row in rows %}
-            <tr data-row-index="{{ loop.index0 }}">
-                {% for i in range(headers|length) %}
-                <td {% if headers[i].startswith('lb_') %}class="lb-col"{% endif %} 
-                    title="{{ row[i] if i < row|length else '' }}">
-                    {{ row[i] if i < row|length else '' }}
-                </td>
-                {% endfor %}
-            </tr>
-            {% endfor %}
-            {% if not rows %}
-            <tr>
-                <td colspan="{{ headers|length }}" style="text-align: center; padding: 2rem; color: var(--text-muted);">
-                    No data found
-                </td>
-            </tr>
-            {% endif %}
-        </tbody>
-    </table>
+<div class="card results-table-wrapper">
+  <table class="results-table">
+    <thead>
+      <tr>
+        {% for header in headers %}
+        <th scope="col"{% if header.startswith('lb_') %} class="lb-col"{% endif %} title="{{ header }}">{{ header[3:] | replace('_', ' ') if header.startswith('lb_') else header | replace('_', ' ') }}</th>
+        {% endfor %}
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+      <tr>
+        {% for i in range(headers | length) %}
+        <td{% if headers[i].startswith('lb_') %} class="lb-col"{% endif %} title="{{ row[i] if i < row | length else '' }}">{{ row[i] if i < row | length else '' }}</td>
+        {% endfor %}
+      </tr>
+      {% endfor %}
+      {% if not rows %}
+      <tr class="empty-row"><td class="empty" colspan="{{ [headers | length, 1] | max }}">No data found</td></tr>
+      {% endif %}
+    </tbody>
+  </table>
 </div>
 
-<!-- Pagination -->
 {% if total_pages > 1 %}
-<div class="pagination">
-    <!-- Previous Button -->
-    <button class="pagination-btn" 
-            {% if page <= 1 %}disabled{% endif %}
-            hx-get="/results/page?page={{ page - 1 }}&page_size={{ page_size }}"
-            hx-target="#results-table-container"
-            hx-indicator="#loading-indicator">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <polyline points="15 18 9 12 15 6"/>
-        </svg>
-    </button>
-
-    <!-- Page Numbers -->
-    {% set start_page = [1, page - 2]|max %}
-    {% set end_page = [total_pages, page + 2]|min %}
-    
+{% macro page_button(label, target, disabled=false, current=false) %}
+<button type="button" class="btn sm{% if current %} on{% endif %}"{% if disabled %} disabled{% endif %}{% if current %} aria-current="page"{% endif %}
+        hx-get="/results/page?page={{ target }}&page_size={{ page_size }}"
+        hx-target="#results-table-container"
+        hx-indicator="#loading-indicator">{{ label }}</button>
+{% endmacro %}
+{% set start_page = [1, page - 2] | max %}
+{% set end_page = [total_pages, page + 2] | min %}
+<div class="row muted results-foot">
+  <span>Page {{ page }} of {{ total_pages }} ({{ total_rows }} rows)</span>
+  <span class="grow"></span>
+  <div class="row pagination-controls">
+    {{ page_button('‹ Prev', page - 1, page <= 1) }}
     {% if start_page > 1 %}
-    <button class="pagination-btn"
-            hx-get="/results/page?page=1&page_size={{ page_size }}"
-            hx-target="#results-table-container"
-            hx-indicator="#loading-indicator">
-        1
-    </button>
-    {% if start_page > 2 %}
-    <span class="pagination-info">...</span>
+    {{ page_button(1, 1) }}
+    {% if start_page > 2 %}<span class="faint">…</span>{% endif %}
     {% endif %}
-    {% endif %}
-
     {% for p in range(start_page, end_page + 1) %}
-    <button class="pagination-btn {% if p == page %}active{% endif %}"
-            {% if p == page %}disabled{% endif %}
-            hx-get="/results/page?page={{ p }}&page_size={{ page_size }}"
-            hx-target="#results-table-container"
-            hx-indicator="#loading-indicator">
-        {{ p }}
-    </button>
+    {{ page_button(p, p, p == page, p == page) }}
     {% endfor %}
-
     {% if end_page < total_pages %}
-    {% if end_page < total_pages - 1 %}
-    <span class="pagination-info">...</span>
+    {% if end_page < total_pages - 1 %}<span class="faint">…</span>{% endif %}
+    {{ page_button(total_pages, total_pages) }}
     {% endif %}
-    <button class="pagination-btn"
-            hx-get="/results/page?page={{ total_pages }}&page_size={{ page_size }}"
-            hx-target="#results-table-container"
-            hx-indicator="#loading-indicator">
-        {{ total_pages }}
-    </button>
-    {% endif %}
-
-    <!-- Next Button -->
-    <button class="pagination-btn"
-            {% if page >= total_pages %}disabled{% endif %}
-            hx-get="/results/page?page={{ page + 1 }}&page_size={{ page_size }}"
-            hx-target="#results-table-container"
-            hx-indicator="#loading-indicator">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <polyline points="9 18 15 12 9 6"/>
-        </svg>
-    </button>
-
-    <span class="pagination-info">
-        Page {{ page }} of {{ total_pages }} ({{ total_rows }} rows)
-    </span>
+    {{ page_button('Next ›', page + 1, page >= total_pages) }}
+  </div>
 </div>
 {% endif %}
 {% endif %}

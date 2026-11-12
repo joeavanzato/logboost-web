@@ -1,0 +1,296 @@
+{# Graph: node menu and dialogs. Behaviour: static/js/graph-dialogs.js and static/js/graph.js. #}
+
+{# Node right-click menu. graph.js shows and hides items per node type and per configured API key;
+   a heading is hidden when every item under it is hidden. #}
+<div id="node-context-menu" class="menu node-context-menu" role="menu" aria-label="Node actions">
+    <div class="menu-group">
+        <div class="eyebrow">Resolve</div>
+        <button type="button" role="menuitem" class="context-menu-item" data-action="dns" id="context-dns-item">DNS</button>
+        <button type="button" role="menuitem" class="context-menu-item" data-action="whois" id="context-whois-item">WHOIS</button>
+        <button type="button" role="menuitem" class="context-menu-item" data-action="geo" id="context-geo-item">Geo</button>
+        <button type="button" role="menuitem" class="context-menu-item" data-action="idb" id="context-idb-item">Ports/Tags <em>IDB</em></button>
+        <button type="button" role="menuitem" class="context-menu-item" data-action="all" id="context-all-item">Resolve all</button>
+    </div>
+    <div class="menu-group">
+        <div class="eyebrow">Pivot</div>
+        <button type="button" role="menuitem" class="context-menu-item" data-action="shodan-host" id="context-shodan-host-item">Host info <em>Shodan</em></button>
+        <button type="button" role="menuitem" class="context-menu-item" data-action="shodan" id="context-shodan-item">JARM and pivot <em>Shodan</em></button>
+        <button type="button" role="menuitem" class="context-menu-item" data-action="shodan-pivot" id="context-shodan-pivot-item">Pivot… <em>Shodan</em></button>
+        <button type="button" role="menuitem" class="context-menu-item" data-action="circl-pdns" id="context-circl-pdns-item">Passive DNS <em>CIRCL</em></button>
+        <button type="button" role="menuitem" class="context-menu-item" data-action="hackertarget-shared-ns" id="context-hackertarget-ns-item">Shared NS <em>HackerTarget</em></button>
+        <button type="button" role="menuitem" class="context-menu-item" data-action="chaos-subdomains" id="context-chaos-item">Related subdomains <em>Chaos</em></button>
+        <div class="context-menu-item has-submenu" id="context-viewdns-item">
+            <button type="button" role="menuitem" class="submenu-trigger" aria-haspopup="menu" aria-expanded="false">ViewDNS <em>›</em></button>
+            <div class="menu context-submenu" role="menu" aria-label="ViewDNS">
+                <button type="button" role="menuitem" data-action="viewdns-reverse-mx">Reverse MX</button>
+                <button type="button" role="menuitem" data-action="viewdns-reverse-ns">Reverse NS</button>
+                <button type="button" role="menuitem" data-action="viewdns-reverse-whois">Reverse WHOIS</button>
+            </div>
+        </div>
+        <button type="button" role="menuitem" class="context-menu-item" data-action="viewdns-reverse-whois-standalone" id="context-viewdns-whois-standalone-item">Reverse WHOIS <em>ViewDNS</em></button>
+    </div>
+    <hr>
+    <button type="button" role="menuitem" class="context-menu-item" data-action="freeze" id="freeze-menu-text">Freeze position</button>
+    <button type="button" role="menuitem" class="context-menu-item" data-action="connect">Add connection…</button>
+    <button type="button" role="menuitem" class="context-menu-item red" data-action="remove">Remove node</button>
+</div>
+
+{# Add connection #}
+<dialog id="add-connection-modal" class="gdialog" aria-labelledby="add-connection-title">
+    <div class="card-h">
+        <h2 id="add-connection-title">Add connection</h2>
+        <button type="button" class="x" data-dialog-close aria-label="Close">&times;</button>
+    </div>
+    <div class="card-b stack" style="gap:16px">
+        <div class="muted" style="font-size:13px">Add a new connection from <b class="mono" id="connection-source-name"></b></div>
+        <div class="field">
+            <label for="connection-target">Target node value</label>
+            <input type="text" id="connection-target" class="input mono" placeholder="e.g. example.com or 192.168.1.1" autocomplete="off" spellcheck="false">
+        </div>
+        <div class="field">
+            <label for="connection-target-type">Target node type</label>
+            <select id="connection-target-type" class="input">
+                <option value="domain">Domain</option>
+                <option value="ip">IP Address</option>
+                <option value="tld">TLD</option>
+                <option value="asn">ASN</option>
+                <option value="country">Country</option>
+                <option value="jarm">JARM</option>
+                <option value="port">Port</option>
+                <option value="tag">Tag</option>
+                <option value="registrant">Registrant</option>
+                <option value="email">Email</option>
+                <option value="org">Organization</option>
+                <option value="registrar">Registrar</option>
+            </select>
+        </div>
+        <div class="field">
+            <label for="connection-relationship">Relationship type</label>
+            <select id="connection-relationship" class="input">
+                <option value="A">A (IPv4)</option>
+                <option value="AAAA">AAAA (IPv6)</option>
+                <option value="CNAME">CNAME</option>
+                <option value="MX">MX (Mail)</option>
+                <option value="NS">NS (Nameserver)</option>
+                <option value="PTR">PTR (Reverse DNS)</option>
+                <option value="SOA">SOA</option>
+                <option value="TXT">TXT</option>
+                <option value="ASN">ASN</option>
+                <option value="country">Country</option>
+                <option value="JARM">JARM</option>
+                <option value="Open Port">Open Port</option>
+                <option value="has_tag">Has Tag</option>
+                <option value="tld">TLD</option>
+                <option value="registrant">Registrant</option>
+                <option value="email">Email</option>
+                <option value="org">Organization</option>
+                <option value="registrar">Registrar</option>
+                <option value="related">Related</option>
+                <option value="custom">Custom...</option>
+            </select>
+        </div>
+        <div class="field" id="custom-relationship-group" style="display:none">
+            <label for="connection-custom-relationship">Custom relationship</label>
+            <input type="text" id="connection-custom-relationship" class="input" placeholder="Enter custom relationship type" autocomplete="off">
+        </div>
+    </div>
+    <div class="line gdialog-f">
+        <button type="button" class="btn sm" data-dialog-close>Cancel</button>
+        <button type="button" class="btn sm primary" id="add-connection-confirm-btn">Add connection</button>
+    </div>
+</dialog>
+
+{# Save graph #}
+<dialog id="graph-save-modal" class="gdialog" aria-labelledby="graph-save-title">
+    <div class="card-h">
+        <h2 id="graph-save-title">Save graph</h2>
+        <button type="button" class="x" data-dialog-close aria-label="Close">&times;</button>
+    </div>
+    <div class="card-b">
+        <div class="field">
+            <label for="graph-save-name">Graph name</label>
+            <input type="text" id="graph-save-name" class="input" placeholder="Enter a name for this graph" autocomplete="off">
+        </div>
+    </div>
+    <div class="line gdialog-f">
+        <button type="button" class="btn sm" data-dialog-close>Cancel</button>
+        <button type="button" class="btn sm primary" id="graph-save-confirm-btn">Save</button>
+    </div>
+</dialog>
+
+{# Open (load) a saved graph #}
+<dialog id="graph-load-modal" class="gdialog" aria-labelledby="graph-load-title">
+    <div class="card-h">
+        <h2 id="graph-load-title">Open a saved graph</h2>
+        <button type="button" class="x" data-dialog-close aria-label="Close">&times;</button>
+    </div>
+    <div class="gdialog-scroll load-graphs-list" id="load-graphs-list">
+        <div class="empty">Loading saved graphs…</div>
+    </div>
+    <div class="line gdialog-f">
+        <button type="button" class="btn sm" data-dialog-close>Cancel</button>
+    </div>
+</dialog>
+
+{# Asked when a value is sent to the graph while a graph is already open. #}
+<dialog id="graph-prompt-modal" class="gdialog" aria-labelledby="graph-prompt-title">
+    <div class="card-h">
+        <h2 id="graph-prompt-title">Add to graph</h2>
+        <button type="button" class="x" data-dialog-close aria-label="Close">&times;</button>
+    </div>
+    <div class="card-b stack" style="gap:12px">
+        <div>A graph is already open. Would you like to add this item to the existing graph or create a new one?</div>
+        <div class="mono prompt-value" id="graph-prompt-value"></div>
+    </div>
+    <div class="line gdialog-f">
+        <button type="button" class="btn sm" id="graph-prompt-new-btn">New graph</button>
+        <button type="button" class="btn sm primary" id="graph-prompt-add-btn">Add to existing</button>
+    </div>
+</dialog>
+
+{# Add node #}
+<dialog id="add-node-modal" class="gdialog" aria-labelledby="add-node-title">
+    <div class="card-h">
+        <h2 id="add-node-title">Add node</h2>
+        <button type="button" class="x" data-dialog-close aria-label="Close">&times;</button>
+    </div>
+    <div class="card-b stack" style="gap:16px">
+        <div class="field">
+            <label for="add-node-type">Node type</label>
+            <select id="add-node-type" class="input">
+                <option value="ip">IP Address</option>
+                <option value="domain">Domain</option>
+                <option value="email">Email</option>
+                <option value="registrant">Registrant</option>
+                <option value="org">Organization</option>
+                <option value="asn">ASN</option>
+                <option value="country">Country</option>
+                <option value="port">Port</option>
+                <option value="tag">Tag</option>
+            </select>
+        </div>
+        <div class="field">
+            <label for="add-node-value">Value</label>
+            <input type="text" id="add-node-value" class="input mono" placeholder="e.g., 8.8.8.8" autocomplete="off" spellcheck="false">
+        </div>
+        <div class="notice plain add-node-info" id="add-node-info">IP/Domain will be auto-enriched with DNS and relevant Geo/ASN data</div>
+    </div>
+    <div class="line gdialog-f">
+        <button type="button" class="btn sm" data-dialog-close>Cancel</button>
+        <button type="button" class="btn sm primary" id="add-node-submit-btn">Add node</button>
+    </div>
+</dialog>
+
+{# Bulk IOC import #}
+<dialog id="bulk-graph-modal" class="gdialog gdialog-wide" aria-labelledby="bulk-graph-title">
+    <div class="card-h">
+        <h2 id="bulk-graph-title">Import IOCs into a new graph</h2>
+        <button type="button" class="x" data-dialog-close aria-label="Close">&times;</button>
+    </div>
+    <div class="card-b stack gdialog-scroll" style="gap:16px">
+        <div class="seg bulk-graph-tabs" role="group" aria-label="IOC source">
+            <button type="button" class="bulk-tab on" data-bulk-tab="text">Paste text</button>
+            <button type="button" class="bulk-tab" data-bulk-tab="url">Fetch URL</button>
+            <button type="button" class="bulk-tab" data-bulk-tab="file">Upload file</button>
+        </div>
+
+        <div class="bulk-panel stack" id="bulk-panel-text" style="gap:10px">
+            <div class="field">
+                <label for="bulk-text-input">Paste IOCs (IPs, domains, or threat report text)</label>
+                <textarea id="bulk-text-input" class="input" rows="8"
+                          placeholder="Paste IPs, domains, or any text containing IOCs...&#10;&#10;Examples:&#10;192.168.1.1&#10;malware.evil.com&#10;&#10;Or paste entire threat report text - IOCs will be automatically extracted."></textarea>
+            </div>
+            <div><button type="button" class="btn sm bulk-extract-btn" id="bulk-extract-text-btn">Extract IOCs</button></div>
+        </div>
+
+        <div class="bulk-panel stack hide" id="bulk-panel-url" style="gap:10px">
+            <div class="field">
+                <label for="bulk-url-input">Threat report URL (HTML page or PDF)</label>
+                <div class="row">
+                    <input type="url" id="bulk-url-input" class="input mono grow" placeholder="https://example.com/threat-report.pdf" autocomplete="off" spellcheck="false">
+                    <button type="button" class="btn bulk-extract-btn" id="bulk-extract-url-btn">Fetch and extract</button>
+                </div>
+                <small>Supports HTML pages and PDF documents. IOCs will be automatically extracted.</small>
+            </div>
+        </div>
+
+        <div class="bulk-panel stack hide" id="bulk-panel-file" style="gap:10px">
+            <div class="drop bulk-file-dropzone" id="bulk-file-dropzone">
+                <div class="stack" style="gap:10px;align-items:center">
+                    <label for="bulk-file-input">Choose a file (PDF or text), or drop it here</label>
+                    <input type="file" id="bulk-file-input" accept=".pdf,.txt,.csv,.log,.json">
+                    <small class="faint">PDF, TXT, CSV, LOG, JSON</small>
+                </div>
+            </div>
+            <div class="row bulk-file-selected" id="bulk-file-selected" style="display:none">
+                <span class="mono grow ell" id="bulk-file-name"></span>
+                <button type="button" class="btn sm bulk-extract-btn" id="bulk-extract-file-btn">Extract IOCs</button>
+            </div>
+        </div>
+
+        <div class="bulk-status" id="bulk-status" role="status" style="display:none">
+            <div class="row bulk-status-loading" id="bulk-status-loading">
+                <span class="spinner graph-spinner-sm" aria-hidden="true"></span>
+                <span>Extracting IOCs…</span>
+            </div>
+        </div>
+
+        <div class="bulk-results" id="bulk-results" style="display:none">
+            <div class="row" style="justify-content:space-between;margin-bottom:10px">
+                <b>Extracted IOCs</b>
+                <span class="muted" style="font-size:13px"><span id="bulk-ip-count">0</span> IPs, <span id="bulk-domain-count">0</span> domains</span>
+            </div>
+            <div class="bulk-results-lists">
+                <div class="bulk-results-column">
+                    <div class="bulk-results-column-header">
+                        <label>
+                            <input type="checkbox" class="check" id="bulk-include-ips" checked>
+                            <span>Include IPs (<span id="bulk-ip-count-2">0</span>)</span>
+                        </label>
+                    </div>
+                    <div class="bulk-results-list" id="bulk-ips-list"></div>
+                </div>
+                <div class="bulk-results-column">
+                    <div class="bulk-results-column-header">
+                        <label>
+                            <input type="checkbox" class="check" id="bulk-include-domains" checked>
+                            <span>Include domains (<span id="bulk-domain-count-2">0</span>)</span>
+                        </label>
+                    </div>
+                    <div class="bulk-results-list" id="bulk-domains-list"></div>
+                </div>
+            </div>
+            <label class="bulk-option">
+                <input type="checkbox" class="check" id="bulk-auto-enrich" checked>
+                <span>Auto-enrich nodes after creation (DNS, Geo, ASN)</span>
+            </label>
+        </div>
+    </div>
+    <div class="line gdialog-f">
+        <button type="button" class="btn sm" data-dialog-close>Cancel</button>
+        <button type="button" class="btn sm primary" id="bulk-create-btn" disabled><span id="bulk-create-btn-text">Create graph</span></button>
+    </div>
+</dialog>
+
+{# Shodan attribute pivot #}
+<dialog id="shodan-pivot-modal" class="gdialog gdialog-medium" aria-labelledby="shodan-pivot-title">
+    <div class="card-h">
+        <h2 id="shodan-pivot-title">Pivot (Shodan) · <span class="mono" id="shodan-pivot-ip"></span></h2>
+        <button type="button" class="x" data-dialog-close aria-label="Close">&times;</button>
+    </div>
+    <div class="card-b stack gdialog-scroll" style="gap:12px">
+        <div class="muted" style="font-size:13px">Select one or more attributes to find other hosts with matching values:</div>
+        <input type="text" id="pivot-attribute-search" class="input" aria-label="Filter attributes" placeholder="Filter attributes..." autocomplete="off">
+        <div class="pivot-attributes-list" id="pivot-attributes-list">
+            <div class="empty">Loading Shodan data…</div>
+        </div>
+        <div class="pivot-query-preview" id="pivot-query-preview" style="display:none">
+            <div class="eyebrow" style="margin-bottom:6px">Query preview</div>
+            <div id="pivot-query-text"></div>
+        </div>
+    </div>
+    <div class="line gdialog-f">
+        <button type="button" class="btn sm" data-dialog-close>Cancel</button>
+        <button type="button" class="btn sm primary" id="pivot-execute-btn" disabled>Search Shodan</button>
+    </div>
+</dialog>
