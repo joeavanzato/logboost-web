@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="csrf-token" content="{{ csrf_token() }}">
+<title>{% block title %}LogBoost{% endblock %}</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+{% block head %}{% endblock %}
+</head>
+{#- Child templates set `active` to the key of their sidebar item. -#}
+{%- set is_admin = session.get('user_role') == 'admin' -%}
+{%- macro nav_item(key, label, href, badge=None) -%}
+<a href="{{ href }}"{% if active == key %} class="on" aria-current="page"{% endif %}>{{ label }}{% if badge is not none %} <span>{{ badge }}</span>{% endif %}</a>
+{%- endmacro %}
+<body>
+<div class="app">
+  <aside class="side">
+    <a class="logo" href="{{ url_for('index') }}" style="color:var(--text)"><span class="bars"><i></i><i></i><i></i></span>LogBoost</a>
+    <div class="eyebrow">Workspace</div>
+    <nav class="nav" aria-label="Workspace">
+      {{ nav_item('enrich', 'Enrich', url_for('index') ~ '#adhoc') }}
+      {{ nav_item('graph', 'Graph', url_for('index') ~ '#graph') }}
+      {{ nav_item('intel', 'Intel browser', url_for('index') ~ '#intel-browser') }}
+      {{ nav_item('shares', 'Shares', url_for('my_shares')) }}
+    </nav>
+    {% if is_admin %}
+    <div class="eyebrow">Admin</div>
+    <nav class="nav" aria-label="Admin">
+      {{ nav_item('overview', 'Overview', url_for('admin.dashboard')) }}
+      {{ nav_item('tasks', 'Tasks', url_for('admin.tasks')) }}
+      {{ nav_item('feeds', 'Threat feeds', url_for('admin.threat_intel'), feed_count()) }}
+      {{ nav_item('sources', 'Data sources', url_for('admin.settings')) }}
+      {{ nav_item('audit', 'Audit log', url_for('admin.audit_logs')) }}
+      {{ nav_item('accounts', 'Accounts', url_for('admin.accounts')) }}
+    </nav>
+    {% endif %}
+    <div class="side-foot">
+      {% if is_admin %}
+        {% set setup = setup_steps() %}
+        {% if setup.done < setup.total %}
+        <a class="setup-card" href="{{ url_for('admin.dashboard') }}">
+          <span class="row" style="justify-content:space-between"><span>Finish setup</span><span class="mono amber" style="font-size:12px">{{ setup.done }} / {{ setup.total }}</span></span>
+          <span class="bar"><i style="width:{{ (100 * setup.done / setup.total) | round | int }}%"></i></span>
+        </a>
+        {% endif %}
+      {% endif %}
+      <div class="user">
+        <span class="avatar">{{ (session.get('username') or '?')[:1] | upper }}</span>
+        <a href="{{ url_for('auth_routes.account_password') }}" class="grow ell" style="color:var(--text)" title="Your account">{{ session.get('username', '') }}<br><span class="faint" style="font-size:12px">{{ 'Administrator' if is_admin else 'User' }}</span></a>
+        <form method="post" action="{{ url_for('auth_routes.logout') }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button type="submit" class="linkbtn">Sign out</button>
+        </form>
+      </div>
+    </div>
+  </aside>
+  <main class="main">
+    <section class="screen on">
+      {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+      <div class="flashes" role="status">
+        {% for category, message in messages %}
+        <div class="notice {{ 'red' if category == 'error' else 'green' if category == 'success' else 'plain' }}">{{ message }}</div>
+        {% endfor %}
+      </div>
+      {% endif %}
+      {% endwith %}
+      {% block content %}{% endblock %}
+    </section>
+  </main>
+</div>
+{% block scripts %}{% endblock %}
+</body>
+</html>

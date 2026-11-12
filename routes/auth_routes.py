@@ -47,7 +47,7 @@ def setup():
             errors.append('Invalid setup token. Find it in the server log (docker logs <container>).')
         if not username or len(username) < 3:
             errors.append('Username must be at least 3 characters')
-        errors += _password_errors(password, request.form.get('confirm_password', ''))
+        errors += _password_errors(password, request.form.get('confirm_password', password))
 
         if errors:
             for error in errors:
@@ -177,7 +177,7 @@ def account_password():
 
         if login_blocked(username, ip):
             flash('Too many failed attempts. Try again in 15 minutes.', 'error')
-            return render_template('login.html', change_password=True), 429
+            return render_template('account.html'), 429
 
         with db() as conn:
             row = conn.execute('SELECT password_hash FROM users WHERE id = ?', (user_id,)).fetchone()
@@ -202,4 +202,4 @@ def account_password():
         for error in errors:
             flash(error, 'error')
 
-    return render_template('login.html', change_password=True)
+    return render_template('account.html')

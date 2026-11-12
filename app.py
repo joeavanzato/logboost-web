@@ -79,6 +79,7 @@ if (not _raw_key or len(_raw_key) < 32
 # Some hosts (Windows registry) map .js to text/plain; with X-Content-Type-Options: nosniff the
 # browser then refuses the vendored scripts. Pin the type instead of trusting the host.
 mimetypes.add_type('text/javascript', '.js')
+mimetypes.add_type('font/woff2', '.woff2')
 
 app = Flask(__name__)
 app.secret_key = _raw_key
@@ -213,6 +214,36 @@ def check_threat_db_exists():
         return True
     threat_db_path = Path(THREAT_DB_DIR) / 'threats.db'
     return threat_db_path.exists()
+
+
+def setup_steps():
+    """The five first-run steps behind the Overview checklist and the sidebar progress card."""
+    from admin import get_setting
+    with admin_db() as conn:
+        schedules_on = conn.execute('SELECT COUNT(*) FROM scheduled_tasks WHERE enabled = 1').fetchone()[0] > 0
+    steps = [
+        ('admin', True),
+        ('geo', check_mmdb_files_exist()[0] or bool(get_setting('maxmind_api_key'))),
+        ('threat_db', check_threat_db_exists()),
+        ('shodan', bool(get_setting('shodan_api_key'))),
+        ('schedules', schedules_on),
+    ]
+    return {'steps': dict(steps), 'done': sum(1 for _, ok in steps if ok), 'total': len(steps)}
+
+
+def feed_count():
+    """Number of configured threat feeds, or None when the feed config cannot be read."""
+    from admin import load_feeds
+    try:
+        return len(load_feeds())
+    except (OSError, ValueError):
+        return None
+
+
+@app.context_processor
+def inject_shell_helpers():
+    """Helpers the shared layout calls; nothing is computed unless a template uses them."""
+    return {'setup_steps': setup_steps, 'feed_count': feed_count}
 
 
 def _get_threats_db_path():
