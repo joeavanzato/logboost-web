@@ -1,0 +1,218 @@
+{# Enrich: paste and upload. Each view is one form; the Sources card sits inside its form. #}
+{%- set is_admin_user = session.get('user_role') == 'admin' -%}
+
+{% macro enrich_head() %}
+<div class="head">
+  <div>
+    <h1>Enrich IPs</h1>
+    <div class="sub">Paste logs or any text, or upload a file. IP addresses are found automatically.</div>
+  </div>
+  <div class="actions">
+    {#- Shown only while results are on screen (body.has-results) -#}
+    <button type="button" class="btn enrich-hide" data-enrich-collapse>Hide input</button>
+    <div class="seg" role="group" aria-label="Input">
+      <a href="#adhoc" data-tab="adhoc">Paste</a>
+      <a href="#upload" data-tab="upload">Upload file</a>
+      <a href="#runs" data-tab="runs">Past runs</a>
+    </div>
+  </div>
+</div>
+{% endmacro %}
+
+{# What the input form shrinks to once results are showing, so they start at the top of the page. #}
+{% macro enrich_bar() %}
+<div class="card enrich-bar" role="group" aria-label="Enrichment input">
+  <span class="eyebrow">Input</span>
+  <span class="enrich-bar-summary grow ell"></span>
+  <a class="btn sm" href="#runs">Past runs</a>
+  <button type="button" class="btn sm" data-enrich-expand>Edit input</button>
+  <button type="button" class="btn sm primary" data-enrich-new>New enrichment</button>
+</div>
+{% endmacro %}
+
+{# The five enrichment options, the advanced fields and the submit button. `p` prefixes the ids. #}
+{% macro sources_card(p, submit_label, hint) %}
+<div class="card enrich-side">
+  <div class="card-h"><h2>Sources</h2></div>
+  <div class="line">
+    <label class="grow" for="{{ p }}-geo"><b>Geolocation and ASN</b><small>Local MaxMind databases · always on</small></label>
+    <input type="checkbox" class="toggle locked" id="{{ p }}-geo" name="geo" checked disabled>
+  </div>
+  <div class="line">
+    <label class="grow" for="{{ p }}-dns"><b>DNS lookups</b><small>Reverse DNS for each IP address</small></label>
+    <input type="checkbox" class="toggle" id="{{ p }}-dns" name="dns">
+  </div>
+  <div class="line">
+    <label class="grow" for="{{ p }}-whois"><b>WHOIS</b><small>WHOIS information for IPs and domains</small></label>
+    <input type="checkbox" class="toggle" id="{{ p }}-whois" name="whois">
+  </div>
+  <div class="line">
+    <label class="grow" for="{{ p }}-idb"><b>Shodan InternetDB</b><small>Open ports, tags and known CVEs</small></label>
+    <input type="checkbox" class="toggle" id="{{ p }}-idb" name="idb">
+  </div>
+  <div class="line">
+    <div class="grow">
+      <label for="{{ p }}-useti"><b{% if threat_db_missing %} style="color:var(--text-3)"{% endif %}>Threat intel</b><small>Match against threat intelligence feeds</small></label>
+      {% if threat_db_missing %}
+        {% if is_admin_user %}
+        <small class="amber">Not set up yet · <a href="{{ url_for('admin.dashboard') }}">Set up in Overview</a></small>
+        {% else %}
+        <small class="amber">Not set up yet. Ask an admin to download threat intel.</small>
+        {% endif %}
+      {% endif %}
+    </div>
+    <input type="checkbox" class="toggle" id="{{ p }}-useti" name="useti"{% if threat_db_missing %} disabled{% endif %}>
+  </div>
+  <details class="fold">
+    <summary>Advanced: goroutines, batch size, results per page</summary>
+    <div class="fold-b">
+      <div class="field">
+        <label for="{{ p }}-maxgoperfile">Max goroutines per file</label>
+        <input class="input" type="number" id="{{ p }}-maxgoperfile" name="maxgoperfile" placeholder="Default: 100">
+      </div>
+      <div class="field">
+        <label for="{{ p }}-batchsize">Batch size</label>
+        <input class="input" type="number" id="{{ p }}-batchsize" name="batchsize" placeholder="Default: 10">
+      </div>
+      <div class="field">
+        <label for="{{ p }}-page_size">Results per page</label>
+        <select class="input" id="{{ p }}-page_size" name="page_size">
+          <option value="25">25</option>
+          <option value="50" selected>50</option>
+          <option value="100">100</option>
+          <option value="250">250</option>
+          <option value="500">500</option>
+        </select>
+      </div>
+    </div>
+  </details>
+  <div class="card-b enrich-submit">
+    <button type="submit" class="btn primary lg">{{ submit_label }}</button>
+    <div class="row faint" style="justify-content:space-between;font-size:12px;margin-top:10px"><span>{{ hint }}</span><span class="mono">Ctrl Enter</span></div>
+  </div>
+</div>
+{% endmacro %}
+
+<div id="adhoc-panel" class="tab-panel active">
+  {{ enrich_head() }}
+  {{ enrich_bar() }}
+  <form hx-post="/enrich/text"
+        hx-target="#results-container"
+        hx-indicator="#loading-indicator"
+        class="enrichment-form cols enrich-cols">
+    <div class="editor">
+      <textarea name="text" id="adhoc-text" spellcheck="false" autocomplete="off"
+                aria-label="Text to search for IP addresses"
+                placeholder="Paste any text containing IP addresses…"></textarea>
+      <div class="editor-f">
+        <span><b class="green" id="adhoc-count">0 unique IPv4-looking addresses</b> · approximate. The server does the final extraction, including IPv6 and defanged addresses.</span>
+        <button type="button" class="linkbtn" id="adhoc-clear" style="font-size:13px;flex:none;margin-left:16px">Clear</button>
+      </div>
+    </div>
+    {{ sources_card('adhoc', 'Enrich IP addresses', 'Results appear below') }}
+  </form>
+</div>
+
+<div id="upload-panel" class="tab-panel">
+  {{ enrich_head() }}
+  {{ enrich_bar() }}
+  <form hx-post="/enrich/file"
+        hx-target="#results-container"
+        hx-indicator="#loading-indicator"
+        hx-encoding="multipart/form-data"
+        class="enrichment-form cols enrich-cols">
+    <div class="stack">
+      <label class="drop" id="drop-zone" for="file-input">
+        <input type="file" name="file" id="file-input" accept=".csv,.log,.txt,.json,.gz,.cef">
+        <span>
+          <b style="color:var(--text);font-size:15px">Drop a log file here, or <span class="green">browse</span></b><br>
+          <span style="font-size:13px">CSV, LOG, TXT, JSON, GZ or CEF</span><br><br>
+          <span class="code hide" id="file-name"></span>
+        </span>
+      </label>
+      <div class="card">
+        <div class="card-h"><h2>How to read the file</h2></div>
+        <div class="line">
+          <label class="grow" for="upload-regex"><b>Regex IP detection</b><small>Find IP addresses with a regex instead of naming a column</small></label>
+          <input type="checkbox" class="toggle" id="upload-regex" name="regex" checked>
+        </div>
+        <div class="line">
+          <label class="grow" for="upload-fullparse"><b>Full parse</b><small>Deep parse to detect all possible columns and keys</small></label>
+          <input type="checkbox" class="toggle" id="upload-fullparse" name="fullparse">
+        </div>
+        <div class="line">
+          <label class="grow" for="upload-rawtxt"><b>Raw text fallback</b><small>Treat unknown formats as raw text</small></label>
+          <input type="checkbox" class="toggle" id="upload-rawtxt" name="rawtxt">
+        </div>
+        <div class="line">
+          <label class="grow" for="upload-passthrough"><b>Passthrough</b><small>Skip enrichment and only convert the format</small></label>
+          <input type="checkbox" class="toggle" id="upload-passthrough" name="passthrough">
+        </div>
+        <div class="line">
+          <label class="grow" for="upload-combine"><b>Combine outputs</b><small>Combine multiple output files into one</small></label>
+          <input type="checkbox" class="toggle" id="upload-combine" name="combine">
+        </div>
+        <details class="fold">
+          <summary>Column and parser configuration</summary>
+          <div class="fold-b">
+            <div class="field">
+              <label for="upload-ipcol">IP column name</label>
+              <input class="input" type="text" id="upload-ipcol" name="ipcol" placeholder="Leave empty for regex detection">
+            </div>
+            <div class="field">
+              <label for="upload-jsoncol">JSON column name</label>
+              <input class="input" type="text" id="upload-jsoncol" name="jsoncol" placeholder="e.g., AuditData">
+            </div>
+            <div class="field">
+              <label for="upload-separator">KV separator</label>
+              <input class="input" type="text" id="upload-separator" name="separator" placeholder="Default: =">
+            </div>
+            <div class="field">
+              <label for="upload-delimiter">KV delimiter</label>
+              <input class="input" type="text" id="upload-delimiter" name="delimiter" placeholder="Default: ,">
+            </div>
+          </div>
+        </details>
+        <details class="fold">
+          <summary>Date filtering</summary>
+          <div class="fold-b">
+            <div class="field">
+              <label for="upload-startdate">Start date</label>
+              <input class="input" type="text" id="upload-startdate" name="startdate" placeholder="e.g., 01/01/2024">
+            </div>
+            <div class="field">
+              <label for="upload-enddate">End date</label>
+              <input class="input" type="text" id="upload-enddate" name="enddate" placeholder="e.g., 12/31/2024">
+            </div>
+            <div class="field">
+              <label for="upload-datecol">Date column</label>
+              <input class="input" type="text" id="upload-datecol" name="datecol" placeholder="e.g., date, timestamp">
+            </div>
+            <div class="field">
+              <label for="upload-dateformat">Date format (Go style)</label>
+              <input class="input" type="text" id="upload-dateformat" name="dateformat" placeholder="e.g., 2006-01-02T15:04:05Z">
+            </div>
+          </div>
+        </details>
+      </div>
+    </div>
+    {{ sources_card('upload', 'Process and enrich file', 'Results appear below') }}
+  </form>
+</div>
+
+{# Past runs: the signed-in user's own enrichments, reopened from the stored result file. #}
+<div id="runs-panel" class="tab-panel">
+  {{ enrich_head() }}
+  <div class="card">
+    <div class="card-h">
+      <h2>Past runs</h2>
+      <span class="muted">Only you can see these · kept for {{ run_history_days() }} days</span>
+    </div>
+    <table id="runs-table" class="hide">
+      <thead><tr><th>Input</th><th class="num">IPs</th><th class="num">Rows</th><th>Extra sources</th><th>When</th><th></th></tr></thead>
+      <tbody id="runs-rows"></tbody>
+    </table>
+    <div class="empty" id="runs-empty">No runs yet. Each enrichment you run is kept here so you can reopen its results.</div>
+  </div>
+  <div class="muted" id="runs-status" role="status" style="font-size:13px"></div>
+</div>

@@ -242,7 +242,7 @@ class TestAdminLogsEndpoints:
         
         response = admin_client.get('/admin/logs')
         assert response.status_code == 200
-        assert b'update_geo' in response.data or b'Logs' in response.data
+        assert b'Run log' in response.data and b'Update geolocation' in response.data
     
     def test_logs_page_pagination(self, admin_client, test_db):
         """Test logs page pagination."""

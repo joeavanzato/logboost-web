@@ -79,8 +79,8 @@ class TestSharedResults:
 
         # Stats tab and its value modal work for the viewer, who has no result file of their own
         stats_page = viewer.get(f'/stats?shared={share_id}').data.decode()
-        assert '<span class="stat-value">15</span>' in stats_page
-        assert 'Threat Categories' in stats_page
+        assert '<b class="stat-value">15</b>' in stats_page
+        assert 'Threat categories' in stats_page
         values = viewer.get(f'/stats/values/threat_summary/all_categories?shared={share_id}').get_json()
         assert ['malware', 15] in values['values'] and len(values['values']) == 16
 

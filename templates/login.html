@@ -1,324 +1,45 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Login — LogBoost</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500;600&family=Geist:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <style>
-        :root {
-            --cyber-green: #00ff88;
-            --cyber-green-dim: #00cc6a;
-            --cyber-green-glow: rgba(0, 255, 136, 0.12);
-            --bg-deepest: #080a0d;
-            --bg-deep: #0d1117;
-            --bg-surface: #11161d;
-            --bg-input: #0a0e13;
-            --text-primary: #e6edf3;
-            --text-secondary: #8b949e;
-            --text-muted: #5d6671;
-            --border-default: #232a33;
-            --border-focus: rgba(0, 255, 136, 0.4);
-            --error: #f85149;
-            --font-sans: 'Geist', -apple-system, BlinkMacSystemFont, sans-serif;
-            --font-mono: 'Geist Mono', 'JetBrains Mono', monospace;
-        }
-
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-
-        body {
-            font-family: var(--font-sans);
-            background: var(--bg-deepest);
-            color: var(--text-primary);
-            min-height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 24px;
-            position: relative;
-            overflow: hidden;
-            -webkit-font-smoothing: antialiased;
-        }
-
-        /* Single restrained light source — soft green wash from top */
-        body::before {
-            content: '';
-            position: fixed;
-            inset: 0;
-            background: radial-gradient(120% 80% at 50% -10%, var(--cyber-green-glow) 0%, transparent 55%);
-            pointer-events: none;
-        }
-
-        /* Faint hairline grid, barely perceptible */
-        body::after {
-            content: '';
-            position: fixed;
-            inset: 0;
-            background-image:
-                linear-gradient(var(--border-default) 1px, transparent 1px),
-                linear-gradient(90deg, var(--border-default) 1px, transparent 1px);
-            background-size: 64px 64px;
-            mask-image: radial-gradient(100% 70% at 50% 40%, #000 0%, transparent 75%);
-            -webkit-mask-image: radial-gradient(100% 70% at 50% 40%, #000 0%, transparent 75%);
-            opacity: 0.35;
-            pointer-events: none;
-        }
-
-        .login {
-            position: relative;
-            z-index: 1;
-            width: 100%;
-            max-width: 380px;
-            animation: rise 0.6s cubic-bezier(0.22, 1, 0.36, 1) both;
-        }
-
-        @keyframes rise {
-            from { opacity: 0; transform: translateY(12px); }
-            to   { opacity: 1; transform: translateY(0); }
-        }
-
-        /* Brand */
-        .brand {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            margin-bottom: 28px;
-        }
-
-        .brand-mark { width: 30px; height: 30px; }
-        .brand-mark rect { transform-box: fill-box; transform-origin: bottom; animation: bar 0.7s cubic-bezier(0.22, 1, 0.36, 1) both; }
-        .brand-mark rect:nth-child(1) { animation-delay: 0.15s; }
-        .brand-mark rect:nth-child(2) { animation-delay: 0.27s; }
-        .brand-mark rect:nth-child(3) { animation-delay: 0.39s; }
-
-        @keyframes bar {
-            from { transform: scaleY(0); opacity: 0; }
-            to   { transform: scaleY(1); opacity: 1; }
-        }
-
-        .brand-name {
-            font-size: 19px;
-            font-weight: 600;
-            letter-spacing: -0.02em;
-        }
-
-        .brand-tag {
-            margin-left: auto;
-            font-family: var(--font-mono);
-            font-size: 10px;
-            font-weight: 500;
-            letter-spacing: 0.12em;
-            text-transform: uppercase;
-            color: var(--text-muted);
-        }
-
-        /* Card */
-        .card {
-            background: var(--bg-surface);
-            border: 1px solid var(--border-default);
-            border-radius: 14px;
-            padding: 30px 28px;
-        }
-
-        .card-title {
-            font-size: 15px;
-            font-weight: 600;
-            margin-bottom: 4px;
-        }
-
-        .card-sub {
-            font-family: var(--font-mono);
-            font-size: 11px;
-            color: var(--text-muted);
-            letter-spacing: 0.02em;
-            margin-bottom: 26px;
-        }
-
-        .card-sub::before {
-            content: '> ';
-            color: var(--cyber-green);
-        }
-
-        /* Flash */
-        .flash {
-            display: flex;
-            align-items: center;
-            gap: 9px;
-            padding: 11px 13px;
-            border-radius: 9px;
-            font-size: 13px;
-            margin-bottom: 18px;
-            font-family: var(--font-mono);
-        }
-        .flash svg { width: 15px; height: 15px; flex-shrink: 0; }
-        .flash.error   { background: rgba(248, 81, 73, 0.08);  color: var(--error);       border: 1px solid rgba(248, 81, 73, 0.25); }
-        .flash.success { background: var(--cyber-green-glow);   color: var(--cyber-green); border: 1px solid rgba(0, 255, 136, 0.25); }
-
-        /* Fields */
-        .field { margin-bottom: 16px; }
-
-        .field label {
-            display: block;
-            font-family: var(--font-mono);
-            font-size: 11px;
-            font-weight: 500;
-            letter-spacing: 0.08em;
-            text-transform: uppercase;
-            color: var(--text-secondary);
-            margin-bottom: 7px;
-        }
-
-        .field input {
-            width: 100%;
-            padding: 11px 13px;
-            background: var(--bg-input);
-            border: 1px solid var(--border-default);
-            border-radius: 9px;
-            font-family: var(--font-mono);
-            font-size: 14px;
-            color: var(--text-primary);
-            transition: border-color 0.18s ease, box-shadow 0.18s ease;
-        }
-        .field input::placeholder { color: var(--text-muted); }
-        .field input:focus {
-            outline: none;
-            border-color: var(--border-focus);
-            box-shadow: 0 0 0 3px var(--cyber-green-glow);
-        }
-
-        /* Submit */
-        .submit {
-            width: 100%;
-            margin-top: 8px;
-            padding: 12px;
-            background: var(--cyber-green);
-            color: var(--bg-deepest);
-            border: none;
-            border-radius: 9px;
-            font-family: var(--font-sans);
-            font-size: 14px;
-            font-weight: 600;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 8px;
-            transition: background 0.18s ease, transform 0.12s ease, box-shadow 0.18s ease;
-        }
-        .submit svg { width: 17px; height: 17px; transition: transform 0.18s ease; }
-        .submit:hover {
-            background: #1aff96;
-            box-shadow: 0 6px 24px -8px rgba(0, 255, 136, 0.5);
-        }
-        .submit:hover svg { transform: translateX(2px); }
-        .submit:active { transform: translateY(1px); }
-
-        /* Footer */
-        .foot {
-            margin-top: 22px;
-            text-align: center;
-            font-family: var(--font-mono);
-            font-size: 11px;
-            color: var(--text-muted);
-            letter-spacing: 0.02em;
-        }
-        .foot a { color: var(--text-secondary); text-decoration: none; transition: color 0.18s ease; }
-        .foot a:hover { color: var(--cyber-green); }
-    </style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign in · LogBoost</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
 </head>
 <body>
-    <div class="login">
-        <div class="brand">
-            <svg class="brand-mark" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <rect x="2" y="8" width="8" height="24" rx="2" fill="var(--cyber-green)"/>
-                <rect x="14" y="4" width="8" height="32" rx="2" fill="var(--cyber-green)" opacity="0.7"/>
-                <rect x="26" y="12" width="8" height="20" rx="2" fill="var(--cyber-green)" opacity="0.4"/>
-            </svg>
-            <span class="brand-name">LogBoost</span>
-            <span class="brand-tag">IP Intel</span>
+<div class="auth on">
+  <div class="auth-right">
+    <div class="stack" style="width:400px;max-width:100%;gap:26px">
+      <div class="logo" style="padding:0;font-size:18px"><span class="bars"><i></i><i></i><i></i></span>LogBoost</div>
+      <div>
+        <h1>Sign in</h1>
+        <div class="mono muted" style="margin-top:6px" data-host></div>
+      </div>
+      {% set messages = get_flashed_messages(with_categories=true) %}
+      {% set failed = messages | selectattr(0, 'equalto', 'error') | list | length > 0 %}
+      {% for category, message in messages %}
+      <div class="notice {{ 'red' if category == 'error' else 'green' if category == 'success' else 'plain' }}" role="alert">{{ message }}</div>
+      {% endfor %}
+      <form class="stack" method="post" action="{{ url_for('auth_routes.login') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="field">
+          <label for="username">Username</label>
+          <input class="input lg" type="text" id="username" name="username" required autofocus autocomplete="username">
         </div>
-
-        <div class="card">
-            {% if change_password %}
-            <div class="card-title">Change password</div>
-            <div class="card-sub">signed in as {{ session.get('username') }}</div>
-            {% else %}
-            <div class="card-title">Sign in</div>
-            <div class="card-sub">authenticate to continue</div>
-            {% endif %}
-
-            {% with messages = get_flashed_messages(with_categories=true) %}
-                {% if messages %}
-                    {% for category, message in messages %}
-                        <div class="flash {{ category }}">
-                            {% if category == 'error' %}
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                    <circle cx="12" cy="12" r="10"/>
-                                    <line x1="15" y1="9" x2="9" y2="15"/>
-                                    <line x1="9" y1="9" x2="15" y2="15"/>
-                                </svg>
-                            {% else %}
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                    <path d="M22 11.08V12a10 10 0 11-5.93-9.14"/>
-                                    <polyline points="22 4 12 14.01 9 11.01"/>
-                                </svg>
-                            {% endif %}
-                            {{ message }}
-                        </div>
-                    {% endfor %}
-                {% endif %}
-            {% endwith %}
-
-            {% if change_password %}
-            <form method="POST" action="{{ url_for('auth_routes.account_password') }}">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <div class="field">
-                    <label for="current_password">Current password</label>
-                    <input type="password" id="current_password" name="current_password" required autofocus
-                           autocomplete="current-password">
-                </div>
-                <div class="field">
-                    <label for="new_password">New password</label>
-                    <input type="password" id="new_password" name="new_password" required minlength="8"
-                           autocomplete="new-password" placeholder="at least 8 characters">
-                </div>
-                <div class="field">
-                    <label for="confirm_password">Confirm new password</label>
-                    <input type="password" id="confirm_password" name="confirm_password" required minlength="8"
-                           autocomplete="new-password">
-                </div>
-                <button type="submit" class="submit">Update Password</button>
-            </form>
-            <div class="foot"><a href="{{ url_for('index') }}">Cancel</a></div>
-            {% else %}
-            <form method="POST" action="{{ url_for('auth_routes.login') }}">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <div class="field">
-                    <label for="username">Username</label>
-                    <input type="text" id="username" name="username" required autofocus
-                           autocomplete="username" placeholder="username">
-                </div>
-                <div class="field">
-                    <label for="password">Password</label>
-                    <input type="password" id="password" name="password" required
-                           autocomplete="current-password" placeholder="••••••••">
-                </div>
-                <button type="submit" class="submit">
-                    Sign In
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
-                        <line x1="4" y1="12" x2="19" y2="12"/>
-                        <polyline points="13 6 19 12 13 18"/>
-                    </svg>
-                </button>
-            </form>
-            {% endif %}
+        <div class="field">
+          <label for="password">Password</label>
+          <div class="row">
+            <input class="input lg{{ ' bad' if failed }}" type="password" id="password" name="password" required autocomplete="current-password" data-caps-hint="caps-hint">
+            <button type="button" class="btn" style="height:44px" data-show-password="password" aria-pressed="false">Show</button>
+          </div>
+          <small class="amber hide" id="caps-hint">Caps Lock is on</small>
         </div>
-
-        <div class="foot">
-            <a href="https://github.com/joeavanzato/logboost-web" target="_blank" rel="noopener noreferrer">github.com/joeavanzato/logboost-web</a>
-        </div>
+        <button type="submit" class="btn primary lg">Sign in</button>
+      </form>
+      <div class="mono faint" style="font-size:12px">LogBoost Web · <a class="muted" href="https://github.com/joeavanzato/logboost-web" target="_blank" rel="noopener noreferrer">GitHub</a></div>
     </div>
+  </div>
+</div>
+<script src="{{ url_for('static', filename='js/auth.js') }}"></script>
 </body>
 </html>

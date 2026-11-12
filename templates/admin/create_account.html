@@ -1,66 +1,52 @@
-{% extends "admin/base.html" %}
-
-{% block title %}Create Account{% endblock %}
-
+{% extends 'base.html' %}
+{% set active = 'accounts' %}
+{% block title %}Add account · LogBoost{% endblock %}
 {% block content %}
-<div class="admin-page">
-    <div class="page-header">
-        <div>
-            <a href="{{ url_for('admin.accounts') }}" class="back-link">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <line x1="19" y1="12" x2="5" y2="12"/>
-                    <polyline points="12 19 5 12 12 5"/>
-                </svg>
-                Back to Accounts
-            </a>
-            <h1>Create User Account</h1>
-            <p>Add a new user or administrator account</p>
-        </div>
-    </div>
-    
-    <div class="form-card">
-        <form method="POST" class="admin-form">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <div class="form-group">
-                <label for="username">Username</label>
-                <input type="text" id="username" name="username" required minlength="3" autocomplete="off">
-                <span class="form-hint">At least 3 characters</span>
-            </div>
-            
-            <div class="form-group">
-                <label for="role">Role</label>
-                <select id="role" name="role" class="form-select">
-                    {% for role in roles %}
-                    <option value="{{ role }}">{{ role|capitalize }}</option>
-                    {% endfor %}
-                </select>
-                <span class="form-hint">Admins can access the admin panel; Users can only use the main app</span>
-            </div>
-            
-            <div class="form-group">
-                <label for="password">Password</label>
-                <input type="password" id="password" name="password" required minlength="8" autocomplete="new-password">
-                <span class="form-hint">At least 8 characters</span>
-            </div>
-            
-            <div class="form-group">
-                <label for="confirm_password">Confirm Password</label>
-                <input type="password" id="confirm_password" name="confirm_password" required minlength="8" autocomplete="new-password">
-            </div>
-            
-            <div class="form-actions">
-                <a href="{{ url_for('admin.accounts') }}" class="btn secondary">Cancel</a>
-                <button type="submit" class="btn primary">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M16 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/>
-                        <circle cx="8.5" cy="7" r="4"/>
-                        <line x1="20" y1="8" x2="20" y2="14"/>
-                        <line x1="23" y1="11" x2="17" y2="11"/>
-                    </svg>
-                    Create Account
-                </button>
-            </div>
-        </form>
-    </div>
+<div class="head">
+  <div>
+    <div class="crumb"><a class="muted" href="{{ url_for('admin.accounts') }}">Accounts</a> / Add account</div>
+    <h1>Add account</h1>
+    <div class="sub">Create a user or administrator account.</div>
+  </div>
 </div>
+<div class="card" style="max-width:520px">
+  <form class="card-b stack" style="gap:18px" method="post">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="field">
+      <label for="username">Username</label>
+      <input class="input lg" type="text" id="username" name="username" required minlength="3" autocomplete="off" autofocus>
+      <small>At least 3 characters.</small>
+    </div>
+    <div class="field">
+      <label for="role">Role</label>
+      <select class="input lg" id="role" name="role">
+        {% for role in roles %}
+        <option value="{{ role }}">{{ 'Administrator' if role == 'admin' else role | capitalize }}</option>
+        {% endfor %}
+      </select>
+      <small>Administrators can open the admin pages. Users can only use the main app.</small>
+    </div>
+    <div class="field">
+      <label for="password">Password</label>
+      <div class="row">
+        <input class="input lg" type="password" id="password" name="password" required minlength="8" autocomplete="new-password">
+        <button type="button" class="btn" style="height:44px" data-show-password="password" aria-pressed="false">Show</button>
+      </div>
+      <div class="meter" data-meter-for="password" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+      <small data-meter-label="password">Minimum is 8 characters.</small>
+    </div>
+    <div class="field">
+      <label for="confirm_password">Confirm password</label>
+      <input class="input lg" type="password" id="confirm_password" name="confirm_password" required minlength="8" autocomplete="new-password">
+    </div>
+    <div class="row">
+      <button type="submit" class="btn primary">Create account</button>
+      <a class="btn" href="{{ url_for('admin.accounts') }}">Cancel</a>
+    </div>
+  </form>
+</div>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/app.js') }}"></script>
+<script src="{{ url_for('static', filename='js/auth.js') }}"></script>
 {% endblock %}

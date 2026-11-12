@@ -1,92 +1,41 @@
-{% extends "admin/base.html" %}
-
-{% block title %}Log Details{% endblock %}
-
+{% extends 'base.html' %}
+{% set active = 'tasks' %}
+{% block title %}Run #{{ log.id }} · LogBoost{% endblock %}
 {% block content %}
-<div class="admin-page">
-    <div class="page-header">
-        <div>
-            <a href="{{ url_for('admin.logs') }}" class="back-link">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <line x1="19" y1="12" x2="5" y2="12"/>
-                    <polyline points="12 19 5 12 12 5"/>
-                </svg>
-                Back to Logs
-            </a>
-            <h1>Log #{{ log.id }}</h1>
-            <p>Task execution details</p>
-        </div>
-    </div>
-    
-    <div class="log-detail-card">
-        <div class="log-detail-header">
-            <div class="log-task-info">
-                {% if log.task_type == 'update_geo' %}
-                <div class="task-icon">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <circle cx="12" cy="12" r="10"/>
-                        <line x1="2" y1="12" x2="22" y2="12"/>
-                        <path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/>
-                    </svg>
-                </div>
-                <h2>Update Geolocation</h2>
-                {% elif log.task_type == 'update_ti' %}
-                <div class="task-icon">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-                    </svg>
-                </div>
-                <h2>Update Threat Intelligence</h2>
-                {% else %}
-                <h2>{{ log.task_type }}</h2>
-                {% endif %}
-            </div>
-            <span class="badge large {{ log.status }}">{{ log.status }}</span>
-        </div>
-        
-        <div class="log-detail-meta">
-            <div class="meta-item">
-                <span class="meta-label">Started</span>
-                <span class="meta-value">{{ log.started_at }}</span>
-            </div>
-            <div class="meta-item">
-                <span class="meta-label">Completed</span>
-                <span class="meta-value">{{ log.completed_at or 'Still running...' }}</span>
-            </div>
-        </div>
-        
-        {% if log.output %}
-        <div class="log-output-section">
-            <h3>
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <polyline points="4 17 10 11 4 5"/>
-                    <line x1="12" y1="19" x2="20" y2="19"/>
-                </svg>
-                Output
-            </h3>
-            <pre class="log-output">{{ log.output }}</pre>
-        </div>
-        {% endif %}
-        
-        {% if log.error %}
-        <div class="log-output-section error">
-            <h3>
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <circle cx="12" cy="12" r="10"/>
-                    <line x1="15" y1="9" x2="9" y2="15"/>
-                    <line x1="9" y1="9" x2="15" y2="15"/>
-                </svg>
-                Error
-            </h3>
-            <pre class="log-output error">{{ log.error }}</pre>
-        </div>
-        {% endif %}
-        
-        {% if not log.output and not log.error %}
-        <div class="empty-state small">
-            <p>No output recorded for this task</p>
-        </div>
-        {% endif %}
-    </div>
+<div class="head">
+  <div>
+    <div class="crumb"><a class="muted" href="{{ url_for('admin.tasks') }}">Tasks</a> / <a class="muted" href="{{ url_for('admin.tasks', tab='log') }}">Run log</a></div>
+    <h1>Run #{{ log.id }}</h1>
+    <div class="sub">{{ task_labels.get(log.task_type, (log.task_type,))[0] }}</div>
+  </div>
+  <div class="actions">
+    {% if log.status == 'success' %}<span class="pill"><span class="dot green">Done</span></span>
+    {% elif log.status == 'running' %}<span class="pill amber"><span class="dot amber">Running</span></span>
+    {% else %}<span class="pill red"><span class="dot red">{{ log.status | capitalize }}</span></span>{% endif %}
+  </div>
 </div>
+<div class="card">
+  <div class="card-b">
+    <dl class="kv">
+      <dt>Started</dt><dd>{{ log.started_at }}</dd>
+      <dt>Completed</dt><dd>{{ log.completed_at or 'Still running' }}</dd>
+      {% if log.completed_at %}<dt>Duration</dt><dd>{{ duration(log.started_at, log.completed_at) }}</dd>{% endif %}
+    </dl>
+  </div>
+</div>
+{% if log.error %}
+<div class="card">
+  <div class="card-h"><h2 class="red">Error</h2></div>
+  <pre class="card-b mono" style="margin:0;white-space:pre-wrap;overflow-wrap:anywhere;color:var(--red-text);font-size:12px">{{ log.error }}</pre>
+</div>
+{% endif %}
+{% if log.output %}
+<div class="card">
+  <div class="card-h"><h2>Output</h2></div>
+  <pre class="card-b mono" style="margin:0;white-space:pre-wrap;overflow-wrap:anywhere;color:var(--text-3);font-size:12px;max-height:60vh;overflow-y:auto">{{ log.output }}</pre>
+</div>
+{% endif %}
+{% if not log.output and not log.error %}
+<div class="card"><div class="empty">No output was recorded for this run.</div></div>
+{% endif %}
 {% endblock %}

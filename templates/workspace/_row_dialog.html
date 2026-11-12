@@ -1,0 +1,25 @@
+{# Results: the row details drawer and the right-click menu. Filled by static/js/enrich.js. #}
+<aside class="drawer" id="row-drawer" aria-label="Row details" aria-hidden="true">
+  <div class="drawer-h">
+    <div class="row" style="justify-content:space-between">
+      <span class="mono ell" id="row-drawer-title" style="font-size:22px;font-weight:500">Row details</span>
+      <button type="button" class="x" id="row-drawer-close" aria-label="Close row details">×</button>
+    </div>
+    <div class="muted ell" id="row-drawer-sub" style="margin-top:6px"></div>
+  </div>
+  <div class="drawer-b" id="row-drawer-body"></div>
+  <div class="drawer-f row-drawer-f">
+    <button type="button" class="btn sm" id="row-drawer-prev">Previous</button>
+    <span class="mono muted grow" id="row-drawer-pos" style="font-size:12px;text-align:center;white-space:nowrap"></span>
+    <button type="button" class="btn sm" id="row-drawer-next">Next</button>
+    <span class="row-drawer-break"></span>
+    <button type="button" class="btn sm" id="row-drawer-copy" title="Copy the enrichment as readable text, defanged">Copy</button>
+    <button type="button" class="btn sm" id="row-drawer-copy-json" title="Copy the enrichment as JSON, defanged">Copy JSON</button>
+    <span class="grow"></span>
+    <button type="button" class="btn sm primary" id="row-drawer-graph" title="Add this row's IP to the graph">Graph</button>
+  </div>
+</aside>
+
+<div id="context-menu" class="menu results-menu hide" role="menu">
+  <button type="button" id="context-menu-graph" role="menuitem">Graph this IP</button>
+</div>

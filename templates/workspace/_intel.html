@@ -1,0 +1,98 @@
+{# Intel browser. Behaviour: static/js/intel-browser.js. View-specific styles: static/css/intel.css. #}
+<div id="intel-browser-panel" class="tab-panel">
+    <div class="head">
+        <div>
+            <h1>Intel browser</h1>
+            <div class="sub" id="intel-subtitle">Browse IOCs from <span class="mono">threats.db</span> by source or tag</div>
+        </div>
+        <div class="actions">
+            <button type="button" class="btn" id="intel-export-btn">Export CSV</button>
+            <button type="button" class="btn" id="intel-graph-btn" disabled title="Ctrl/Cmd-click rows to select">Graph (0)</button>
+            <button type="button" class="btn primary" id="intel-enrich-btn" disabled title="Ctrl/Cmd-click rows to select">Enrich (0)</button>
+        </div>
+    </div>
+
+    {% if threat_db_missing %}
+    <div class="notice">The threat database has not been downloaded yet, so there is nothing to browse.
+        {% if session.get('user_role') == 'admin' %}<a href="{{ url_for('admin.dashboard') }}">Set up in Overview</a>{% else %}Ask an admin to run the first download.{% endif %}
+    </div>
+    {% endif %}
+
+    <div class="tabs" id="intel-subtabs">
+        <a href="#intel-browser" class="on" data-subtab="browser" aria-current="true">Browse</a>
+        <a href="#intel-browser" data-subtab="stats">Statistics</a>
+    </div>
+
+    <div class="stack intel-sub-panel" id="intel-sub-browser" style="gap:16px">
+        <div class="row" style="flex-wrap:wrap">
+            <input type="text" class="input mono" id="intel-search" aria-label="IP starts with" placeholder="IP starts with" autocomplete="off" spellcheck="false" style="width:200px">
+            <select class="input" id="intel-source" aria-label="Source">
+                <option value="">All sources</option>
+            </select>
+            <select class="input" id="intel-tag" aria-label="Tag">
+                <option value="">All tags</option>
+            </select>
+            <button type="button" class="btn sm" id="intel-clear-btn">Clear</button>
+            <span class="grow"></span>
+            <span class="muted" style="font-size:13px" id="intel-selected-count" title="Ctrl/Cmd-click a row to select it, Shift-click to select a range">0 selected · up to 100</span>
+        </div>
+
+        <div class="card intel-table-card">
+            <table class="intel-table">
+                <thead>
+                    <tr>
+                        <th style="width:40px"><span class="intel-sr">Selected</span></th>
+                        <th>IP</th>
+                        <th>Sources</th>
+                        <th>Tags</th>
+                    </tr>
+                </thead>
+                <tbody id="intel-rows">
+                    <tr><td colspan="4" class="muted">Loading…</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="row muted" style="font-size:13px;justify-content:space-between">
+            <span id="intel-status">—</span>
+            <span class="row">
+                <button type="button" class="btn sm" id="intel-prev" disabled>‹ Prev</button>
+                <button type="button" class="btn sm" id="intel-next" disabled>Next ›</button>
+            </span>
+        </div>
+    </div>
+
+    <div class="stack intel-sub-panel hide" id="intel-sub-stats">
+        <div class="card intel-stat-grid">
+            <div class="stat"><b id="stat-total-entries">—</b><span>Total entries</span></div>
+            <div class="stat"><b id="stat-unique-ips">—</b><span>Unique IPs</span></div>
+            <div class="stat"><b id="stat-source-count">—</b><span>Sources</span></div>
+            <div class="stat"><b id="stat-tag-count">—</b><span>Tags</span></div>
+        </div>
+        <div class="cols" style="grid-template-columns:repeat(2,minmax(0,1fr))">
+            <div class="card">
+                <div class="card-h"><h2>Sources</h2><span class="muted">Click to filter</span></div>
+                <div class="card-b barlist intel-barlist" id="intel-stats-sources"><span class="muted">Loading…</span></div>
+            </div>
+            <div class="card">
+                <div class="card-h"><h2>Tags</h2><span class="muted">Click to filter</span></div>
+                <div class="card-b barlist intel-barlist" id="intel-stats-tags"><span class="muted">Loading…</span></div>
+            </div>
+        </div>
+    </div>
+
+    {# Asked before a selection replaces a graph that already has nodes. #}
+    <dialog id="intel-graph-confirm" aria-labelledby="intel-graph-confirm-title">
+        <div class="card-h">
+            <h2 id="intel-graph-confirm-title">Replace current graph?</h2>
+        </div>
+        <div class="card-b">
+            The graph already contains <b id="intel-modal-node-count">0</b> node(s). What should happen with it before loading your selection?
+        </div>
+        <div class="row" style="justify-content:flex-end;padding:0 22px 18px">
+            <button type="button" class="btn" data-dialog-close>Cancel</button>
+            <button type="button" class="btn" id="intel-graph-discard-btn">Discard</button>
+            <button type="button" class="btn primary" id="intel-graph-save-btn">Save first</button>
+        </div>
+    </dialog>
+</div>

@@ -1,16 +1,9 @@
-<!-- Error Display Partial -->
-<div class="error-container">
-    <svg class="error-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <circle cx="12" cy="12" r="10"/>
-        <line x1="12" y1="8" x2="12" y2="12"/>
-        <line x1="12" y1="16" x2="12.01" y2="16"/>
-    </svg>
-    <h3 class="error-title">Processing Error</h3>
-    <p class="error-message">{{ error }}</p>
-    {% if command %}
-    <div class="error-command-wrapper">
-        <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.5rem;">Command executed:</p>
-        <pre class="error-command">{{ command }}</pre>
-    </div>
-    {% endif %}
+{# Error fragment, swapped into #results-container (or #stats-container). #}
+<div class="notice red results-error" role="alert">
+  <b>Processing error</b>
+  <div class="error-message">{{ error }}</div>
+  {% if command %}
+  <div class="muted" style="font-size:12px;margin-top:10px">Command executed:</div>
+  <pre class="error-command mono">{{ command }}</pre>
+  {% endif %}
 </div>

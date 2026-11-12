@@ -519,8 +519,10 @@ class TestEnrichFileEndpoint:
     def test_enrich_file_no_output_generated(self, authenticated_client, tmp_path, test_db):
         """Test error when no output file is generated."""
         file_content = b'IP\n8.8.8.8\n'
-        
-        with patch('app.get_session_dir', return_value=(tmp_path / 'session', tmp_path / 'session')):
+
+        # separate upload and output directories: with one shared directory the upload itself
+        # was picked up as the output and this test only passed on the word "error" in page script
+        with patch('app.get_session_dir', return_value=(tmp_path / 'upload', tmp_path / 'output')):
             with patch('app.run_logboost', return_value=(True, 'Success', '')):
                 with patch('app.get_large_file_warning_threshold', return_value=10000):
                     response = authenticated_client.post(

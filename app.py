@@ -79,6 +79,7 @@ if (not _raw_key or len(_raw_key) < 32
 # Some hosts (Windows registry) map .js to text/plain; with X-Content-Type-Options: nosniff the
 # browser then refuses the vendored scripts. Pin the type instead of trusting the host.
 mimetypes.add_type('text/javascript', '.js')
+mimetypes.add_type('font/woff2', '.woff2')
 
 app = Flask(__name__)
 app.secret_key = _raw_key
@@ -137,13 +138,15 @@ def handle_csrf_error(e):
 
 _CSP_POLICY = (
     "default-src 'self'; "
-    # 'unsafe-inline' is required for the existing inline <script>/<style>/onclick blocks.
-    # Scripts: htmx, d3 and psl are vendored under static/vendor, so no external hosts.
-    # 'unsafe-inline' remains until the inline JavaScript moves to static files.
-    "script-src 'self' 'unsafe-inline'; "
-    # Google Fonts loads CSS from fonts.googleapis.com.
-    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
-    "font-src 'self' https://fonts.gstatic.com; "
+    # Scripts come only from static files: no inline <script>, no inline event handlers, no eval.
+    # htmx, d3 and psl are vendored under static/vendor. An injected <script> or onclick= does
+    # not run, which backs up the output escaping.
+    "script-src 'self'; "
+    # Stylesheets are local. 'unsafe-inline' stays for style="" attributes in the templates and
+    # the <style> element htmx adds for its request indicator.
+    "style-src 'self' 'unsafe-inline'; "
+    # Fonts are served from static/vendor/fonts.
+    "font-src 'self'; "
     # data: + blob: needed for inline SVG icons embedded as background-image and PNG export blobs.
     "img-src 'self' data: blob:; "
     "connect-src 'self'; "
@@ -213,6 +216,74 @@ def check_threat_db_exists():
         return True
     threat_db_path = Path(THREAT_DB_DIR) / 'threats.db'
     return threat_db_path.exists()
+
+
+def setup_steps():
+    """The five first-run steps behind the Overview checklist and the sidebar progress card."""
+    from admin import get_setting
+    with admin_db() as conn:
+        schedules_on = conn.execute('SELECT COUNT(*) FROM scheduled_tasks WHERE enabled = 1').fetchone()[0] > 0
+    steps = [
+        ('admin', True),
+        ('geo', check_mmdb_files_exist()[0] or bool(get_setting('maxmind_api_key'))),
+        ('threat_db', check_threat_db_exists()),
+        ('shodan', bool(get_setting('shodan_api_key'))),
+        ('schedules', schedules_on),
+    ]
+    return {'steps': dict(steps), 'done': sum(1 for _, ok in steps if ok), 'total': len(steps)}
+
+
+def feed_count():
+    """Number of configured threat feeds, or None when the feed config cannot be read."""
+    from admin import load_feeds
+    try:
+        return len(load_feeds())
+    except (OSError, ValueError):
+        return None
+
+
+def _as_datetime(value):
+    if isinstance(value, datetime):
+        return value
+    try:
+        return datetime.fromisoformat(str(value))
+    except ValueError:
+        return None
+
+
+@app.template_filter('ago')
+def ago(value):
+    """'5 min ago' / 'in 3 hours' for a stored server-local timestamp; the raw value if unparseable."""
+    when = _as_datetime(value)
+    if when is None:
+        return value or ''
+    seconds = (datetime.now() - when).total_seconds()
+    future, seconds = seconds < 0, abs(seconds)
+    if seconds < 60:
+        return 'in a moment' if future else 'just now'
+    for size, unit in ((86400, 'day'), (3600, 'hour'), (60, 'min')):
+        if seconds >= size:
+            count = int(seconds // size)
+            text = f"{count} {unit}{'s' if count != 1 and unit != 'min' else ''}"
+            break
+    return f'in {text}' if future else f'{text} ago'
+
+
+def duration(start, end):
+    """'1m 52s' between two stored timestamps; '' when either is missing."""
+    start, end = _as_datetime(start), _as_datetime(end)
+    if not start or not end:
+        return ''
+    seconds = max(int((end - start).total_seconds()), 0)
+    minutes, seconds = divmod(seconds, 60)
+    return f'{minutes}m {seconds:02d}s' if minutes else f'{seconds}s'
+
+
+@app.context_processor
+def inject_shell_helpers():
+    """Helpers the shared layout calls; nothing is computed unless a template uses them."""
+    return {'setup_steps': setup_steps, 'feed_count': feed_count, 'duration': duration,
+            'run_history_days': get_run_history_days}
 
 
 def _get_threats_db_path():
@@ -679,7 +750,7 @@ def sweep_session_dirs(max_age_days: int = SESSION_DIR_MAX_AGE_DAYS) -> int:
             continue
         for entry in base.iterdir():
             try:
-                if not entry.is_dir():
+                if not entry.is_dir() or entry.name == RUNS_DIRNAME:
                     continue
                 newest = max([entry.stat().st_mtime] + [child.stat().st_mtime for child in entry.iterdir()])
                 if newest < cutoff:
@@ -715,6 +786,167 @@ def reset_session_dirs():
         shutil.rmtree(directory, ignore_errors=True)
         directory.mkdir(parents=True, exist_ok=True)
     return session_upload, session_output
+
+
+# ---- run history ----
+# Every finished enrichment is kept for run_history_days so its results can be reopened. A run
+# belongs to the user who started it; nobody else, administrators included, can list or open it.
+RUNS_DIRNAME = '_runs'
+RUN_OPTION_KEYS = ('dns', 'whois', 'idb', 'useti')  # the source toggles shown in the run list
+
+
+def get_run_history_days() -> int:
+    from admin import get_int_setting
+    return get_int_setting('run_history_days', 7, 1, 365)
+
+
+def finish_run(output_file: Path, kind: str, label: str, options: dict,
+               ip_count=None, input_text=None) -> dict:
+    """Make `output_file` the session's current result and return its template data. The file is
+    first moved into the user's run history; if that fails the run still completes from where
+    the file is, just without a history entry."""
+    run_id = secrets.token_urlsafe(12)
+    try:
+        run_dir = OUTPUT_FOLDER / RUNS_DIRNAME / str(session['user_id']) / run_id
+        run_dir.mkdir(parents=True)
+        stored = Path(shutil.move(str(output_file), str(run_dir / output_file.name)))
+    except (OSError, KeyError):
+        app.logger.warning('Could not store run %s in the run history', run_id, exc_info=True)
+        stored, run_id = output_file, None
+
+    session['current_output'] = str(stored)
+    data = results_payload(stored)
+    if ip_count is not None:
+        data['ip_count'] = ip_count
+
+    if run_id:
+        try:
+            with admin_db() as conn:
+                conn.execute(
+                    '''INSERT INTO enrichment_runs
+                       (id, user_id, kind, label, ip_count, row_count, options, input_text, output_path)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                    (run_id, session['user_id'], kind, label, ip_count, data.get('total_rows', 0),
+                     json.dumps({key: bool(options.get(key)) for key in RUN_OPTION_KEYS}),
+                     input_text, str(stored)))
+                conn.commit()
+        except sqlite3.Error:
+            app.logger.warning('Could not record run %s', run_id, exc_info=True)
+    return data
+
+
+def _own_run(run_id: str):
+    """The run row if it belongs to the signed-in user and its file is still there, else None."""
+    with admin_db() as conn:
+        run = conn.execute('SELECT * FROM enrichment_runs WHERE id = ? AND user_id = ?',
+                           (run_id, session.get('user_id'))).fetchone()
+    if not run:
+        return None
+    try:
+        path = _assert_within(Path(run['output_path']), OUTPUT_FOLDER / RUNS_DIRNAME)
+    except (ValueError, OSError):
+        return None
+    return run if path.is_file() else None
+
+
+def _remove_run_files(output_path: str) -> None:
+    """Delete a run's directory; never anything outside the run store."""
+    try:
+        run_dir = _assert_within(Path(output_path), OUTPUT_FOLDER / RUNS_DIRNAME).parent
+        if run_dir.parent.parent == (OUTPUT_FOLDER / RUNS_DIRNAME).resolve():
+            shutil.rmtree(run_dir, ignore_errors=True)
+    except (ValueError, OSError):
+        app.logger.warning('Could not remove run files at %s', output_path, exc_info=True)
+
+
+def cleanup_old_runs() -> int:
+    """Housekeeping: drop runs older than run_history_days, rows and files. Returns the count."""
+    with admin_db() as conn:
+        old = conn.execute(
+            "SELECT id, output_path FROM enrichment_runs WHERE created_at < datetime('now', ?)",
+            (f'-{get_run_history_days()} days',)).fetchall()
+        for run in old:
+            _remove_run_files(run['output_path'])
+        conn.executemany('DELETE FROM enrichment_runs WHERE id = ?', [(run['id'],) for run in old])
+        conn.commit()
+    if old:
+        app.logger.info('Removed %d expired runs', len(old))
+    return len(old)
+
+
+@app.route('/runs')
+@login_required
+def list_runs():
+    """The signed-in user's past runs, newest first."""
+    with admin_db() as conn:
+        rows = conn.execute(
+            '''SELECT id, kind, label, ip_count, row_count, options, created_at, output_path,
+                      input_text IS NOT NULL AS has_input
+               FROM enrichment_runs WHERE user_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 200''',
+            (session.get('user_id'),)).fetchall()
+    runs = []
+    for row in rows:
+        if not Path(row['output_path']).is_file():
+            continue
+        try:
+            options = json.loads(row['options'] or '{}')
+        except ValueError:
+            options = {}
+        runs.append({
+            'id': row['id'], 'kind': row['kind'], 'label': row['label'],
+            'ip_count': row['ip_count'], 'row_count': row['row_count'],
+            'sources': [key for key in RUN_OPTION_KEYS if options.get(key)],
+            'created_at': str(row['created_at']).replace(' ', 'T') + 'Z',  # stored in UTC
+            'can_edit': bool(row['has_input']),
+        })
+    return jsonify({'runs': runs, 'retention_days': get_run_history_days()})
+
+
+@app.route('/runs/<run_id>')
+@login_required
+def open_run(run_id):
+    """Reopen a past run: it becomes the session's current result."""
+    run = _own_run(run_id)
+    if not run:
+        return render_template('partials/error.html', error='That run is no longer available.'), 404
+    path = Path(run['output_path'])
+    session['current_output'] = str(path)
+    data = results_payload(path)
+    if run['ip_count'] is not None:
+        data['ip_count'] = run['ip_count']
+    if run['kind'] == 'file':
+        data['original_filename'] = run['label']
+    return render_template('partials/results.html', **data)
+
+
+@app.route('/runs/<run_id>/input')
+@login_required
+def run_input(run_id):
+    """The pasted text and source toggles of a text run, for "Edit input"."""
+    run = _own_run(run_id)
+    if not run or run['input_text'] is None:
+        return jsonify({'error': 'No stored input for this run'}), 404
+    try:
+        options = json.loads(run['options'] or '{}')
+    except ValueError:
+        options = {}
+    return jsonify({'text': run['input_text'], 'options': options})
+
+
+@app.route('/runs/<run_id>/delete', methods=['POST'])
+@login_required
+def delete_run(run_id):
+    with admin_db() as conn:
+        run = conn.execute('SELECT output_path FROM enrichment_runs WHERE id = ? AND user_id = ?',
+                           (run_id, session.get('user_id'))).fetchone()
+        if not run:
+            return jsonify({'error': 'Run not found'}), 404
+        conn.execute('DELETE FROM enrichment_runs WHERE id = ?', (run_id,))
+        conn.commit()
+    if current_output_path() and session.get('current_output') == run['output_path']:
+        session.pop('current_output', None)
+    _remove_run_files(run['output_path'])
+    return jsonify({'success': True})
 
 
 def results_payload(output_file: Path) -> dict:
@@ -826,11 +1058,7 @@ def enrich_text():
     if not output_files:
         return render_template('partials/error.html', error='No output file generated')
     
-    output_file = output_files[0]
-    session['current_output'] = str(output_file)
-    
-    data = results_payload(output_file)
-    data['ip_count'] = len(ips)
+    data = finish_run(output_files[0], 'text', 'Pasted text', options, ip_count=len(ips), input_text=text)
 
     log_audit('logboost_enrich', 'logboost', None, {'source': 'text', 'ip_count': len(ips)})
     return render_template('partials/results.html', **data)
@@ -928,10 +1156,7 @@ def enrich_file():
     if not output_files:
         return render_template('partials/error.html', error='No output file generated')
     
-    output_file = output_files[0]
-    session['current_output'] = str(output_file)
-    
-    data = results_payload(output_file)
+    data = finish_run(output_files[0], 'file', filename, options)
     data['original_filename'] = filename
 
     log_audit('logboost_enrich', 'logboost', None, {'source': 'file', 'filename': filename, 'row_count': data.get('total_rows', 0)})
@@ -2031,7 +2256,8 @@ def my_shares():
     """The user's shared result links; an admin sees everyone's."""
     admin_view = is_admin()
     shares = list_shared_results(None if admin_view else session.get('user_id'))
-    return render_template('shares.html', shares=shares, admin_view=admin_view)
+    return render_template('shares.html', shares=shares, admin_view=admin_view,
+                           graphs=list_graphs(session.get('user_id')))
 
 
 @app.route('/shares/<share_id>/delete', methods=['POST'])

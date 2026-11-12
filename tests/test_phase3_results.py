@@ -69,7 +69,7 @@ class TestGraphLookupIsolation:
 
         stats = authenticated_client.get('/stats')
         assert stats.status_code == 200
-        assert b'<span class="stat-value">3</span>' in stats.data  # three main rows
+        assert b'<b class="stat-value">3</b>' in stats.data  # three main rows
 
     def test_graph_lookup_rejects_non_ip_input(self, authenticated_client):
         with patch('app.run_logboost') as run:
@@ -195,7 +195,7 @@ class TestRowCap:
         download.close()
 
         # statistics cover the full file
-        assert b'<span class="stat-value">12</span>' in authenticated_client.get('/stats').data
+        assert b'<b class="stat-value">12</b>' in authenticated_client.get('/stats').data
 
     def test_result_within_cap_has_no_banner(self, authenticated_client):
         with patch('app.extract_ips', return_value=['10.0.0.1']), \

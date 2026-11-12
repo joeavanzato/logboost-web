@@ -6,6 +6,7 @@ Handles authentication, scheduled tasks, and settings management
 import os
 import io
 import json
+import re
 import sqlite3
 import hashlib
 import hmac
@@ -18,6 +19,7 @@ import subprocess
 import threading
 import time
 import logging
+import re
 import zipfile
 import requests
 from contextlib import contextmanager
@@ -172,6 +174,19 @@ def init_db():
             )
         ''')
     
+        # Last known fetch result per threat feed, keyed by feed URL (timestamps are server-local)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS feed_status (
+                url TEXT PRIMARY KEY,
+                name TEXT,
+                ok INTEGER,
+                detail TEXT,
+                checked_at TIMESTAMP,
+                last_ok_at TIMESTAMP,
+                source TEXT
+            )
+        ''')
+
         # Settings table
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS settings (
@@ -356,6 +371,26 @@ def init_db():
             )
         ''')
     
+        # Run history: one row per finished enrichment, private to the user who ran it.
+        # The output file lives under OUTPUT_FOLDER/_runs; rows and files are removed together
+        # after run_history_days (see app.cleanup_old_runs).
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS enrichment_runs (
+                id TEXT PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                kind TEXT NOT NULL,
+                label TEXT,
+                ip_count INTEGER,
+                row_count INTEGER,
+                options TEXT,
+                input_text TEXT,
+                output_path TEXT NOT NULL,
+                FOREIGN KEY (user_id) REFERENCES users(id)
+            )
+        ''')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_runs_user ON enrichment_runs(user_id, created_at)')
+
         # row_count lets listings and audit entries skip parsing the stored rows
         cursor.execute("PRAGMA table_info(shared_results)")
         if 'row_count' not in [col[1] for col in cursor.fetchall()]:
@@ -730,14 +765,21 @@ def dashboard():
         threat_db_missing = not threat_db_path.exists()
         intel_indexes_missing = not threat_db_missing and not _intel_indexes_present(threat_db_path)
 
+        from app import check_mmdb_files_exist  # lazy: app imports admin
+        mmdb_available, mmdb_missing = check_mmdb_files_exist()
+
         return render_template('admin/dashboard.html',
                                tasks=tasks,
+                               task_labels=TASK_LABELS,
                                recent_logs=recent_logs,
                                maxmind_key_set=maxmind_key_set,
                                shodan_key_set=shodan_key_set,
                                account_count=account_count,
+                               mmdb_available=mmdb_available,
+                               mmdb_missing=mmdb_missing,
                                threat_db_missing=threat_db_missing,
-                               intel_indexes_missing=intel_indexes_missing)
+                               intel_indexes_missing=intel_indexes_missing,
+                               logboost_version=get_setting('logboost_installed_version', BUNDLED_LOGBOOST_VERSION))
 
 
 # ============================================
@@ -952,10 +994,25 @@ def set_account_active(account_id):
 # Settings
 # ============================================
 
+@admin_bp.route('/sources')
+@admin_required
+def sources():
+    """Data sources: service keys, GeoIP databases and the LogBoost binary."""
+    from app import check_mmdb_files_exist  # lazy: app imports admin
+    mmdb_available, mmdb_missing = check_mmdb_files_exist()
+    return render_template('admin/sources.html', mmdb_available=mmdb_available, mmdb_missing=mmdb_missing,
+                           **_settings_context(), **_binary_status())
+
+
 @admin_bp.route('/settings')
 @admin_required
 def settings():
-    """Manage settings."""
+    """Limits and timings. Keys and credentials are on the Data sources page."""
+    return render_template('admin/settings.html', **_settings_context())
+
+
+def _settings_context():
+    """Stored settings for the Settings and Data sources pages. Secrets only as *_set flags."""
     with db() as conn:
         cursor = conn.cursor()
     
@@ -1083,7 +1140,7 @@ def settings():
         max_url_fetch_size_mb = int(max_url_fetch_size_row['value']) if max_url_fetch_size_row else 10
     
     
-        return render_template('admin/settings.html',
+        return dict(
                                maxmind_key_set=bool(maxmind_key),
                                shodan_key_set=bool(shodan_key),
                                dns_servers=dns_servers,
@@ -1128,6 +1185,39 @@ def _submitted_secret(setting_key, form_field):
     return request.form.get(form_field, '').strip() or get_setting(setting_key, '')
 
 
+_SECRET_SETTING_SUFFIXES = ('_api_key', '_password', '_secret', '_token')
+
+
+def _setting_changes(before, after, secret_keys=()):
+    """What a settings save changed, for the audit log: {key: {'from': old, 'to': new}} for the
+    keys of `after` whose stored value differs (compared as strings, so '5' and 5 are equal).
+    Secrets (keys in `secret_keys` or named like a credential) never appear: only
+    'set' / 'not set' / 'replaced'."""
+    changes = {}
+    for key, new in after.items():
+        old = before.get(key)
+        old_text = '' if old is None else str(old)
+        new_text = '' if new is None else str(new)
+        if old_text == new_text:
+            continue
+        if key in secret_keys or key.endswith(_SECRET_SETTING_SUFFIXES):
+            changes[key] = {'from': 'set' if old_text else 'not set',
+                            'to': 'not set' if not new_text else 'replaced' if old_text else 'set'}
+        else:
+            changes[key] = {'from': old, 'to': new}
+    return changes
+
+
+def _changes_detail(before, after, secret_keys=()):
+    """{'changes': {...}} to merge into audit details, or {} when nothing changed.
+    Called after the save, so it also drops the per-request settings cache that reading
+    `before` filled: anything read later in the request sees the saved values."""
+    changes = _setting_changes(before, after, secret_keys)
+    if has_request_context():
+        g.pop('_settings', None)
+    return {'changes': changes} if changes else {}
+
+
 @admin_bp.route('/settings/shodan-info')
 @admin_required
 def shodan_account_info():
@@ -1140,6 +1230,7 @@ def shodan_account_info():
 @admin_required
 def save_maxmind_key():
     """Save MaxMind API key."""
+    before = dict(_all_settings())
     api_key = _submitted_secret('maxmind_api_key', 'maxmind_api_key')
     
     with db() as conn:
@@ -1150,9 +1241,10 @@ def save_maxmind_key():
         ''', (api_key,))
         conn.commit()
     
-        log_audit('api_key_modified', 'setting', 'maxmind_api_key', {'key_set': bool(api_key)})
+        log_audit('api_key_modified', 'setting', 'maxmind_api_key', {
+            'key_set': bool(api_key), **_changes_detail(before, {'maxmind_api_key': api_key}, ('maxmind_api_key',))})
         flash('MaxMind API key saved successfully', 'success')
-        return redirect(url_for('admin.settings'))
+        return redirect(url_for('admin.sources'))
 
 
 @admin_bp.route('/settings/upload-mmdb', methods=['POST'])
@@ -1209,6 +1301,7 @@ def upload_mmdb():
 @admin_required
 def save_shodan_key():
     """Save Shodan API key."""
+    before = dict(_all_settings())
     api_key = _submitted_secret('shodan_api_key', 'shodan_api_key')
     
     with db() as conn:
@@ -1219,9 +1312,10 @@ def save_shodan_key():
         ''', (api_key,))
         conn.commit()
     
-        log_audit('api_key_modified', 'setting', 'shodan_api_key', {'key_set': bool(api_key)})
+        log_audit('api_key_modified', 'setting', 'shodan_api_key', {
+            'key_set': bool(api_key), **_changes_detail(before, {'shodan_api_key': api_key}, ('shodan_api_key',))})
         flash('Shodan API key saved successfully', 'success')
-        return redirect(url_for('admin.settings'))
+        return redirect(url_for('admin.sources'))
 
 
 @admin_bp.route('/settings/dns', methods=['POST'])
@@ -1229,6 +1323,7 @@ def save_shodan_key():
 def save_dns_settings():
     """Save DNS settings. Servers must be IP addresses; numbers are clamped to the ranges the
     resolver accepts, so a bad value can never be stored."""
+    before = dict(_all_settings())
     servers = [s.strip() for s in request.form.get('dns_servers', '').split(',') if s.strip()]
     invalid = []
     for server in servers:
@@ -1260,7 +1355,8 @@ def save_dns_settings():
         conn.commit()
 
     log_audit('setting_modified', 'setting', 'dns',
-              {'dns_servers': values['dns_servers'], 'dns_cache_ttl': values['dns_cache_ttl']})
+              {'dns_servers': values['dns_servers'], 'dns_cache_ttl': values['dns_cache_ttl'],
+               **_changes_detail(before, values)})
     flash('DNS settings saved successfully', 'success')
     return redirect(url_for('admin.settings'))
 
@@ -1269,6 +1365,7 @@ def save_dns_settings():
 @admin_required
 def save_concurrency_settings():
     """Save concurrency settings."""
+    before = dict(_all_settings())
     dns_concurrency = request.form.get('dns_concurrency', '10').strip()
     whois_concurrency = request.form.get('whois_concurrency', '5').strip()
     
@@ -1296,7 +1393,9 @@ def save_concurrency_settings():
     
         conn.commit()
     
-        log_audit('setting_modified', 'setting', 'concurrency', {'dns': dns_concurrency, 'whois': whois_concurrency})
+        log_audit('setting_modified', 'setting', 'concurrency', {
+            'dns': dns_concurrency, 'whois': whois_concurrency,
+            **_changes_detail(before, {'dns_concurrency': dns_concurrency, 'whois_concurrency': whois_concurrency})})
         flash('Concurrency settings saved successfully', 'success')
         return redirect(url_for('admin.settings'))
 
@@ -1305,6 +1404,7 @@ def save_concurrency_settings():
 @admin_required
 def save_cache_settings():
     """Save cache TTL settings."""
+    before = dict(_all_settings())
     whois_cache_ttl = request.form.get('whois_cache_ttl', '86400').strip()
     shodan_cache_ttl = request.form.get('shodan_cache_ttl', '3600').strip()
     
@@ -1332,7 +1432,9 @@ def save_cache_settings():
     
         conn.commit()
     
-        log_audit('setting_modified', 'setting', 'cache', {'whois_ttl': whois_cache_ttl, 'shodan_ttl': shodan_cache_ttl})
+        log_audit('setting_modified', 'setting', 'cache', {
+            'whois_ttl': whois_cache_ttl, 'shodan_ttl': shodan_cache_ttl,
+            **_changes_detail(before, {'whois_cache_ttl': whois_cache_ttl, 'shodan_cache_ttl': shodan_cache_ttl})})
         flash('Cache settings saved successfully', 'success')
         return redirect(url_for('admin.settings'))
 
@@ -1341,6 +1443,7 @@ def save_cache_settings():
 @admin_required
 def save_shodan_pivot_settings():
     """Save Shodan pivot settings."""
+    before = dict(_all_settings())
     shodan_pivot_limit = request.form.get('shodan_pivot_limit', '100').strip()
     
     # Validate range (minimum 10, max 1000)
@@ -1359,7 +1462,8 @@ def save_shodan_pivot_settings():
     
         conn.commit()
     
-        log_audit('setting_modified', 'setting', 'shodan_pivot_limit', {'value': shodan_pivot_limit})
+        log_audit('setting_modified', 'setting', 'shodan_pivot_limit', {
+            'value': shodan_pivot_limit, **_changes_detail(before, {'shodan_pivot_limit': shodan_pivot_limit})})
         flash('Shodan pivot settings saved successfully', 'success')
         return redirect(url_for('admin.settings'))
 
@@ -1368,6 +1472,7 @@ def save_shodan_pivot_settings():
 @admin_required
 def save_sharing_settings():
     """Save sharing settings."""
+    before = dict(_all_settings())
     shared_results_expiry_days = request.form.get('shared_results_expiry_days', '30').strip()
     
     # Validate range (minimum 1 day, max 365 days)
@@ -1376,17 +1481,31 @@ def save_sharing_settings():
     except ValueError:
         shared_results_expiry_days = 30
     
+    # How long each user's past enrichment runs are kept (same form; 1 to 365 days)
+    try:
+        run_history_days = max(1, min(365, int(request.form.get('run_history_days', '7').strip())))
+    except ValueError:
+        run_history_days = 7
+
     with db() as conn:
         cursor = conn.cursor()
-    
+
         cursor.execute('''
-            INSERT OR REPLACE INTO settings (key, value, updated_at) 
+            INSERT OR REPLACE INTO settings (key, value, updated_at)
             VALUES ('shared_results_expiry_days', ?, CURRENT_TIMESTAMP)
         ''', (str(shared_results_expiry_days),))
-    
+        cursor.execute('''
+            INSERT OR REPLACE INTO settings (key, value, updated_at)
+            VALUES ('run_history_days', ?, CURRENT_TIMESTAMP)
+        ''', (str(run_history_days),))
+
         conn.commit()
-    
-        log_audit('setting_modified', 'setting', 'shared_results_expiry_days', {'value': shared_results_expiry_days})
+
+        log_audit('setting_modified', 'setting', 'shared_results_expiry_days', {
+            'value': shared_results_expiry_days,
+            'run_history_days': run_history_days,
+            **_changes_detail(before, {'shared_results_expiry_days': shared_results_expiry_days,
+                                       'run_history_days': run_history_days})})
         flash('Sharing settings saved successfully', 'success')
         return redirect(url_for('admin.settings'))
 
@@ -1395,6 +1514,7 @@ def save_sharing_settings():
 @admin_required
 def save_scalability_settings():
     """Save scalability settings."""
+    before = dict(_all_settings())
     max_adhoc_ips = request.form.get('max_adhoc_ips', '1000').strip()
     max_unique_values = request.form.get('max_unique_values', '10000').strip()
     large_file_warning_threshold = request.form.get('large_file_warning_threshold', '10000').strip()
@@ -1457,13 +1577,14 @@ def save_scalability_settings():
     
         conn.commit()
     
-        log_audit('setting_modified', 'setting', 'scalability_settings', {
+        saved = {
             'max_adhoc_ips': max_adhoc_ips,
             'max_unique_values': max_unique_values,
             'large_file_warning_threshold': large_file_warning_threshold,
             'max_embedded_rows': max_embedded_rows,
             'max_url_fetch_size_mb': max_url_fetch_size_mb
-        })
+        }
+        log_audit('setting_modified', 'setting', 'scalability_settings', {**saved, **_changes_detail(before, saved)})
         flash('Scalability settings saved successfully', 'success')
         return redirect(url_for('admin.settings'))
 
@@ -1472,6 +1593,7 @@ def save_scalability_settings():
 @admin_required
 def save_circl_settings():
     """Save CIRCL Passive DNS settings."""
+    before = dict(_all_settings())
     circl_username = request.form.get('circl_username', '').strip()
     circl_password = request.form.get('circl_password', '').strip()
     circl_disable_active_query = '1' if request.form.get('circl_disable_active_query') == 'on' else '0'
@@ -1546,16 +1668,27 @@ def save_circl_settings():
         log_audit('setting_modified', 'setting', 'circl_pdns', {
             'username_set': bool(circl_username),
             'max_results': circl_max_results,
-            'cache_ttl': circl_cache_ttl
+            'cache_ttl': circl_cache_ttl,
+            **_changes_detail(before, {
+                'circl_username': circl_username,
+                # a blank password field keeps the stored one
+                'circl_password': circl_password or before.get('circl_password'),
+                'circl_disable_active_query': circl_disable_active_query,
+                'circl_max_results': circl_max_results,
+                'circl_cache_ttl': circl_cache_ttl,
+                'circl_concurrency': circl_concurrency,
+                'circl_rate_limit': circl_rate_limit,
+            }, ('circl_password',))
         })
         flash('CIRCL Passive DNS settings saved successfully', 'success')
-        return redirect(url_for('admin.settings'))
+        return redirect(url_for('admin.sources'))
 
 
 @admin_bp.route('/settings/hackertarget', methods=['POST'])
 @admin_required
 def save_hackertarget_settings():
     """Save HackerTarget settings."""
+    before = dict(_all_settings())
     hackertarget_api_key = _submitted_secret('hackertarget_api_key', 'hackertarget_api_key')
     hackertarget_cache_ttl = request.form.get('hackertarget_cache_ttl', '86400').strip()
     
@@ -1582,16 +1715,21 @@ def save_hackertarget_settings():
     
         log_audit('setting_modified', 'setting', 'hackertarget', {
             'api_key_set': bool(hackertarget_api_key),
-            'cache_ttl': hackertarget_cache_ttl
+            'cache_ttl': hackertarget_cache_ttl,
+            **_changes_detail(before, {
+                'hackertarget_api_key': hackertarget_api_key,
+                'hackertarget_cache_ttl': hackertarget_cache_ttl,
+            }, ('hackertarget_api_key',))
         })
         flash('HackerTarget settings saved successfully', 'success')
-        return redirect(url_for('admin.settings'))
+        return redirect(url_for('admin.sources'))
 
 
 @admin_bp.route('/settings/viewdns', methods=['POST'])
 @admin_required
 def save_viewdns_settings():
     """Save ViewDNS settings."""
+    before = dict(_all_settings())
     viewdns_api_key = _submitted_secret('viewdns_api_key', 'viewdns_api_key')
     viewdns_cache_ttl = request.form.get('viewdns_cache_ttl', '86400').strip()
     viewdns_rate_limit = request.form.get('viewdns_rate_limit', '1.0').strip()
@@ -1642,16 +1780,23 @@ def save_viewdns_settings():
             'api_key_set': bool(viewdns_api_key),
             'cache_ttl': viewdns_cache_ttl,
             'rate_limit': viewdns_rate_limit,
-            'max_nodes': viewdns_max_nodes
+            'max_nodes': viewdns_max_nodes,
+            **_changes_detail(before, {
+                'viewdns_api_key': viewdns_api_key,
+                'viewdns_cache_ttl': viewdns_cache_ttl,
+                'viewdns_rate_limit': viewdns_rate_limit,
+                'viewdns_max_nodes': viewdns_max_nodes,
+            }, ('viewdns_api_key',))
         })
         flash('ViewDNS settings saved successfully', 'success')
-        return redirect(url_for('admin.settings'))
+        return redirect(url_for('admin.sources'))
 
 
 @admin_bp.route('/settings/chaos', methods=['POST'])
 @admin_required
 def save_chaos_settings():
     """Save Chaos (ProjectDiscovery) settings."""
+    before = dict(_all_settings())
     chaos_api_key = _submitted_secret('chaos_api_key', 'chaos_api_key')
     chaos_cache_ttl = request.form.get('chaos_cache_ttl', '86400').strip()
     chaos_rate_limit = request.form.get('chaos_rate_limit', '5.0').strip()
@@ -1690,10 +1835,15 @@ def save_chaos_settings():
         log_audit('setting_modified', 'setting', 'chaos', {
             'api_key_set': bool(chaos_api_key),
             'cache_ttl': chaos_cache_ttl,
-            'rate_limit': chaos_rate_limit
+            'rate_limit': chaos_rate_limit,
+            **_changes_detail(before, {
+                'chaos_api_key': chaos_api_key,
+                'chaos_cache_ttl': chaos_cache_ttl,
+                'chaos_rate_limit': chaos_rate_limit,
+            }, ('chaos_api_key',))
         })
         flash('Chaos (ProjectDiscovery) settings saved successfully', 'success')
-        return redirect(url_for('admin.settings'))
+        return redirect(url_for('admin.sources'))
 
 
 @admin_bp.route('/settings/test-maxmind', methods=['POST'])
@@ -1809,15 +1959,26 @@ def test_api_key():
 # Task Management
 # ============================================
 
+def _tasks_page(tab):
+    """The Tasks screen: the schedule and the run log are two tabs of one page."""
+    page = max(request.args.get('page', 1, type=int), 1)
+    per_page = 20
+    with db() as conn:
+        tasks = conn.execute('SELECT * FROM scheduled_tasks ORDER BY task_type').fetchall()
+        total = conn.execute('SELECT COUNT(*) FROM task_logs').fetchone()[0]
+        logs = conn.execute('SELECT * FROM task_logs ORDER BY started_at DESC LIMIT ? OFFSET ?',
+                            (per_page, (page - 1) * per_page)).fetchall()
+    return render_template('admin/tasks.html', tab=tab, tasks=tasks, task_labels=TASK_LABELS,
+                           maxmind_key_set=bool(get_setting('maxmind_api_key')),
+                           logs=logs, page=page, total=total,
+                           total_pages=(total + per_page - 1) // per_page)
+
+
 @admin_bp.route('/tasks')
 @admin_required
 def tasks():
-    """View and manage scheduled tasks."""
-    with db() as conn:
-        cursor = conn.cursor()
-        cursor.execute('SELECT * FROM scheduled_tasks ORDER BY task_type')
-        tasks = cursor.fetchall()
-        return render_template('admin/tasks.html', tasks=tasks)
+    """Scheduled tasks."""
+    return _tasks_page('log' if request.args.get('tab') == 'log' else 'schedule')
 
 
 @admin_bp.route('/tasks/<task_type>/configure', methods=['POST'])
@@ -1881,34 +2042,8 @@ def run_task(task_type):
 @admin_bp.route('/logs')
 @admin_required
 def logs():
-    """View task logs."""
-    page = request.args.get('page', 1, type=int)
-    per_page = 20
-    
-    with db() as conn:
-        cursor = conn.cursor()
-    
-        # Get total count
-        cursor.execute('SELECT COUNT(*) as count FROM task_logs')
-        total = cursor.fetchone()['count']
-    
-        # Get paginated logs
-        offset = (page - 1) * per_page
-        cursor.execute('''
-            SELECT * FROM task_logs 
-            ORDER BY started_at DESC 
-            LIMIT ? OFFSET ?
-        ''', (per_page, offset))
-        logs = cursor.fetchall()
-    
-    
-        total_pages = (total + per_page - 1) // per_page
-    
-        return render_template('admin/logs.html', 
-                               logs=logs, 
-                               page=page, 
-                               total_pages=total_pages,
-                               total=total)
+    """The run log tab of the Tasks screen (the former Task Logs page)."""
+    return _tasks_page('log')
 
 
 @admin_bp.route('/logs/<int:log_id>')
@@ -1924,7 +2059,7 @@ def log_detail(log_id):
             flash('Log entry not found', 'error')
             return redirect(url_for('admin.logs'))
     
-        return render_template('admin/log_detail.html', log=log)
+        return render_template('admin/log_detail.html', log=log, task_labels=TASK_LABELS)
 
 
 @admin_bp.route('/logs/clear', methods=['POST'])
@@ -1943,6 +2078,42 @@ def clear_logs():
 # ============================================
 # Audit Logs
 # ============================================
+
+_UA_BROWSERS = (
+    ('Edge', r'Edg(?:e|A|iOS)?/(\d+)'),
+    ('Opera', r'(?:OPR|Opera)/(\d+)'),
+    ('Firefox', r'(?:Firefox|FxiOS)/(\d+)'),
+    ('Chrome', r'(?:Chrome|CriOS)/(\d+)'),
+    ('Safari', r'Version/(\d+).*Safari/'),
+)
+_UA_SYSTEMS = (
+    ('Android', r'Android'),
+    ('iOS', r'iPhone|iPad|iPod'),
+    ('Windows', r'Windows'),
+    ('macOS', r'Mac OS X|Macintosh'),
+    ('Linux', r'Linux|X11'),
+)
+
+
+def describe_user_agent(ua: str) -> str:
+    """Readable client for a User-Agent header: 'Chrome 126 · Windows', 'curl 8.5.0'.
+    Unrecognised agents give their first product token; an empty header gives ''."""
+    ua = (ua or '').strip()
+    if not ua:
+        return ''
+    if ua.startswith('Mozilla/'):
+        for browser, pattern in _UA_BROWSERS:
+            match = re.search(pattern, ua)
+            if match:
+                system = next((name for name, pat in _UA_SYSTEMS if re.search(pat, ua)), '')
+                return f'{browser} {match.group(1)}' + (f' · {system}' if system else '')
+    return ua.split()[0].replace('/', ' ', 1)
+
+
+def _display_value(value):
+    """Audit change value as text for the template ('' when there was none)."""
+    return '' if value is None else str(value)
+
 
 @admin_bp.route('/audit')
 @admin_required
@@ -1978,6 +2149,25 @@ def audit_logs():
     # Calculate pagination
     total_pages = (total_count + per_page - 1) // per_page
     
+    # Display fields for the template: day heading, time of day, ISO stamp, details as stored
+    for log in logs:
+        ts = str(log.get('timestamp') or '')
+        try:
+            dt = datetime.fromisoformat(ts)
+            log['day'] = f'{dt:%A, %b} {dt.day} {dt.year}'
+            log['time'] = f'{dt:%H:%M:%S}'
+            log['utc_iso'] = f'{dt:%Y-%m-%dT%H:%M:%S}Z'
+        except ValueError:
+            log['day'], log['time'], log['utc_iso'] = ts[:10], ts[11:19] or ts, ''
+        details = log.get('details')
+        log['details_text'] = details if isinstance(details, str) else json.dumps(details, indent=2, ensure_ascii=False) if details else ''
+        log['client'] = describe_user_agent(log.get('user_agent') or '')
+        changes = details.get('changes') if isinstance(details, dict) else None
+        log['changes'] = [
+            {'setting': key, 'previous': _display_value(change.get('from')), 'new': _display_value(change.get('to'))}
+            for key, change in changes.items() if isinstance(change, dict)
+        ] if isinstance(changes, dict) else []
+
     # Get retention setting
     retention_days = get_audit_retention_days()
     
@@ -2062,6 +2252,7 @@ def cleanup_audit_logs():
 @admin_required
 def save_audit_retention():
     """Save audit log retention setting."""
+    before = dict(_all_settings())
     days = request.form.get('audit_retention_days', 90, type=int)
     days = max(7, min(365, days))  # Clamp between 7-365 days
     
@@ -2073,7 +2264,8 @@ def save_audit_retention():
         ''', ('audit_retention_days', str(days)))
         conn.commit()
     
-        log_audit('setting_modified', 'setting', 'audit_retention_days', {'value': days})
+        log_audit('setting_modified', 'setting', 'audit_retention_days', {
+            'value': days, **_changes_detail(before, {'audit_retention_days': days})})
         flash(f'Audit log retention set to {days} days', 'success')
         return redirect(url_for('admin.audit_logs'))
 
@@ -2103,6 +2295,14 @@ def get_api_key():
 
 
 TASK_TYPES = ('update_geo', 'update_ti', 'build_ti', 'backup')
+
+# Display name and one-line description per task type
+TASK_LABELS = {
+    'update_geo': ('Update geolocation', 'Downloads the three GeoLite2 databases from MaxMind'),
+    'update_ti': ('Update threat intel', 'Fetches every configured feed and rebuilds the search index'),
+    'build_ti': ('Build threat intel', 'Rebuilds the threat database from the configured feeds'),
+    'backup': ('Back up databases', 'Copies the admin database to the backup directory'),
+}
 
 
 def claim_task(task_type, runner_id) -> bool:
@@ -2158,11 +2358,16 @@ def execute_task(task_type: str):
 
     binary = get_effective_logboost_path()
     ran = False
+    captured, run_log = '', None  # for per-feed results: what the run printed, and its log file
     try:
         cmd, workdir, extra_env = _task_command(task_type, binary)
+        if task_type in ('update_ti', 'build_ti'):
+            run_log = Path(workdir) / 'logboost.log'
+            run_log = (run_log, run_log.stat().st_size if run_log.is_file() else 0)
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=3600,  # 1 hour
                                 cwd=workdir, env={**os.environ, **extra_env})
         ran = True
+        captured = f'{result.stdout or ""}\n{result.stderr or ""}'
         status = 'success' if result.returncode == 0 else 'failed'
         output, error = result.stdout, (None if result.returncode == 0 else result.stderr)
     except subprocess.TimeoutExpired:
@@ -2184,6 +2389,10 @@ def execute_task(task_type: str):
                 conn.execute('UPDATE scheduled_tasks SET next_run = ? WHERE task_type = ?',
                              (completed_at + timedelta(hours=task['interval_hours']), task_type))
         conn.commit()
+
+    if run_log:
+        # Also after a failed or timed-out run: the feeds it did reach still have a result
+        record_task_feed_results(captured, *run_log)
 
     if status == 'success' and task_type in ('update_ti', 'build_ti'):
         # LogBoost may have rebuilt threats.db; make sure the Intel Browser indexes exist again
@@ -2219,6 +2428,11 @@ def _sweep_session_dirs():
     sweep_session_dirs()
 
 
+def _cleanup_old_runs():
+    from app import cleanup_old_runs  # lazy: app imports this module
+    cleanup_old_runs()
+
+
 def run_housekeeping():
     """Hourly clean-up: audit retention, expired cache rows and shares, free space, and upload/
     output directories of sessions that ended without a logout. Steps are independent."""
@@ -2229,6 +2443,7 @@ def run_housekeeping():
         clear_expired_viewdns_cache, clear_expired_chaos_cache, clear_expired_shared_results,
         _vacuum_if_worthwhile,
         _sweep_session_dirs,
+        _cleanup_old_runs,
     )
     for step in steps:
         try:
@@ -3206,6 +3421,143 @@ def update_feeds(change):
         return result
 
 
+# ---- Per-feed health (feed_status) ----
+
+FEED_STALE_AFTER = timedelta(hours=48)
+_FEED_RESULT_RE = re.compile(r'(Successfully Downloaded:|Error Getting File from)\s*([^\s"]+)(.*)')
+_ANSI_RE = re.compile(r'\x1b\[[0-9;]*m')
+
+
+def parse_feed_fetch_results(text):
+    """{feed URL: (ok, detail)} from LogBoost's per-feed download messages, wherever they sit in
+    `text`: plain console lines or JSON log lines. The last message about a URL wins."""
+    results = {}
+    for line in _ANSI_RE.sub('', text or '').splitlines():
+        if 'Successfully Downloaded:' not in line and 'Error Getting File from' not in line:
+            continue
+        line = line.strip()
+        raw_json = False
+        if line.startswith('{'):
+            try:
+                entry = json.loads(line)
+            except ValueError:
+                entry = None
+            if isinstance(entry, dict):
+                line = ' '.join(str(entry[key]) for key in ('message', 'error') if entry.get(key))
+            else:
+                raw_json = True
+        match = _FEED_RESULT_RE.search(line)
+        url = match.group(2).rstrip('.,;:!)\'') if match else ''
+        if not url:
+            continue
+        if match.group(1).startswith('Successfully'):
+            results[url] = (True, '')
+            continue
+        detail = match.group(3)
+        if raw_json:  # a JSON line that did not parse: stop at the end of the message string
+            detail = re.split(r'(?<!\\)"', detail)[0].replace('\\"', '"')
+        results[url] = (False, detail.strip(' \t:,-')[:500] or 'Download failed')
+    return results
+
+
+def _configured_feed_names():
+    """{url: name} of the configured feeds; empty when feed_config.json cannot be read."""
+    try:
+        return {str(feed.get('url') or '').strip(): feed.get('name')
+                for feed in load_feeds() if isinstance(feed, dict)}
+    except (OSError, ValueError):
+        return {}
+
+
+def record_feed_statuses(results, source):
+    """Store {url: (ok, detail)} in feed_status. A success also moves last_ok_at; a failure keeps it."""
+    if not results:
+        return
+    names = _configured_feed_names()
+    now = datetime.now()
+    with db() as conn:
+        conn.executemany('''
+            INSERT INTO feed_status (url, name, ok, detail, checked_at, last_ok_at, source)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(url) DO UPDATE SET
+                name = COALESCE(excluded.name, feed_status.name), ok = excluded.ok,
+                detail = excluded.detail, checked_at = excluded.checked_at,
+                last_ok_at = COALESCE(excluded.last_ok_at, feed_status.last_ok_at),
+                source = excluded.source
+        ''', [(url, names.get(url), int(bool(ok)), detail, now, now if ok else None, source)
+              for url, (ok, detail) in results.items()])
+        conn.commit()
+
+
+def record_task_feed_results(captured, log_path=None, log_offset=0):
+    """Record the per-feed results of a finished threat-intel run. `captured` is what the run
+    printed; when that names no feed, the part of LogBoost's log file written during the run
+    (from `log_offset`) is read instead. Never raises: a task must not fail over this."""
+    try:
+        results = parse_feed_fetch_results(captured)
+        if not results and log_path is not None:
+            try:
+                with open(log_path, 'rb') as fh:
+                    if os.fstat(fh.fileno()).st_size >= log_offset:  # else rotated: read it all
+                        fh.seek(log_offset)
+                    results = parse_feed_fetch_results(fh.read().decode('utf-8', 'replace'))
+            except OSError:
+                pass  # no log file
+        record_feed_statuses(results, 'fetch')
+        return results
+    except Exception:
+        logger.exception('Could not record per-feed fetch results')
+        return {}
+
+
+def _stored_datetime(value):
+    """A TIMESTAMP column value as a datetime, or None."""
+    if isinstance(value, datetime):
+        return value
+    try:
+        return datetime.fromisoformat(str(value))
+    except ValueError:
+        return None
+
+
+def _short_feed_error(detail):
+    """A failure detail cut down to fit the Status column."""
+    detail = (detail or '').strip()
+    code = (re.search(r'(?i)\b(?:http|status(?: code)?)[ :=]{1,3}([1-5]\d\d)\b(?!\.)', detail)
+            or re.search(r'\b([45]\d\d) [A-Z][a-z]', detail))
+    if code:
+        return f'HTTP {code.group(1)}'
+    if len(detail) > 40:
+        return detail[:40].rstrip() + '…'
+    return detail or 'Failing'
+
+
+def feed_health(feeds, entries=None):
+    """One dict per feed, in order, for the Threat feeds page: state (none, healthy, stale,
+    failing), dot colour, label, title, fetched (last success) and entries (None = unknown)."""
+    with db() as conn:
+        stored = {row['url']: row for row in conn.execute('SELECT * FROM feed_status')}
+    now = datetime.now()
+    health = []
+    for feed in feeds:
+        name = feed.get('name')
+        row = stored.get(str(feed.get('url') or '').strip())
+        last_ok = _stored_datetime(row['last_ok_at']) if row and row['last_ok_at'] else None
+        item = {'state': 'none', 'dot': 'grey', 'label': 'Not fetched yet', 'title': '', 'fetched': last_ok,
+                'entries': entries.get(name) if entries is not None and isinstance(name, str) else None}
+        if row and not row['ok']:
+            checked = _stored_datetime(row['checked_at'])
+            item.update(state='failing', dot='red', label=_short_feed_error(row['detail']),
+                        title=(row['detail'] or 'Failed') + (f' · checked {checked:%Y-%m-%d %H:%M}' if checked else ''))
+        elif row and last_ok and now - last_ok > FEED_STALE_AFTER:
+            item.update(state='stale', dot='amber', label=f'Stale · {(now - last_ok).days}d',
+                        title=f'Last fetched {last_ok:%Y-%m-%d %H:%M}')
+        elif row:
+            item.update(state='healthy', dot='green', label='Healthy')
+        health.append(item)
+    return health
+
+
 # ============================================
 # Scalability Settings
 # ============================================
@@ -3308,7 +3660,12 @@ def get_effective_logboost_path() -> str:
 @admin_bp.route('/setup')
 @admin_required
 def setup():
-    """LogBoost Setup page -- Docker mode."""
+    """Old LogBoost Setup URL: the binary card is on the Data sources page now."""
+    return redirect(url_for('admin.sources'))
+
+
+def _binary_status():
+    """LogBoost binary status for the Data sources page -- Docker mode."""
     binary_path = get_effective_logboost_path()
     binary_exists = Path(binary_path).exists()
     override_path = get_setting('logboost_override_path')
@@ -3317,7 +3674,7 @@ def setup():
     last_checked = get_setting('github_latest_checked', None)
     cached_latest = get_setting('github_latest_version', None)
 
-    return render_template('admin/setup.html',
+    return dict(
         bundled_version=BUNDLED_LOGBOOST_VERSION,
         binary_path=binary_path,
         binary_exists=binary_exists,
@@ -3442,8 +3799,30 @@ def threat_intel():
     # Unique tags for suggestions
     all_tags = {tag for feed in feeds for tag in feed.get('type', [])}
 
+    # Entries per feed come from threats.db, whose source names are the feed names
+    stats = None
+    try:
+        from app import _get_intel_stats  # lazy: app imports this module
+        stats = _get_intel_stats()
+    except Exception:
+        logger.exception('Could not read threat intel statistics')
+    entries = None
+    if stats:
+        entries = {}
+        for source in stats.get('sources', []):
+            entries[source['name']] = entries.get(source['name'], 0) + source['count']
+    health = feed_health(feeds, entries)
+    with db() as conn:
+        intel_updated = conn.execute("SELECT MAX(last_run) FROM scheduled_tasks "
+                                     "WHERE task_type IN ('update_ti', 'build_ti')").fetchone()[0]
+
     return render_template('admin/threat_intel.html',
                            feeds=feeds,
+                           health=health,
+                           health_counts={state: sum(1 for item in health if item['state'] == state)
+                                          for state in ('healthy', 'failing', 'stale', 'none')},
+                           indexed_ips=stats.get('unique_ips') if stats else None,
+                           intel_updated=intel_updated,
                            error=error,
                            all_tags=sorted(all_tags),
                            logboost_path=get_effective_logboost_path())
@@ -3579,6 +3958,16 @@ def add_feed():
     return jsonify({'success': True, 'feed': new_feed, 'index': len(feeds) - 1})
 
 
+def _feed_test_result(url, body):
+    """The test-feed response. The result for a configured feed is also kept in feed_status."""
+    try:
+        if url in _configured_feed_names():
+            record_feed_statuses({url: (body['ok'], body.get('error') or '')}, 'test')
+    except Exception:
+        logger.exception('Could not record the test result for a feed')
+    return jsonify(body), 200
+
+
 @admin_bp.route('/api/threat-intel/test-feed', methods=['POST'])
 @admin_required
 def test_feed():
@@ -3625,7 +4014,7 @@ def test_feed():
         content_length = int(cl_header) if cl_header.isdigit() else None
         ok = 200 <= resp.status_code < 400
 
-        return jsonify({
+        return _feed_test_result(url, {
             'ok': ok,
             'status_code': resp.status_code,
             'content_length': content_length,
@@ -3635,19 +4024,19 @@ def test_feed():
             # Redirects are reported, not followed: the target has not been through the SSRF check.
             'error': None if ok else f'HTTP {resp.status_code}',
             'redirect': resp.headers.get('Location') if resp.is_redirect else None,
-        }), 200
+        })
     except requests.exceptions.Timeout:
-        return jsonify({'ok': False, 'error': f'Timeout after {timeout}s',
-                        'status_code': None, 'elapsed_ms': _elapsed()}), 200
+        return _feed_test_result(url, {'ok': False, 'error': f'Timeout after {timeout}s',
+                        'status_code': None, 'elapsed_ms': _elapsed()})
     except requests.exceptions.SSLError as e:
-        return jsonify({'ok': False, 'error': f'SSL error: {str(e)[:120]}',
-                        'status_code': None, 'elapsed_ms': _elapsed()}), 200
+        return _feed_test_result(url, {'ok': False, 'error': f'SSL error: {str(e)[:120]}',
+                        'status_code': None, 'elapsed_ms': _elapsed()})
     except requests.exceptions.ConnectionError as e:
-        return jsonify({'ok': False, 'error': f'Connection error: {str(e)[:120]}',
-                        'status_code': None, 'elapsed_ms': _elapsed()}), 200
+        return _feed_test_result(url, {'ok': False, 'error': f'Connection error: {str(e)[:120]}',
+                        'status_code': None, 'elapsed_ms': _elapsed()})
     except Exception as e:
-        return jsonify({'ok': False, 'error': f'{type(e).__name__}: {str(e)[:120]}',
-                        'status_code': None, 'elapsed_ms': _elapsed()}), 200
+        return _feed_test_result(url, {'ok': False, 'error': f'{type(e).__name__}: {str(e)[:120]}',
+                        'status_code': None, 'elapsed_ms': _elapsed()})
 
 
 def init_admin(app, csrf=None):

@@ -1,148 +1,93 @@
-{% extends "admin/base.html" %}
-
-{% block title %}Scheduled Tasks{% endblock %}
-
+{% extends 'base.html' %}
+{% set active = 'tasks' %}
+{% block title %}Tasks · LogBoost{% endblock %}
+{% macro status(log) -%}
+  {% if log.status == 'success' %}<span class="dot green">Done</span>
+  {% elif log.status == 'running' %}<span class="dot amber">Running</span>
+  {% else %}<span class="tag red">{{ log.status | capitalize }}</span>{% endif %}
+{%- endmacro %}
 {% block content %}
-<div class="admin-page">
-    <div class="page-header">
-        <h1>Scheduled Tasks</h1>
-        <p>Configure automatic updates for geolocation data, threat intelligence, and backups</p>
-    </div>
-    
-    <div class="tasks-grid">
-        {% for task in tasks %}
-        <div class="task-card {% if task.enabled %}enabled{% endif %}">
-            <div class="task-card-header">
-                <div class="task-icon">
-                    {% if task.task_type == 'update_geo' %}
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <circle cx="12" cy="12" r="10"/>
-                        <line x1="2" y1="12" x2="22" y2="12"/>
-                        <path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/>
-                    </svg>
-                    {% elif task.task_type == 'update_ti' %}
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-                    </svg>
-                    {% elif task.task_type == 'backup' %}
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
-                        <polyline points="7 10 12 15 17 10"/>
-                        <line x1="12" y1="15" x2="12" y2="3"/>
-                    </svg>
-                    {% else %}
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <circle cx="12" cy="12" r="10"/>
-                        <polyline points="12 6 12 12 16 14"/>
-                    </svg>
-                    {% endif %}
-                </div>
-                <div class="task-title">
-                    <h3>
-                        {% if task.task_type == 'update_geo' %}
-                        Update Geolocation Data
-                        {% elif task.task_type == 'update_ti' %}
-                        Update Threat Intelligence
-                        {% elif task.task_type == 'backup' %}
-                        Backup Databases
-                        {% else %}
-                        {{ task.task_type }}
-                        {% endif %}
-                    </h3>
-                    <span class="task-description">
-                        {% if task.task_type == 'update_geo' %}
-                        Downloads latest MaxMind GeoLite2 databases
-                        {% elif task.task_type == 'update_ti' %}
-                        Updates threat indicator feeds from configured sources
-                        {% elif task.task_type == 'backup' %}
-                        Backs up admin and threat intelligence databases
-                        {% endif %}
-                    </span>
-                </div>
-                <div class="task-status-badge">
-                    {% if task.enabled %}
-                    <span class="badge success">Enabled</span>
-                    {% else %}
-                    <span class="badge muted">Disabled</span>
-                    {% endif %}
-                </div>
-            </div>
-            
-            <div class="task-card-body">
-                <form action="{{ url_for('admin.configure_task', task_type=task.task_type) }}" method="POST" class="task-config-form">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label for="interval_{{ task.task_type }}">Run Every</label>
-                            <div class="interval-input">
-                                <input type="number" 
-                                       id="interval_{{ task.task_type }}" 
-                                       name="interval_hours" 
-                                       value="{{ task.interval_hours }}" 
-                                       min="1" 
-                                       max="720">
-                                <span class="interval-unit">hours</span>
-                            </div>
-                        </div>
-                        
-                        <div class="form-group">
-                            <label class="toggle-label">
-                                <input type="checkbox" name="enabled" {% if task.enabled %}checked{% endif %}>
-                                <span class="toggle-switch"></span>
-                                <span class="toggle-text">Enable Schedule</span>
-                            </label>
-                        </div>
-                    </div>
-                    
-                    <div class="task-timing-info">
-                        {% if task.last_run %}
-                        <div class="timing-item">
-                            <span class="timing-label">Last Run:</span>
-                            <span class="timing-value">{{ task.last_run }}</span>
-                        </div>
-                        {% endif %}
-                        {% if task.next_run and task.enabled %}
-                        <div class="timing-item">
-                            <span class="timing-label">Next Run:</span>
-                            <span class="timing-value">{{ task.next_run }}</span>
-                        </div>
-                        {% endif %}
-                    </div>
-                    
-                    <div class="task-actions">
-                        <button type="submit" class="btn primary">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/>
-                                <polyline points="17 21 17 13 7 13 7 21"/>
-                                <polyline points="7 3 7 8 15 8"/>
-                            </svg>
-                            Save Configuration
-                        </button>
-                </form>
-                        
-                        <form action="{{ url_for('admin.run_task', task_type=task.task_type) }}" method="POST" class="inline-form">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                            <button type="submit" class="btn secondary">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                    <polygon points="5 3 19 12 5 21 5 3"/>
-                                </svg>
-                                Run Now
-                            </button>
-                        </form>
-                    </div>
-            </div>
-        </div>
-        {% endfor %}
-    </div>
-    
-    <div class="info-box">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <circle cx="12" cy="12" r="10"/>
-            <path d="M12 16v-4M12 8h.01"/>
-        </svg>
-        <div>
-            <strong>Note:</strong> The scheduler checks for tasks every minute. When you enable a task or change its interval, the next run time will be calculated from the current time.
-        </div>
-    </div>
+<div class="head">
+  <div>
+    <h1>Tasks</h1>
+    <div class="sub">Scheduled jobs and their history. A task never runs twice at the same time.</div>
+  </div>
 </div>
+<div class="tabs">
+  <a href="{{ url_for('admin.tasks') }}"{% if tab == 'schedule' %} class="on" aria-current="page"{% endif %}>Schedule</a>
+  <a href="{{ url_for('admin.tasks', tab='log') }}"{% if tab == 'log' %} class="on" aria-current="page"{% endif %}>Run log <span class="mono faint" style="font-size:11px">{{ total }}</span></a>
+</div>
+
+{% if tab == 'schedule' %}
+<div class="card">
+  {% for task in tasks %}
+  {% set label = task_labels.get(task.task_type, (task.task_type, '')) %}
+  {% set needs_key = task.task_type == 'update_geo' and not maxmind_key_set %}
+  <div class="line">
+    <div class="grow">
+      <b>{{ label[0] }}</b>
+      <small>{{ label[1] }}</small>
+      {% if needs_key %}<small class="amber">Needs a MaxMind key · <a href="{{ url_for('admin.sources') }}">Add key</a></small>{% endif %}
+      <small class="faint">Last run {{ task.last_run | ago if task.last_run else 'never' }}{% if task.enabled and task.next_run %} · next {{ task.next_run | ago }}{% else %} · schedule off{% endif %}</small>
+    </div>
+    <form class="row" method="post" action="{{ url_for('admin.configure_task', task_type=task.task_type) }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <label class="muted" style="font-size:13px" for="interval_{{ task.task_type }}">Every</label>
+      <input class="input mono" type="number" id="interval_{{ task.task_type }}" name="interval_hours" value="{{ task.interval_hours }}" min="1" max="720" style="width:76px;height:34px">
+      <span class="muted" style="font-size:13px">hours</span>
+      <input type="checkbox" class="toggle" name="enabled" {{ 'checked' if task.enabled }} aria-label="Run {{ label[0] }} on a schedule">
+      <button type="submit" class="btn sm">Save</button>
+    </form>
+    <form method="post" action="{{ url_for('admin.run_task', task_type=task.task_type) }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button type="submit" class="btn sm"{% if needs_key %} disabled title="Add a MaxMind key first"{% endif %}>Run now</button>
+    </form>
+  </div>
+  {% endfor %}
+</div>
+<div class="muted" style="font-size:13px">The scheduler checks every minute. When you turn a schedule on or change its interval, the next run is counted from now.</div>
+
+{% else %}
+<div class="row">
+  <span class="muted" style="font-size:13px">{{ total }} run{{ 's' if total != 1 }} recorded</span>
+  <span class="grow"></span>
+  {% if total %}
+  <form method="post" action="{{ url_for('admin.clear_logs') }}" data-confirm="Delete all {{ total }} task log entries? This cannot be undone.">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" class="btn sm danger">Clear log</button>
+  </form>
+  {% endif %}
+</div>
+<div class="card">
+  {% if logs %}
+  <table>
+    <thead><tr><th>Run</th><th>Task</th><th>Started</th><th>Duration</th><th>Status</th><th></th></tr></thead>
+    <tbody>
+      {% for log in logs %}
+      <tr{% if log.status == 'failed' %} class="fail"{% endif %}>
+        <td class="mono">#{{ log.id }}</td>
+        <td>{{ task_labels.get(log.task_type, (log.task_type,))[0] }}</td>
+        <td class="muted" title="{{ log.started_at }}">{{ log.started_at | ago }}</td>
+        <td class="mono">{{ duration(log.started_at, log.completed_at) or '—' }}</td>
+        <td>{{ status(log) }}</td>
+        <td class="right"><a href="{{ url_for('admin.log_detail', log_id=log.id) }}">Details</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty">No runs yet. Start one from the Schedule tab.</div>
+  {% endif %}
+</div>
+{% if total_pages > 1 %}
+<div class="row muted" style="font-size:13px;justify-content:space-between">
+  <span>Page {{ page }} of {{ total_pages }}</span>
+  <span class="row">
+    {% if page > 1 %}<a class="btn sm" href="{{ url_for('admin.tasks', tab='log', page=page - 1) }}">‹ Prev</a>{% endif %}
+    {% if page < total_pages %}<a class="btn sm" href="{{ url_for('admin.tasks', tab='log', page=page + 1) }}">Next ›</a>{% endif %}
+  </span>
+</div>
+{% endif %}
+{% endif %}
 {% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='js/app.js') }}"></script>{% endblock %}

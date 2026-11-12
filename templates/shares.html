@@ -1,71 +1,90 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Shared results — LogBoost</title>
-    <style>
-        body { margin: 0; padding: 32px; background: #0b0f14; color: #d7dde5; font: 14px/1.5 system-ui, sans-serif; }
-        main { max-width: 960px; margin: 0 auto; }
-        h1 { font-size: 20px; margin: 0 0 4px; }
-        p { color: #8b96a5; margin: 0 0 20px; }
-        a { color: #00cc6a; }
-        table { width: 100%; border-collapse: collapse; }
-        th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #1f2731; vertical-align: middle; }
-        th { color: #8b96a5; font-weight: 500; }
-        td.link { font-family: ui-monospace, monospace; font-size: 12px; word-break: break-all; }
-        button { background: none; border: 1px solid #a33; color: #f77; padding: 4px 10px; border-radius: 4px; cursor: pointer; }
-        button:hover { background: #a33; color: #fff; }
-        .flash { padding: 8px 12px; border-radius: 4px; margin-bottom: 16px; border: 1px solid #1f2731; }
-        .flash.success { border-color: #00cc6a; }
-        .flash.error { border-color: #a33; }
-    </style>
-</head>
-<body>
-<main>
-    <h1>{{ 'All shared results' if admin_view else 'My shared results' }}</h1>
-    <p>Anyone signed in to this LogBoost instance can open these links until they expire or are deleted.
-       <a href="{{ url_for('index') }}">Back to LogBoost</a></p>
+{% extends 'base.html' %}
+{% set active = 'shares' %}
+{% block title %}Shares · LogBoost{% endblock %}
+{% block content %}
+<div class="head">
+  <div>
+    <h1>Shares</h1>
+    <div class="sub">{{ 'Every share link on this instance.' if admin_view else 'Links you have created.' }} Anyone with the link must still sign in.</div>
+  </div>
+</div>
 
-    {% for category, message in get_flashed_messages(with_categories=true) %}
-    <div class="flash {{ category }}">{{ message }}</div>
-    {% endfor %}
+<div class="card">
+  <div class="card-h"><h2>Shared results</h2><span class="muted">Links work until they expire or are deleted</span></div>
+  {% if shares %}
+  <div style="overflow-x:auto">
+  <table>
+    <thead>
+      <tr>
+        <th>File</th>
+        {% if admin_view %}<th>Owner</th>{% endif %}
+        <th class="num">Rows</th>
+        <th>Created (UTC)</th>
+        <th>Expires (UTC)</th>
+        <th aria-label="Actions"></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for share in shares %}
+      {% set share_url = url_for('view_shared_results', share_id=share.id, _external=True) %}
+      <tr>
+        <td>
+          <b>{{ share.filename }}</b>
+          <small style="overflow-wrap:anywhere"><a href="{{ url_for('view_shared_results', share_id=share.id) }}">{{ share_url }}</a></small>
+        </td>
+        {% if admin_view %}<td>{{ share.username or '(deleted user)' }}</td>{% endif %}
+        <td class="num">{{ '{:,}'.format(share.row_count) if share.row_count is not none else '—' }}</td>
+        <td class="mono muted">{{ share.created_at }}</td>
+        <td class="mono muted">{{ share.expires_at }}</td>
+        <td>
+          <div class="row" style="justify-content:flex-end">
+            <a class="btn sm" href="{{ url_for('view_shared_results', share_id=share.id) }}">Open</a>
+            <button type="button" class="btn sm" data-copy="{{ share_url }}">Copy link</button>
+            <form method="post" action="{{ url_for('delete_share', share_id=share.id) }}" data-confirm="Delete the share link for {{ share.filename }}? People who have the link will no longer be able to open it.">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button type="submit" class="btn sm danger">Delete</button>
+            </form>
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}
+  <div class="empty">No active share links.</div>
+  {% endif %}
+</div>
 
-    {% if shares %}
-    <table>
-        <thead>
-            <tr>
-                <th>File</th>
-                {% if admin_view %}<th>Owner</th>{% endif %}
-                <th>Rows</th>
-                <th>Created (UTC)</th>
-                <th>Expires (UTC)</th>
-                <th>Link</th>
-                <th></th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for share in shares %}
-            <tr>
-                <td>{{ share.filename }}</td>
-                {% if admin_view %}<td>{{ share.username or '(deleted user)' }}</td>{% endif %}
-                <td>{{ '{:,}'.format(share.row_count) if share.row_count is not none else '—' }}</td>
-                <td>{{ share.created_at }}</td>
-                <td>{{ share.expires_at }}</td>
-                <td class="link"><a href="{{ url_for('view_shared_results', share_id=share.id) }}">{{ url_for('view_shared_results', share_id=share.id, _external=True) }}</a></td>
-                <td>
-                    <form method="POST" action="{{ url_for('delete_share', share_id=share.id) }}">
-                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                        <button type="submit">Delete</button>
-                    </form>
-                </td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-    {% else %}
-    <p>No active share links.</p>
-    {% endif %}
-</main>
-</body>
-</html>
+<div class="card">
+  <div class="card-h"><h2>Saved graphs</h2><span class="muted">A shared graph opens as a copy for other people</span></div>
+  {% if graphs %}
+  <table>
+    <thead>
+      <tr>
+        <th>Graph</th>
+        <th>Saved (UTC)</th>
+        <th>Link sharing</th>
+        <th aria-label="Actions"></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for graph in graphs %}
+      <tr>
+        <td><b>{{ graph.name }}</b></td>
+        <td class="mono muted">{{ graph.updated_at }}</td>
+        <td>{% if graph.is_shared %}<span class="dot green">Link sharing on</span>{% else %}<span class="dot grey">Off</span>{% endif %}</td>
+        <td class="right"><a class="btn sm" href="{{ url_for('index', graph=graph.id) }}">Open</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty">No saved graphs. Save one from the Graph view and it appears here.</div>
+  {% endif %}
+</div>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/app.js') }}"></script>
+<script src="{{ url_for('static', filename='js/shares.js') }}"></script>
+{% endblock %}
