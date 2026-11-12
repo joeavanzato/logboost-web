@@ -10,6 +10,9 @@ import sqlite3
 import hashlib
 import hmac
 import sys
+import ipaddress
+import shutil
+import tempfile
 import secrets
 import subprocess
 import threading
@@ -37,8 +40,6 @@ DB_PATH = Path(os.environ.get('LOGBOOST_DB_PATH', Path(__file__).parent / 'logbo
 # DEFAULT_ADMIN_USER = 'admin'
 # DEFAULT_ADMIN_PASS = 'changeme'
 
-# LogBoost binary path
-LOGBOOST_BINARY = os.environ.get('LOGBOOST_PATH', 'LogBoost')
 
 # Bundled LogBoost version (matches Dockerfile ARG LOGBOOST_VERSION)
 BUNDLED_LOGBOOST_VERSION = "prod_1_5_0"
@@ -586,18 +587,16 @@ def cleanup_old_audit_logs():
     """Delete audit logs older than the retention period."""
     try:
         retention_days = get_audit_retention_days()
-        cutoff_date = datetime.now() - timedelta(days=retention_days)
-        
         with db() as conn:
-            cursor = conn.cursor()
-            cursor.execute('DELETE FROM audit_logs WHERE timestamp < ?', (cutoff_date.isoformat(),))
+            # Timestamps are stored by SQLite in UTC, so SQLite computes the cutoff too
+            cursor = conn.execute("DELETE FROM audit_logs WHERE timestamp < datetime('now', ?)",
+                                  (f'-{int(retention_days)} days',))
             deleted_count = cursor.rowcount
             conn.commit()
-        
-            if deleted_count > 0:
-                logger.info("[Audit] Cleaned up %d audit log entries older than %d days", deleted_count, retention_days)
-        
-            return deleted_count
+
+        if deleted_count > 0:
+            logger.info("[Audit] Cleaned up %d audit log entries older than %d days", deleted_count, retention_days)
+        return deleted_count
     except Exception as e:
         logger.error("[Audit] Failed to cleanup old logs: %s", e)
         return 0
@@ -629,7 +628,8 @@ def get_audit_logs(limit=100, offset=0, action_filter=None, user_filter=None, st
             params.append(start_date)
     
         if end_date:
-            where_clauses.append('timestamp <= ?')
+            # end_date is a calendar day (UTC) and includes that whole day
+            where_clauses.append("timestamp < datetime(?, '+1 day')")
             params.append(end_date)
     
         where_sql = ' AND '.join(where_clauses) if where_clauses else '1=1'
@@ -672,6 +672,22 @@ def get_audit_action_types():
 # Dashboard
 # ============================================
 
+INTEL_INDEXES = ('idx_ips_ip', 'idx_ips_feed', 'idx_ips_category')
+
+
+def _intel_indexes_present(threat_db_path) -> bool:
+    """Whether threats.db has the indexes the Intel Browser relies on (read-only check)."""
+    try:
+        conn = sqlite3.connect(f'file:{Path(threat_db_path).as_posix()}?mode=ro', uri=True, timeout=5)
+        try:
+            names = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'index'")}
+        finally:
+            conn.close()
+        return set(INTEL_INDEXES) <= names
+    except sqlite3.Error:
+        return True  # cannot tell (locked mid-update): say nothing rather than raise a false alarm
+
+
 @admin_bp.route('/')
 @admin_bp.route('/dashboard')
 @admin_required
@@ -712,6 +728,7 @@ def dashboard():
         if not threat_db_path.exists():
             threat_db_path = Path(os.environ.get('THREAT_DB_DIR', '.')) / 'threats.db'
         threat_db_missing = not threat_db_path.exists()
+        intel_indexes_missing = not threat_db_missing and not _intel_indexes_present(threat_db_path)
 
         return render_template('admin/dashboard.html',
                                tasks=tasks,
@@ -719,7 +736,8 @@ def dashboard():
                                maxmind_key_set=maxmind_key_set,
                                shodan_key_set=shodan_key_set,
                                account_count=account_count,
-                               threat_db_missing=threat_db_missing)
+                               threat_db_missing=threat_db_missing,
+                               intel_indexes_missing=intel_indexes_missing)
 
 
 # ============================================
@@ -1209,33 +1227,42 @@ def save_shodan_key():
 @admin_bp.route('/settings/dns', methods=['POST'])
 @admin_required
 def save_dns_settings():
-    """Save DNS settings."""
-    dns_servers = request.form.get('dns_servers', '8.8.8.8,8.8.4.4,1.1.1.1').strip()
-    dns_cache_ttl = request.form.get('dns_cache_ttl', '3600').strip()
-    dns_timeout = request.form.get('dns_timeout', '5').strip()
-    dns_max_domains = request.form.get('dns_max_domains', '100').strip()
-    
-    with db() as conn:
-        cursor = conn.cursor()
-    
-        settings_to_save = [
-            ('dns_servers', dns_servers),
-            ('dns_cache_ttl', dns_cache_ttl),
-            ('dns_timeout', dns_timeout),
-            ('dns_max_domains', dns_max_domains),
-        ]
-    
-        for key, value in settings_to_save:
-            cursor.execute('''
-                INSERT OR REPLACE INTO settings (key, value, updated_at) 
-                VALUES (?, ?, CURRENT_TIMESTAMP)
-            ''', (key, value))
-    
-        conn.commit()
-    
-        log_audit('setting_modified', 'setting', 'dns', {'dns_servers': dns_servers, 'dns_cache_ttl': dns_cache_ttl})
-        flash('DNS settings saved successfully', 'success')
+    """Save DNS settings. Servers must be IP addresses; numbers are clamped to the ranges the
+    resolver accepts, so a bad value can never be stored."""
+    servers = [s.strip() for s in request.form.get('dns_servers', '').split(',') if s.strip()]
+    invalid = []
+    for server in servers:
+        try:
+            ipaddress.ip_address(server)
+        except ValueError:
+            invalid.append(server)
+    if not servers or invalid:
+        flash('DNS servers must be a comma-separated list of IP addresses'
+              + (f" (not valid: {', '.join(invalid)})" if invalid else ''), 'error')
         return redirect(url_for('admin.settings'))
+
+    def clamped(field, default, lo, hi):
+        try:
+            return max(lo, min(hi, int(request.form.get(field, default))))
+        except (TypeError, ValueError):
+            return default
+
+    values = {
+        'dns_servers': ','.join(servers),
+        'dns_cache_ttl': clamped('dns_cache_ttl', 3600, 0, 30 * 86400),
+        'dns_timeout': clamped('dns_timeout', 5, 1, 60),
+        'dns_max_domains': clamped('dns_max_domains', 100, 1, 10000),
+    }
+    with db() as conn:
+        for key, value in values.items():
+            conn.execute('INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)',
+                         (key, str(value)))
+        conn.commit()
+
+    log_audit('setting_modified', 'setting', 'dns',
+              {'dns_servers': values['dns_servers'], 'dns_cache_ttl': values['dns_cache_ttl']})
+    flash('DNS settings saved successfully', 'success')
+    return redirect(url_for('admin.settings'))
 
 
 @admin_bp.route('/settings/concurrency', methods=['POST'])
@@ -1797,6 +1824,10 @@ def tasks():
 @admin_required
 def configure_task(task_type):
     """Configure a scheduled task."""
+    if task_type not in TASK_TYPES:
+        flash('Unknown task', 'error')
+        return redirect(url_for('admin.tasks'))
+
     interval_hours = request.form.get('interval_hours', type=int)
     enabled = request.form.get('enabled') == 'on'
     
@@ -1827,12 +1858,17 @@ def configure_task(task_type):
 @admin_bp.route('/tasks/<task_type>/run', methods=['POST'])
 @admin_required
 def run_task(task_type):
-    """Run a task immediately."""
-    # Start task in background thread
-    thread = threading.Thread(target=execute_task, args=(task_type,))
-    thread.daemon = True
-    thread.start()
-    
+    """Run a task immediately, unless it is already running (scheduled or manual)."""
+    if task_type not in TASK_TYPES:
+        flash('Unknown task', 'error')
+        return redirect(url_for('admin.tasks'))
+
+    if not claim_task(task_type, scheduler.runner_id):
+        flash(f'Task "{task_type}" is already running', 'error')
+        return redirect(url_for('admin.logs'))
+
+    threading.Thread(target=scheduler._run_task_with_cleanup, args=(task_type,), daemon=True).start()
+
     log_audit('task_run_manual', 'task', task_type)
     flash(f'Task "{task_type}" started. Check logs for progress.', 'success')
     return redirect(url_for('admin.logs'))
@@ -2066,117 +2102,139 @@ def get_api_key():
         return api_key
 
 
-def execute_task(task_type: str):
-    """Execute a LogBoost task."""
+TASK_TYPES = ('update_geo', 'update_ti', 'build_ti', 'backup')
+
+
+def claim_task(task_type, runner_id) -> bool:
+    """Atomically mark a task as running; False when it already is. The scheduler and
+    "Run now" both go through here, so a task never runs twice at once."""
     with db() as conn:
-        cursor = conn.cursor()
-    
-        started_at = datetime.now()
-    
-        # Create log entry
-        cursor.execute('''
-            INSERT INTO task_logs (task_type, status, started_at) 
-            VALUES (?, 'running', ?)
-        ''', (task_type, started_at))
-        log_id = cursor.lastrowid
+        cursor = conn.execute('''
+            INSERT INTO scheduled_tasks (task_type, enabled, running, running_since, runner_id)
+            VALUES (?, 0, 1, ?, ?)
+            ON CONFLICT(task_type) DO UPDATE SET
+                running = 1, running_since = excluded.running_since, runner_id = excluded.runner_id
+            WHERE scheduled_tasks.running = 0
+        ''', (task_type, datetime.now(), runner_id))
         conn.commit()
-    
-        try:
-            # Build command based on task type
-            cmd = [LOGBOOST_BINARY]
-        
-            if task_type == 'update_geo':
-                api_key = get_api_key()
-                if api_key:
-                    cmd.extend(['-api', api_key])
-                cmd.append('-updategeo')
-                cmd.extend(['-dbdir', '/data/maxmind'])
-            elif task_type == 'update_ti':
-                cmd.append('-updateti')
-                cmd.extend(['-tidb', '/app/threats.db'])
-            elif task_type == 'build_ti':
-                cmd.append('-buildti')
-                cmd.extend(['-tidb', '/app/threats.db'])
-            elif task_type == 'backup':
-                # Backup task uses shell script, not LogBoost binary
-                backup_dir = os.environ.get('BACKUP_DIR', '/data/backups')
-                cmd = ['/bin/sh', '/app/scripts/backup.sh', backup_dir]
-            else:
-                raise ValueError(f'Unknown task type: {task_type}')
+        return cursor.rowcount > 0
 
-            # Set working directory based on task type
-            # Threat intel tasks run in /app where feed_config.json and logboost binary live
-            if task_type in ('update_ti', 'build_ti'):
-                workdir = '/app'
-            else:
-                workdir = os.environ.get('LOGBOOST_WORKDIR', '.')
 
-            # Execute command
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=3600,  # 1 hour timeout
-                cwd=workdir
-            )
-        
-            completed_at = datetime.now()
-        
-            if result.returncode == 0:
-                status = 'success'
-                output = result.stdout
-                error = None
-            else:
-                status = 'failed'
-                output = result.stdout
-                error = result.stderr
-        
-            # Update log entry
-            cursor.execute('''
-                UPDATE task_logs 
-                SET status = ?, completed_at = ?, output = ?, error = ?
-                WHERE id = ?
-            ''', (status, completed_at, output, error, log_id))
-        
-            # Update task last_run
-            cursor.execute('''
-                UPDATE scheduled_tasks 
-                SET last_run = ?
-                WHERE task_type = ?
-            ''', (completed_at, task_type))
-        
-            # Calculate next run if task is enabled
-            cursor.execute('SELECT interval_hours, enabled FROM scheduled_tasks WHERE task_type = ?', (task_type,))
-            task = cursor.fetchone()
+def release_task(task_type):
+    """Clear a task's running flag."""
+    with db() as conn:
+        conn.execute('''
+            UPDATE scheduled_tasks
+            SET running = 0, running_since = NULL, runner_id = NULL, last_run = ?
+            WHERE task_type = ?
+        ''', (datetime.now(), task_type))
+        conn.commit()
+
+
+def _task_command(task_type, binary):
+    """(argv, working directory, extra environment) for a task."""
+    workdir = os.environ.get('LOGBOOST_WORKDIR', '.')
+    if task_type == 'update_geo':
+        # The MaxMind key travels in MM_API, which LogBoost reads, rather than on the command
+        # line, where it would show up in the process list and in logs.
+        api_key = get_api_key()
+        return ([binary, '-updategeo', '-dbdir', os.environ.get('MAXMIND_DIR', '/data/maxmind')],
+                workdir, {'MM_API': api_key} if api_key else {})
+    if task_type in ('update_ti', 'build_ti'):
+        # Threat intel tasks run in /app, where feed_config.json and threats.db are linked
+        return [binary, '-updateti' if task_type == 'update_ti' else '-buildti', '-tidb', '/app/threats.db'], '/app', {}
+    if task_type == 'backup':
+        # A shell script, not the LogBoost binary. BACKUP_INCLUDE_THREATS is read from the environment.
+        return ['/bin/sh', '/app/scripts/backup.sh', os.environ.get('BACKUP_DIR', '/data/backups')], workdir, {}
+    raise ValueError(f'Unknown task type: {task_type}')
+
+
+def execute_task(task_type: str):
+    """Run one task to completion and record the outcome in task_logs."""
+    with db() as conn:
+        log_id = conn.execute("INSERT INTO task_logs (task_type, status, started_at) VALUES (?, 'running', ?)",
+                              (task_type, datetime.now())).lastrowid
+        conn.commit()
+
+    binary = get_effective_logboost_path()
+    ran = False
+    try:
+        cmd, workdir, extra_env = _task_command(task_type, binary)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=3600,  # 1 hour
+                                cwd=workdir, env={**os.environ, **extra_env})
+        ran = True
+        status = 'success' if result.returncode == 0 else 'failed'
+        output, error = result.stdout, (None if result.returncode == 0 else result.stderr)
+    except subprocess.TimeoutExpired:
+        status, output, error = 'failed', None, 'Task timed out after 1 hour'
+    except FileNotFoundError:
+        status, output, error = 'failed', None, f'LogBoost binary not found: {binary}'
+    except Exception as e:
+        status, output, error = 'failed', None, str(e)
+
+    completed_at = datetime.now()
+    with db() as conn:
+        conn.execute('UPDATE task_logs SET status = ?, completed_at = ?, output = ?, error = ? WHERE id = ?',
+                     (status, completed_at, output, error, log_id))
+        if ran:
+            conn.execute('UPDATE scheduled_tasks SET last_run = ? WHERE task_type = ?', (completed_at, task_type))
+            task = conn.execute('SELECT interval_hours, enabled FROM scheduled_tasks WHERE task_type = ?',
+                                (task_type,)).fetchone()
             if task and task['enabled']:
-                next_run = completed_at + timedelta(hours=task['interval_hours'])
-                cursor.execute('UPDATE scheduled_tasks SET next_run = ? WHERE task_type = ?', (next_run, task_type))
-        
-            conn.commit()
-        
-        except subprocess.TimeoutExpired:
-            cursor.execute('''
-                UPDATE task_logs 
-                SET status = 'failed', completed_at = ?, error = ?
-                WHERE id = ?
-            ''', (datetime.now(), 'Task timed out after 1 hour', log_id))
-            conn.commit()
-        
-        except FileNotFoundError:
-            cursor.execute('''
-                UPDATE task_logs 
-                SET status = 'failed', completed_at = ?, error = ?
-                WHERE id = ?
-            ''', (datetime.now(), f'LogBoost binary not found: {LOGBOOST_BINARY}', log_id))
-            conn.commit()
-        
-        except Exception as e:
-            cursor.execute('''
-                UPDATE task_logs 
-                SET status = 'failed', completed_at = ?, error = ?
-                WHERE id = ?
-            ''', (datetime.now(), str(e), log_id))
-            conn.commit()
+                conn.execute('UPDATE scheduled_tasks SET next_run = ? WHERE task_type = ?',
+                             (completed_at + timedelta(hours=task['interval_hours']), task_type))
+        conn.commit()
+
+    if status == 'success' and task_type in ('update_ti', 'build_ti'):
+        # LogBoost may have rebuilt threats.db; make sure the Intel Browser indexes exist again
+        try:
+            from app import _ensure_intel_indexes  # lazy: app imports this module
+            _ensure_intel_indexes()
+        except Exception:
+            logger.exception('Intel index build after %s failed', task_type)
+
+
+# ============================================
+# Housekeeping
+# ============================================
+
+def _vacuum_if_worthwhile():
+    """Hand disk space back after a large purge. Expired shares hold whole result sets, so the
+    signal is free pages, not deleted row counts.
+
+    ponytail: fixed thresholds (10 MB free and a quarter of the file). VACUUM rewrites the file
+    under an exclusive lock; move it to a quiet hour if the admin DB ever gets large.
+    """
+    with db() as conn:
+        free_pages = conn.execute('PRAGMA freelist_count').fetchone()[0]
+        pages = conn.execute('PRAGMA page_count').fetchone()[0]
+        page_size = conn.execute('PRAGMA page_size').fetchone()[0]
+        if free_pages * page_size >= 10 * 1024 * 1024 and free_pages * 4 >= pages:
+            conn.execute('VACUUM')
+            logger.info('Housekeeping: vacuumed admin DB (%d free pages)', free_pages)
+
+
+def _sweep_session_dirs():
+    from app import sweep_session_dirs  # lazy: app imports this module
+    sweep_session_dirs()
+
+
+def run_housekeeping():
+    """Hourly clean-up: audit retention, expired cache rows and shares, free space, and upload/
+    output directories of sessions that ended without a logout. Steps are independent."""
+    steps = (
+        cleanup_old_audit_logs,
+        clear_expired_dns_cache, clear_expired_whois_cache, clear_expired_shodan_cache,
+        clear_expired_shodan_pivot_cache, clear_expired_circl_pdns_cache, clear_expired_hackertarget_cache,
+        clear_expired_viewdns_cache, clear_expired_chaos_cache, clear_expired_shared_results,
+        _vacuum_if_worthwhile,
+        _sweep_session_dirs,
+    )
+    for step in steps:
+        try:
+            step()
+        except Exception:
+            logger.exception('Housekeeping step %s failed', step.__name__)
 
 
 # ============================================
@@ -2186,160 +2244,109 @@ def execute_task(task_type: str):
 class TaskScheduler:
     """
     Background task scheduler with database-level locking.
-    
-    This implementation prevents duplicate task execution in multi-worker
-    deployments by using the database as a distributed lock:
-    - Each task has a 'running' flag that is atomically set when claimed
-    - Only one worker can claim a task at a time
-    - The runner_id tracks which process is running the task
-    - Stale locks (running_since > 2 hours) are automatically cleared
+
+    A task's 'running' flag in scheduled_tasks is the lock (see claim_task): only one runner,
+    scheduled or manual, can hold it. Locks older than STALE_LOCK_TIMEOUT_HOURS belong to a
+    crashed worker and are cleared.
     """
-    
-    # Timeout for stale task locks (2 hours)
+
     STALE_LOCK_TIMEOUT_HOURS = 2
-    
+    HOUSEKEEPING_EVERY_TICKS = 60  # one tick a minute
+
     def __init__(self):
         self.running = False
         self.thread = None
+        self._ticks = 0
         # Unique identifier for this scheduler instance (hostname + pid)
         import socket
         self.runner_id = f"{socket.gethostname()}:{os.getpid()}"
-    
+
     def start(self):
         """Start the scheduler."""
         if self.running:
             return
-        
+
         self.running = True
         self.thread = threading.Thread(target=self._run)
         self.thread.daemon = True
         self.thread.start()
         logger.info("Task scheduler started (runner_id: %s)", self.runner_id)
-    
+
     def stop(self):
         """Stop the scheduler."""
         self.running = False
         if self.thread:
             self.thread.join(timeout=5)
         logger.info("Task scheduler stopped")
-    
+
     def _run(self):
-        """Main scheduler loop."""
-        cleanup_counter = 0
+        """Main scheduler loop: one tick a minute."""
         while self.running:
-            try:
-                self._clear_stale_locks()
-                self._check_tasks()
-                
-                # Run audit log cleanup every hour (60 iterations * 60 seconds = 1 hour)
-                cleanup_counter += 1
-                if cleanup_counter >= 60:
-                    cleanup_counter = 0
-                    try:
-                        cleanup_old_audit_logs()
-                    except Exception as e:
-                        logger.error("Audit log cleanup error: %s", e)
-                        
-            except Exception as e:
-                logger.error("Scheduler error: %s", e)
-            
-            # Check every minute
+            self._tick()
             time.sleep(60)
-    
+
+    def _tick(self):
+        """Start due tasks; on the first tick after start-up and then hourly, run housekeeping."""
+        try:
+            self._clear_stale_locks()
+            self._check_tasks()
+        except Exception as e:
+            logger.error("Scheduler error: %s", e)
+
+        if self._ticks % self.HOUSEKEEPING_EVERY_TICKS == 0:
+            run_housekeeping()
+        self._ticks += 1
+
     def _clear_stale_locks(self):
         """Clear locks from tasks that have been running too long (crashed workers)."""
         try:
             with db() as conn:
-                cursor = conn.cursor()
-            
                 stale_cutoff = datetime.now() - timedelta(hours=self.STALE_LOCK_TIMEOUT_HOURS)
-            
-                cursor.execute('''
-                    UPDATE scheduled_tasks 
+                cursor = conn.execute('''
+                    UPDATE scheduled_tasks
                     SET running = 0, running_since = NULL, runner_id = NULL
                     WHERE running = 1 AND running_since < ?
                 ''', (stale_cutoff,))
-            
                 if cursor.rowcount > 0:
                     logger.warning("Cleared %d stale task locks", cursor.rowcount)
-            
                 conn.commit()
         except Exception as e:
             logger.error("Error clearing stale locks: %s", e)
-    
+
     def _check_tasks(self):
-        """Check for tasks that need to run and claim them atomically."""
+        """Claim and start every enabled task that is due."""
+        now = datetime.now()
         with db() as conn:
-            cursor = conn.cursor()
-        
-            now = datetime.now()
-        
-            # Find tasks that are due and not already running
-            cursor.execute('''
-                SELECT task_type, interval_hours FROM scheduled_tasks 
-                WHERE enabled = 1 
-                  AND running = 0 
-                  AND next_run IS NOT NULL 
-                  AND next_run <= ?
-            ''', (now,))
-        
-            candidate_tasks = cursor.fetchall()
-        
-            for task in candidate_tasks:
-                task_type = task['task_type']
-                interval_hours = task['interval_hours']
-            
-                # Try to atomically claim this task
-                # This UPDATE will only affect rows where running is still 0
-                cursor.execute('''
-                    UPDATE scheduled_tasks 
-                    SET running = 1, running_since = ?, runner_id = ?
-                    WHERE task_type = ? AND running = 0
-                ''', (now, self.runner_id, task_type))
-            
+            due = conn.execute('''
+                SELECT task_type, interval_hours FROM scheduled_tasks
+                WHERE enabled = 1 AND running = 0 AND next_run IS NOT NULL AND next_run <= ?
+            ''', (now,)).fetchall()
+
+        for task in due:
+            task_type = task['task_type']
+            if not claim_task(task_type, self.runner_id):
+                logger.debug("Task %s already claimed", task_type)
+                continue
+            logger.info("Claimed task %s (runner: %s)", task_type, self.runner_id)
+
+            # Set the next run time straight away
+            with db() as conn:
+                conn.execute('UPDATE scheduled_tasks SET next_run = ? WHERE task_type = ?',
+                             (now + timedelta(hours=task['interval_hours']), task_type))
                 conn.commit()
-            
-                # Check if we successfully claimed the task
-                if cursor.rowcount > 0:
-                    logger.info("Claimed task %s (runner: %s)", task_type, self.runner_id)
-                
-                    # Calculate and set next run time immediately
-                    next_run = now + timedelta(hours=interval_hours)
-                    cursor.execute('''
-                        UPDATE scheduled_tasks 
-                        SET next_run = ?
-                        WHERE task_type = ?
-                    ''', (next_run, task_type))
-                    conn.commit()
-                
-                    # Run task with cleanup callback
-                    thread = threading.Thread(
-                        target=self._run_task_with_cleanup,
-                        args=(task_type,)
-                    )
-                    thread.daemon = True
-                    thread.start()
-                else:
-                    logger.debug("Task %s already claimed by another worker", task_type)
-    
+
+            threading.Thread(target=self._run_task_with_cleanup, args=(task_type,), daemon=True).start()
+
     def _run_task_with_cleanup(self, task_type):
-        """Execute a task and ensure the running flag is cleared afterward."""
+        """Execute a claimed task and always release its lock afterwards."""
         try:
             execute_task(task_type)
         except Exception as e:
             logger.error("Task %s failed: %s", task_type, e)
         finally:
-            # Always clear the running flag when done
             try:
-                with db() as conn:
-                    cursor = conn.cursor()
-                    cursor.execute('''
-                        UPDATE scheduled_tasks 
-                        SET running = 0, running_since = NULL, runner_id = NULL, last_run = ?
-                        WHERE task_type = ?
-                    ''', (datetime.now(), task_type))
-                    conn.commit()
-                    logger.info("Task %s completed, lock released", task_type)
+                release_task(task_type)
+                logger.info("Task %s completed, lock released", task_type)
             except Exception as e:
                 logger.error("Error releasing lock for task %s: %s", task_type, e)
 
@@ -3147,9 +3154,56 @@ def set_setting(key, value):
         g.pop('_settings', None)
 
 
+# feed_config.json lives beside the LogBoost binary; in the container /app/feed_config.json is a
+# symlink into the /data/intel volume. FEED_CONFIG_PATH overrides the location.
+FEED_CONFIG_PATH = os.environ.get('FEED_CONFIG_PATH', '/app/feed_config.json')
+_feeds_lock = threading.Lock()
+
+
 def get_feed_config_path():
-    """Get the path to feed_config.json -- lives in /app with binary."""
-    return '/app/feed_config.json'
+    """Path to feed_config.json."""
+    return FEED_CONFIG_PATH
+
+
+def load_feeds():
+    """The feed list. FileNotFoundError when the file is missing, ValueError when it is not
+    JSON with a "feeds" list (a UTF-8 byte-order mark is tolerated)."""
+    with open(get_feed_config_path(), 'r', encoding='utf-8-sig') as fh:
+        data = json.load(fh)
+    feeds = data.get('feeds') if isinstance(data, dict) else None
+    if not isinstance(feeds, list):
+        raise ValueError('feed_config.json does not contain a "feeds" list')
+    return feeds
+
+
+def save_feeds_atomic(feeds):
+    """Write the feed list through a temp file and os.replace, so a crash cannot leave a
+    truncated file. The real path is resolved first: replacing the /app symlink itself would
+    detach the config from its volume."""
+    real_path = Path(os.path.realpath(get_feed_config_path()))
+    fd, tmp_name = tempfile.mkstemp(dir=real_path.parent, prefix='.feed_config.', suffix='.tmp')
+    try:
+        with os.fdopen(fd, 'w', encoding='utf-8') as fh:
+            json.dump({'feeds': feeds}, fh, indent='\t')
+        if real_path.exists():
+            shutil.copymode(real_path, tmp_name)
+        os.replace(tmp_name, real_path)
+    except BaseException:
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+        raise
+
+
+def update_feeds(change):
+    """Read-modify-write of the feed list under a lock. `change(feeds)` edits the list in place;
+    its return value is passed back."""
+    with _feeds_lock:
+        feeds = load_feeds()
+        result = change(feeds)
+        save_feeds_atomic(feeds)
+        return result
 
 
 # ============================================
@@ -3333,7 +3387,7 @@ def install_logboost_update():
     if not latest_tag:
         return jsonify({'error': 'Run Check for Updates first'}), 400
 
-    download_url = f'https://github.com/joeavanzato/LogBoost/releases/download/{latest_tag}/logboost_linux_amd64.zip'
+    download_url = f'https://github.com/joeavanzato/LogBoost/releases/download/{latest_tag}/logboost-linux-x64.zip'
     try:
         resp = requests.get(download_url, timeout=120)
         resp.raise_for_status()
@@ -3355,9 +3409,7 @@ def install_logboost_update():
 
         os.chmod(dest_path, 0o755)
 
-        # Update module global and settings
-        global LOGBOOST_BINARY
-        LOGBOOST_BINARY = dest_path
+
         set_setting('logboost_override_path', dest_path)
         set_setting('logboost_installed_version', latest_tag)
         log_audit('logboost_update_installed', 'logboost', latest_tag, {'path': dest_path})
@@ -3375,28 +3427,20 @@ def install_logboost_update():
 @admin_required
 def threat_intel():
     """Threat Intel feeds management page."""
-    feed_config_path = get_feed_config_path()
-
     feeds = []
     error = None
+    try:
+        feeds = load_feeds()
+    except FileNotFoundError:
+        error = (f'feed_config.json not found at {get_feed_config_path()}. '
+                 'It will be created when you add your first feed.')
+    except ValueError as e:
+        error = f'Invalid feed_config.json: {e}'
+    except OSError as e:
+        error = f'Error reading feed_config.json: {e.strerror or e}'
 
-    if not os.path.isfile(feed_config_path):
-        error = 'feed_config.json not found at /data/config/feed_config.json. It will be created when you add your first feed.'
-    else:
-        try:
-            with open(feed_config_path, 'r') as f:
-                data = json.load(f)
-                feeds = data.get('feeds', [])
-        except json.JSONDecodeError as e:
-            error = f'Invalid JSON in feed_config.json: {str(e)}'
-        except Exception as e:
-            error = f'Error reading feed_config.json: {str(e)}'
-
-    # Get unique tags for suggestion
-    all_tags = set()
-    for feed in feeds:
-        for tag in feed.get('type', []):
-            all_tags.add(tag)
+    # Unique tags for suggestions
+    all_tags = {tag for feed in feeds for tag in feed.get('type', [])}
 
     return render_template('admin/threat_intel.html',
                            feeds=feeds,
@@ -3405,164 +3449,134 @@ def threat_intel():
                            logboost_path=get_effective_logboost_path())
 
 
+def _feed_types(value):
+    """A feed's `type` as a list."""
+    return value if isinstance(value, list) else [value or 'suspicious']
+
+
+def _feeds_error(exc):
+    """JSON error response for a failed feed operation."""
+    if isinstance(exc, FileNotFoundError):
+        return jsonify({'error': 'feed_config.json not found'}), 404
+    if isinstance(exc, IndexError):
+        return jsonify({'error': 'Feed index out of range'}), 400
+    if isinstance(exc, ValueError):
+        return jsonify({'error': f'Invalid feed_config.json: {exc}'}), 500
+    return internal_error(exc, 'Feed configuration error')
+
+
+def _feed_dir_missing():
+    """400 response when the directory that should hold feed_config.json does not exist."""
+    directory = Path(os.path.realpath(get_feed_config_path())).parent
+    if not directory.is_dir():
+        return jsonify({'error': f'Feed configuration directory does not exist: {directory}'}), 400
+    return None
+
+
 @admin_bp.route('/api/threat-intel/feeds', methods=['GET'])
 @admin_required
 def get_feeds():
     """Get all threat intel feeds."""
-    feed_config_path = get_feed_config_path()
-    
-    if not feed_config_path or not os.path.isfile(feed_config_path):
-        return jsonify({'error': 'feed_config.json not found'}), 404
-    
     try:
-        with open(feed_config_path, 'r') as f:
-            data = json.load(f)
-            return jsonify({'feeds': data.get('feeds', [])})
+        return jsonify({'feeds': load_feeds()})
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return _feeds_error(e)
 
 
 @admin_bp.route('/api/threat-intel/feeds', methods=['POST'])
 @admin_required
 def save_feeds():
-    """Save all threat intel feeds."""
-    feed_config_path = get_feed_config_path()
-    
-    if not feed_config_path:
-        return jsonify({'error': 'LogBoost path not configured'}), 400
-    
-    data = request.get_json()
-    feeds = data.get('feeds', [])
-    
+    """Replace the whole feed list."""
+    missing = _feed_dir_missing()
+    if missing:
+        return missing
+
+    feeds = (request.get_json(silent=True) or {}).get('feeds', [])
+    if not isinstance(feeds, list) or not all(isinstance(feed, dict) for feed in feeds):
+        return jsonify({'error': 'feeds must be a list of feed objects'}), 400
+    for feed in feeds:
+        if not feed.get('name'):
+            return jsonify({'error': 'Each feed must have a name'}), 400
+        if not feed.get('url'):
+            return jsonify({'error': 'Each feed must have a URL'}), 400
+        feed['type'] = _feed_types(feed.get('type'))
+
     try:
-        # Validate feed structure
-        for feed in feeds:
-            if not feed.get('name'):
-                return jsonify({'error': 'Each feed must have a name'}), 400
-            if not feed.get('url'):
-                return jsonify({'error': 'Each feed must have a URL'}), 400
-            if not isinstance(feed.get('type', []), list):
-                feed['type'] = [feed.get('type', 'suspicious')]
-        
-        # Save to file
-        with open(feed_config_path, 'w') as f:
-            json.dump({'feeds': feeds}, f, indent='\t')
-        
-        log_audit('intel_feeds_modified', 'intel_feed', None, {'feed_count': len(feeds)})
-        return jsonify({'success': True, 'count': len(feeds)})
+        with _feeds_lock:
+            save_feeds_atomic(feeds)
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return _feeds_error(e)
+
+    log_audit('intel_feeds_modified', 'intel_feed', None, {'feed_count': len(feeds)})
+    return jsonify({'success': True, 'count': len(feeds)})
 
 
 @admin_bp.route('/api/threat-intel/feed/<int:index>', methods=['PUT'])
 @admin_required
 def update_feed(index):
     """Update a single feed by index."""
-    feed_config_path = get_feed_config_path()
-    
-    if not feed_config_path or not os.path.isfile(feed_config_path):
-        return jsonify({'error': 'feed_config.json not found'}), 404
-    
-    data = request.get_json()
-    
-    try:
-        with open(feed_config_path, 'r') as f:
-            config = json.load(f)
-        
-        feeds = config.get('feeds', [])
-        
-        if index < 0 or index >= len(feeds):
-            return jsonify({'error': 'Feed index out of range'}), 400
-        
-        # Update feed fields
+    data = request.get_json(silent=True) or {}
+
+    def change(feeds):
+        feed = feeds[index]  # IndexError -> 400
         if 'name' in data:
-            feeds[index]['name'] = data['name']
+            feed['name'] = data['name']
         if 'url' in data:
-            feeds[index]['url'] = data['url']
+            feed['url'] = data['url']
         if 'type' in data:
-            feeds[index]['type'] = data['type'] if isinstance(data['type'], list) else [data['type']]
-        
-        # Save back
-        with open(feed_config_path, 'w') as f:
-            json.dump({'feeds': feeds}, f, indent='\t')
-        
-        log_audit('intel_feed_updated', 'intel_feed', feeds[index].get('name'), {'index': index})
-        return jsonify({'success': True, 'feed': feeds[index]})
+            feed['type'] = _feed_types(data['type'])
+        return feed
+
+    try:
+        feed = update_feeds(change)
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return _feeds_error(e)
+
+    log_audit('intel_feed_updated', 'intel_feed', feed.get('name'), {'index': index})
+    return jsonify({'success': True, 'feed': feed})
 
 
 @admin_bp.route('/api/threat-intel/feed/<int:index>', methods=['DELETE'])
 @admin_required
 def delete_feed(index):
     """Delete a feed by index."""
-    feed_config_path = get_feed_config_path()
-    
-    if not feed_config_path or not os.path.isfile(feed_config_path):
-        return jsonify({'error': 'feed_config.json not found'}), 404
-    
     try:
-        with open(feed_config_path, 'r') as f:
-            config = json.load(f)
-        
-        feeds = config.get('feeds', [])
-        
-        if index < 0 or index >= len(feeds):
-            return jsonify({'error': 'Feed index out of range'}), 400
-        
-        deleted_feed = feeds.pop(index)
-        
-        # Save back
-        with open(feed_config_path, 'w') as f:
-            json.dump({'feeds': feeds}, f, indent='\t')
-        
-        log_audit('intel_feed_deleted', 'intel_feed', deleted_feed.get('name'), {'index': index})
-        return jsonify({'success': True, 'deleted': deleted_feed['name']})
+        deleted_feed = update_feeds(lambda feeds: feeds.pop(index))  # IndexError -> 400
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return _feeds_error(e)
+
+    log_audit('intel_feed_deleted', 'intel_feed', deleted_feed.get('name'), {'index': index})
+    return jsonify({'success': True, 'deleted': deleted_feed.get('name')})
 
 
 @admin_bp.route('/api/threat-intel/feed', methods=['POST'])
 @admin_required
 def add_feed():
-    """Add a new feed."""
-    feed_config_path = get_feed_config_path()
-    
-    if not feed_config_path:
-        return jsonify({'error': 'LogBoost path not configured'}), 400
-    
-    data = request.get_json()
-    
+    """Add a new feed. Creates feed_config.json when it does not exist yet."""
+    missing = _feed_dir_missing()
+    if missing:
+        return missing
+
+    data = request.get_json(silent=True) or {}
     if not data.get('name'):
         return jsonify({'error': 'Feed name is required'}), 400
     if not data.get('url'):
         return jsonify({'error': 'Feed URL is required'}), 400
-    
-    new_feed = {
-        'name': data['name'],
-        'url': data['url'],
-        'type': data.get('type', ['suspicious']) if isinstance(data.get('type'), list) else [data.get('type', 'suspicious')]
-    }
-    
+    new_feed = {'name': data['name'], 'url': data['url'], 'type': _feed_types(data.get('type'))}
+
     try:
-        # Read existing config or create new
-        if os.path.isfile(feed_config_path):
-            with open(feed_config_path, 'r') as f:
-                config = json.load(f)
-        else:
-            config = {'feeds': []}
-        
-        feeds = config.get('feeds', [])
-        feeds.append(new_feed)
-        
-        # Save back
-        with open(feed_config_path, 'w') as f:
-            json.dump({'feeds': feeds}, f, indent='\t')
-        
-        log_audit('intel_feed_added', 'intel_feed', new_feed['name'], {'url': new_feed['url']})
-        return jsonify({'success': True, 'feed': new_feed, 'index': len(feeds) - 1})
+        with _feeds_lock:
+            try:
+                feeds = load_feeds()
+            except FileNotFoundError:
+                feeds = []
+            feeds.append(new_feed)
+            save_feeds_atomic(feeds)
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return _feeds_error(e)
+
+    log_audit('intel_feed_added', 'intel_feed', new_feed['name'], {'url': new_feed['url']})
+    return jsonify({'success': True, 'feed': new_feed, 'index': len(feeds) - 1})
 
 
 @admin_bp.route('/api/threat-intel/test-feed', methods=['POST'])
@@ -3651,15 +3665,6 @@ def start_runtime():
     """Startup side effects: DB schema, binary override, scheduler. Called from app.create_app()."""
     init_db()
 
-    # Resolve LogBoost binary override from settings (after DB is ready)
-    global LOGBOOST_BINARY
-    try:
-        override_path = get_setting('logboost_override_path')
-        if override_path and Path(override_path).exists():
-            LOGBOOST_BINARY = override_path
-            logger.info(f"LogBoost binary override active: {override_path}")
-    except Exception:
-        pass  # DB not ready or setting absent -- use env var default
 
     if needs_setup():
         get_setup_token()  # logs the token the operator needs for /setup

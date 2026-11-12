@@ -16,6 +16,59 @@ from http_utils import json_body, str_field, str_list
 whois_bp = Blueprint('whois', __name__, url_prefix='/api/whois')
 
 
+def _whois_values(record, fields) -> list:
+    """Values of the given WHOIS fields as stripped strings, de-duplicated case-insensitively
+    with the original order kept."""
+    seen, values = set(), []
+    for field in fields:
+        raw = getattr(record, field, None)
+        for item in (raw if isinstance(raw, list) else [raw]):
+            text = str(item).strip() if item else ''
+            if text and text.lower() not in seen:
+                seen.add(text.lower())
+                values.append(text)
+    return values
+
+
+def _whois_date(value):
+    if isinstance(value, list):
+        value = value[0] if value else None
+    if not value:
+        return None
+    try:
+        return value.strftime('%Y-%m-%d') if hasattr(value, 'strftime') else str(value)
+    except (AttributeError, ValueError):
+        return str(value)
+
+
+def parse_whois(domain, record) -> dict:
+    """The fields the UI uses from a python-whois record. Used by the single and the bulk
+    lookup, so both return the same shape."""
+    emails = _whois_values(record, ('emails', 'email', 'registrant_email', 'admin_email', 'tech_email'))
+    names = _whois_values(record, ('name', 'registrant_name', 'admin_name', 'tech_name'))
+    organizations = _whois_values(record, ('org', 'organization', 'registrant_organization'))
+    registrars = _whois_values(record, ('registrar',))
+    name_servers = getattr(record, 'name_servers', None)
+    if name_servers:
+        name_servers = [str(n).lower() for n in (name_servers if isinstance(name_servers, list) else [name_servers]) if n]
+    return {
+        'domain': domain,
+        # first values, for callers that want one
+        'registrant_name': names[0] if names else None,
+        'registrant_email': emails[0] if emails else None,
+        'organization': organizations[0] if organizations else None,
+        'registrar': registrars[0] if registrars else None,
+        'creation_date': _whois_date(getattr(record, 'creation_date', None)),
+        'expiration_date': _whois_date(getattr(record, 'expiration_date', None)),
+        'name_servers': name_servers or None,
+        # every value
+        'all_emails': emails,
+        'all_names': names,
+        'all_organizations': organizations,
+        'all_registrars': registrars,
+    }
+
+
 @whois_bp.route('/resolve', methods=['POST'])
 @login_required
 def api_whois_resolve():
@@ -38,123 +91,8 @@ def api_whois_resolve():
     try:
         import whois
         
-        w = whois.whois(domain)
-        
-        # Extract relevant fields - capture all values, not just first
-        result = {
-            'domain': domain,
-            # Single values (for backwards compatibility)
-            'registrant_name': None,
-            'registrant_email': None,
-            'organization': None,
-            'registrar': None,
-            'creation_date': None,
-            'expiration_date': None,
-            'name_servers': None,
-            # All values as lists
-            'all_emails': [],
-            'all_names': [],
-            'all_organizations': [],
-            'all_registrars': []
-        }
-        
-        # Helper to get first value (for backwards compatibility)
-        def get_first(val):
-            if isinstance(val, list):
-                return val[0] if val else None
-            return val
-        
-        # Helper to get all values as a list
-        def get_all(val):
-            if val is None:
-                return []
-            if isinstance(val, list):
-                # Filter out None and empty values, deduplicate
-                seen = set()
-                result = []
-                for v in val:
-                    if v is not None and str(v).strip():
-                        v_str = str(v).strip()
-                        if v_str.lower() not in seen:
-                            seen.add(v_str.lower())
-                            result.append(v_str)
-                return result
-            return [str(val).strip()] if val and str(val).strip() else []
-        
-        def format_date(val):
-            if val is None:
-                return None
-            if isinstance(val, list):
-                val = val[0] if val else None
-            if val:
-                try:
-                    return val.strftime('%Y-%m-%d') if hasattr(val, 'strftime') else str(val)
-                except (AttributeError, ValueError):
-                    return str(val)
-            return None
-        
-        # Get all emails from multiple possible fields
-        all_emails = []
-        for field in ['emails', 'email', 'registrant_email', 'admin_email', 'tech_email']:
-            emails = get_all(getattr(w, field, None))
-            all_emails.extend(emails)
-        # Deduplicate emails
-        seen_emails = set()
-        unique_emails = []
-        for e in all_emails:
-            if e.lower() not in seen_emails:
-                seen_emails.add(e.lower())
-                unique_emails.append(e)
-        result['all_emails'] = unique_emails
-        result['registrant_email'] = unique_emails[0] if unique_emails else None
-        
-        # Get all names from multiple possible fields
-        all_names = []
-        for field in ['name', 'registrant_name', 'admin_name', 'tech_name']:
-            names = get_all(getattr(w, field, None))
-            all_names.extend(names)
-        # Deduplicate names
-        seen_names = set()
-        unique_names = []
-        for n in all_names:
-            if n.lower() not in seen_names:
-                seen_names.add(n.lower())
-                unique_names.append(n)
-        result['all_names'] = unique_names
-        result['registrant_name'] = unique_names[0] if unique_names else None
-        
-        # Get all organizations
-        all_orgs = []
-        for field in ['org', 'organization', 'registrant_organization']:
-            orgs = get_all(getattr(w, field, None))
-            all_orgs.extend(orgs)
-        # Deduplicate orgs
-        seen_orgs = set()
-        unique_orgs = []
-        for o in all_orgs:
-            if o.lower() not in seen_orgs:
-                seen_orgs.add(o.lower())
-                unique_orgs.append(o)
-        result['all_organizations'] = unique_orgs
-        result['organization'] = unique_orgs[0] if unique_orgs else None
-        
-        # Get all registrars
-        all_registrars = get_all(getattr(w, 'registrar', None))
-        result['all_registrars'] = all_registrars
-        result['registrar'] = all_registrars[0] if all_registrars else None
-        
-        # Dates
-        result['creation_date'] = format_date(getattr(w, 'creation_date', None))
-        result['expiration_date'] = format_date(getattr(w, 'expiration_date', None))
-        
-        # Name servers
-        ns = getattr(w, 'name_servers', None)
-        if ns:
-            if isinstance(ns, list):
-                result['name_servers'] = [str(n).lower() for n in ns if n]
-            else:
-                result['name_servers'] = [str(ns).lower()]
-        
+        result = parse_whois(domain, whois.whois(domain))
+
         # Cache the result
         cache_settings = get_whois_cache_settings()
         set_cached_whois(domain, result, cache_settings['cache_ttl'])
@@ -210,107 +148,8 @@ def api_whois_resolve_bulk():
         
         try:
             import whois
-            w = whois.whois(domain)
-            
-            def get_first(val):
-                if isinstance(val, list):
-                    return val[0] if val else None
-                return val
-            
-            def get_all(val):
-                if val is None:
-                    return []
-                if isinstance(val, list):
-                    seen = set()
-                    result = []
-                    for v in val:
-                        if v is not None and str(v).strip():
-                            v_str = str(v).strip()
-                            if v_str.lower() not in seen:
-                                seen.add(v_str.lower())
-                                result.append(v_str)
-                    return result
-                return [str(val).strip()] if val and str(val).strip() else []
-            
-            def format_date(val):
-                if val is None:
-                    return None
-                if isinstance(val, list):
-                    val = val[0] if val else None
-                if val:
-                    try:
-                        return val.strftime('%Y-%m-%d') if hasattr(val, 'strftime') else str(val)
-                    except (AttributeError, ValueError):
-                        return str(val)
-                return None
-            
-            result = {
-                'domain': domain,
-                'all_emails': [],
-                'all_names': [],
-                'all_organizations': [],
-                'all_registrars': []
-            }
-            
-            # Get all emails
-            all_emails = []
-            for field in ['emails', 'email', 'registrant_email', 'admin_email', 'tech_email']:
-                emails = get_all(getattr(w, field, None))
-                all_emails.extend(emails)
-            seen_emails = set()
-            unique_emails = []
-            for e in all_emails:
-                if e.lower() not in seen_emails:
-                    seen_emails.add(e.lower())
-                    unique_emails.append(e)
-            result['all_emails'] = unique_emails
-            result['registrant_email'] = unique_emails[0] if unique_emails else None
-            
-            # Get all names
-            all_names = []
-            for field in ['name', 'registrant_name', 'admin_name', 'tech_name']:
-                names = get_all(getattr(w, field, None))
-                all_names.extend(names)
-            seen_names = set()
-            unique_names = []
-            for n in all_names:
-                if n.lower() not in seen_names:
-                    seen_names.add(n.lower())
-                    unique_names.append(n)
-            result['all_names'] = unique_names
-            result['registrant_name'] = unique_names[0] if unique_names else None
-            
-            # Get all organizations
-            all_orgs = []
-            for field in ['org', 'organization', 'registrant_organization']:
-                orgs = get_all(getattr(w, field, None))
-                all_orgs.extend(orgs)
-            seen_orgs = set()
-            unique_orgs = []
-            for o in all_orgs:
-                if o.lower() not in seen_orgs:
-                    seen_orgs.add(o.lower())
-                    unique_orgs.append(o)
-            result['all_organizations'] = unique_orgs
-            result['organization'] = unique_orgs[0] if unique_orgs else None
-            
-            # Get all registrars
-            all_registrars = get_all(getattr(w, 'registrar', None))
-            result['all_registrars'] = all_registrars
-            result['registrar'] = all_registrars[0] if all_registrars else None
-            
-            # Dates
-            result['creation_date'] = format_date(getattr(w, 'creation_date', None))
-            result['expiration_date'] = format_date(getattr(w, 'expiration_date', None))
-            
-            # Name servers
-            ns = getattr(w, 'name_servers', None)
-            if ns:
-                if isinstance(ns, list):
-                    result['name_servers'] = [str(n).lower() for n in ns if n]
-                else:
-                    result['name_servers'] = [str(ns).lower()]
-            
+            result = parse_whois(domain, whois.whois(domain))
+
             # Cache the result
             set_cached_whois(domain, result, cache_ttl)
             

@@ -342,7 +342,7 @@ A POSIX shell script ships with the container at `/app/scripts/backup.sh` and ha
 
 ### Scheduling backups
 
-Configure automatic backups from **Admin Panel → Settings → Backup Schedule**. Files land in the `logboost-backups` volume by default. To copy them off-host, either bind-mount the volume or use `docker cp`:
+Configure automatic backups from **Admin Panel → Settings → Backup Schedule**. Scheduled backups cover `logboost_admin.db` only: `threats.db` can be rebuilt from the feeds and is large, so it is included only when `BACKUP_INCLUDE_THREATS=1` is set in the container environment. Files land in the `logboost-backups` volume by default. To copy them off-host, either bind-mount the volume or use `docker cp`:
 
 ```bash
 docker cp logboost-web:/data/backups ./local-backups

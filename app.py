@@ -183,7 +183,6 @@ register_blueprints(app)
 # Configuration
 UPLOAD_FOLDER = Path(os.environ.get('LOGBOOST_UPLOAD_DIR') or Path(__file__).parent / 'uploads')
 OUTPUT_FOLDER = Path(os.environ.get('LOGBOOST_OUTPUT_DIR') or Path(__file__).parent / 'output')
-LOGBOOST_BINARY = os.environ.get('LOGBOOST_PATH', 'LogBoost')
 MAXMIND_DIR = os.environ.get('MAXMIND_DIR', '.')
 
 # Required MaxMind database files
@@ -665,6 +664,32 @@ def get_session_dir(session_id: str) -> Path:
     session_upload.mkdir(exist_ok=True)
     session_output.mkdir(exist_ok=True)
     return session_upload, session_output
+
+
+SESSION_DIR_MAX_AGE_DAYS = 7  # a session ends 7 days after login at the latest
+
+
+def sweep_session_dirs(max_age_days: int = SESSION_DIR_MAX_AGE_DAYS) -> int:
+    """Remove upload/output directories untouched for max_age_days: what is left behind when a
+    session ends without a logout (closed browser, expired cookie). Returns how many were removed."""
+    cutoff = time.time() - max_age_days * 86400
+    removed = 0
+    for base in (UPLOAD_FOLDER, OUTPUT_FOLDER):
+        if not base.is_dir():
+            continue
+        for entry in base.iterdir():
+            try:
+                if not entry.is_dir():
+                    continue
+                newest = max([entry.stat().st_mtime] + [child.stat().st_mtime for child in entry.iterdir()])
+                if newest < cutoff:
+                    shutil.rmtree(entry)
+                    removed += 1
+            except OSError:
+                app.logger.warning('Could not sweep session directory %s', entry, exc_info=True)
+    if removed:
+        app.logger.info('Removed %d stale session directories', removed)
+    return removed
 
 
 def cleanup_session(session_id: str) -> None:
@@ -2981,8 +3006,10 @@ def _build_intel_query(args, base_select):
         clauses.append('ips.category = ?')
         params.append(int(tag_id))
     if q:
-        clauses.append('ips.ip LIKE ?')
-        params.append(q + '%')
+        # A range on the prefix, not LIKE: SQLite's LIKE is case-insensitive and cannot use
+        # idx_ips_ip, so every search used to scan the table. Matches the prefix as typed.
+        clauses.append('ips.ip >= ? AND ips.ip < ?')
+        params.extend([q, q[:-1] + chr(ord(q[-1]) + 1)])
     where_sql = (' WHERE ' + ' AND '.join(clauses)) if clauses else ''
     return base_select + where_sql, params
 

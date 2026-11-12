@@ -13,7 +13,7 @@
 #
 # Backup output:
 #   {backup_dir}/logboost_admin_{timestamp}.db
-#   {backup_dir}/threats_{timestamp}.db
+#   {backup_dir}/threats_{timestamp}.db   (only with BACKUP_INCLUDE_THREATS=1)
 #   {backup_dir}/latest/ (symlinks to most recent backups)
 #
 # Restore options:
@@ -30,6 +30,8 @@ set -e
 # Configuration
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 KEEP_DAYS="${BACKUP_KEEP_DAYS:-7}"
+# threats.db can be rebuilt from the feeds and is large, so it is not backed up by default
+INCLUDE_THREATS="${BACKUP_INCLUDE_THREATS:-0}"
 
 # Database paths (container defaults)
 ADMIN_DB="${LOGBOOST_DB_PATH:-/data/db/logboost_admin.db}"
@@ -80,19 +82,22 @@ cmd_backup() {
         log_warn "Admin database not found: ${ADMIN_DB}"
     fi
 
-    if [ -f "$THREAT_DB" ]; then
-        THREAT_BACKUP="${BACKUP_DIR}/threats_${TIMESTAMP}.db"
-        log_info "Backing up threat database: ${THREAT_DB}"
-        if command -v sqlite3 >/dev/null 2>&1; then
-            sqlite3 "$THREAT_DB" ".backup '${THREAT_BACKUP}'"
-        else
-            cp "$THREAT_DB" "$THREAT_BACKUP"
-        fi
-        ln -sf "../$(basename "$THREAT_BACKUP")" "${BACKUP_DIR}/latest/threats.db"
-        log_info "Threat backup complete: ${THREAT_BACKUP}"
-    else
-        log_warn "Threat database not found: ${THREAT_DB}"
-    fi
+    case "$INCLUDE_THREATS" in
+        1|true|TRUE|yes|YES)
+            if [ -f "$THREAT_DB" ]; then
+                THREAT_BACKUP="${BACKUP_DIR}/threats_${TIMESTAMP}.db"
+                log_info "Backing up threat database: ${THREAT_DB}"
+                sqlite3 "$THREAT_DB" ".backup '${THREAT_BACKUP}'"
+                ln -sf "../$(basename "$THREAT_BACKUP")" "${BACKUP_DIR}/latest/threats.db"
+                log_info "Threat backup complete: ${THREAT_BACKUP}"
+            else
+                log_warn "Threat database not found: ${THREAT_DB}"
+            fi
+            ;;
+        *)
+            log_info "Skipping threat database (set BACKUP_INCLUDE_THREATS=1 to include it)"
+            ;;
+    esac
 
     if [ "$KEEP_DAYS" -gt 0 ]; then
         log_info "Cleaning up backups older than ${KEEP_DAYS} days"
@@ -102,10 +107,13 @@ cmd_backup() {
     echo ""
     log_info "Backup complete!"
     echo "  Latest backups available at: ${BACKUP_DIR}/latest/"
-    [ -f "${BACKUP_DIR}/latest/logboost_admin.db" ] && \
-        echo "    - logboost_admin.db -> $(readlink "${BACKUP_DIR}/latest/logboost_admin.db" 2>/dev/null || echo 'linked')"
-    [ -f "${BACKUP_DIR}/latest/threats.db" ] && \
-        echo "    - threats.db -> $(readlink "${BACKUP_DIR}/latest/threats.db" 2>/dev/null || echo 'linked')"
+    # if/fi, not "test && echo": as the last command that form makes the script exit non-zero
+    # whenever a file is absent, and the scheduled task was then recorded as failed.
+    for name in logboost_admin.db threats.db; do
+        if [ -f "${BACKUP_DIR}/latest/${name}" ]; then
+            echo "    - ${name} -> $(readlink "${BACKUP_DIR}/latest/${name}" 2>/dev/null || echo 'linked')"
+        fi
+    done
 }
 
 # ============================================================
@@ -232,7 +240,7 @@ cmd_restore() {
 
     # Verify both
     if [ -n "$SRC_ADMIN" ]; then
-        verify_backup "$SRC_ADMIN" "users,settings,audit_log,saved_graphs" "admin" || exit 1
+        verify_backup "$SRC_ADMIN" "users,settings,audit_logs,saved_graphs" "admin" || exit 1
     fi
     if [ -n "$SRC_THREAT" ]; then
         verify_backup "$SRC_THREAT" "ips,feeds,categories" "threat" || exit 1

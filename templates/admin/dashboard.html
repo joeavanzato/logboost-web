@@ -20,6 +20,17 @@
     </div>
     {% endif %}
 
+    {% if intel_indexes_missing %}
+    <div class="warning-banner">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/>
+            <line x1="12" y1="8" x2="12" y2="12"/>
+            <line x1="12" y1="16" x2="12.01" y2="16"/>
+        </svg>
+        <span>Threat database indexes are missing, so the Intel Browser will be slow. They are built at start-up and after <strong>'Update Threat Intel'</strong>; the intel directory must be writable.</span>
+    </div>
+    {% endif %}
+
     <!-- Status Cards -->
     <div class="status-cards">
         <div class="status-card">

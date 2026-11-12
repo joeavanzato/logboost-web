@@ -28,15 +28,16 @@ class TestExecuteTask:
         
         with patch('admin.subprocess.run', return_value=mock_result) as mock_run:
             with patch('admin.get_api_key', return_value='test_api_key'):
-                with patch('admin.LOGBOOST_BINARY', '/usr/bin/logboost'):
+                with patch('admin.get_effective_logboost_path', return_value='/usr/bin/logboost'):
                     execute_task('update_geo')
         
         # Check subprocess was called with correct args
         mock_run.assert_called_once()
         call_args = mock_run.call_args[0][0]
         assert '/usr/bin/logboost' in call_args
-        assert '-api' in call_args
-        assert 'test_api_key' in call_args
+        assert '-api' not in call_args
+        assert 'test_api_key' not in call_args
+        assert mock_run.call_args.kwargs['env']['MM_API'] == 'test_api_key'
         assert '-updategeo' in call_args
         
         # Check log was created
@@ -60,7 +61,7 @@ class TestExecuteTask:
         mock_result.stderr = ''
         
         with patch('admin.subprocess.run', return_value=mock_result):
-            with patch('admin.LOGBOOST_BINARY', '/usr/bin/logboost'):
+            with patch('admin.get_effective_logboost_path', return_value='/usr/bin/logboost'):
                 execute_task('update_ti')
         
         # Check log was created with success
@@ -82,7 +83,7 @@ class TestExecuteTask:
         mock_result.stderr = ''
         
         with patch('admin.subprocess.run', return_value=mock_result):
-            with patch('admin.LOGBOOST_BINARY', '/usr/bin/logboost'):
+            with patch('admin.get_effective_logboost_path', return_value='/usr/bin/logboost'):
                 execute_task('build_ti')
         
         conn = get_db()
@@ -103,7 +104,7 @@ class TestExecuteTask:
         mock_result.stderr = 'Error: Database not found'
         
         with patch('admin.subprocess.run', return_value=mock_result):
-            with patch('admin.LOGBOOST_BINARY', '/usr/bin/logboost'):
+            with patch('admin.get_effective_logboost_path', return_value='/usr/bin/logboost'):
                 execute_task('update_geo')
         
         conn = get_db()
@@ -120,7 +121,7 @@ class TestExecuteTask:
         from admin import execute_task, get_db
         
         with patch('admin.subprocess.run', side_effect=subprocess.TimeoutExpired(cmd='logboost', timeout=3600)):
-            with patch('admin.LOGBOOST_BINARY', '/usr/bin/logboost'):
+            with patch('admin.get_effective_logboost_path', return_value='/usr/bin/logboost'):
                 execute_task('update_geo')
         
         conn = get_db()
@@ -137,7 +138,7 @@ class TestExecuteTask:
         from admin import execute_task, get_db
         
         with patch('admin.subprocess.run', side_effect=FileNotFoundError()):
-            with patch('admin.LOGBOOST_BINARY', '/nonexistent/logboost'):
+            with patch('admin.get_effective_logboost_path', return_value='/nonexistent/logboost'):
                 execute_task('update_geo')
         
         conn = get_db()
@@ -153,7 +154,7 @@ class TestExecuteTask:
         """Test task execution with unknown task type."""
         from admin import execute_task, get_db
         
-        with patch('admin.LOGBOOST_BINARY', '/usr/bin/logboost'):
+        with patch('admin.get_effective_logboost_path', return_value='/usr/bin/logboost'):
             execute_task('unknown_task')
         
         conn = get_db()
@@ -186,7 +187,7 @@ class TestExecuteTask:
         
         with patch('admin.subprocess.run', return_value=mock_result):
             with patch('admin.get_api_key', return_value='key'):
-                with patch('admin.LOGBOOST_BINARY', '/usr/bin/logboost'):
+                with patch('admin.get_effective_logboost_path', return_value='/usr/bin/logboost'):
                     execute_task('update_geo')
         
         # Check next_run was updated
@@ -210,7 +211,7 @@ class TestExecuteTask:
         
         with patch('admin.subprocess.run', return_value=mock_result) as mock_run:
             with patch('admin.get_api_key', return_value=None):
-                with patch('admin.LOGBOOST_BINARY', '/usr/bin/logboost'):
+                with patch('admin.get_effective_logboost_path', return_value='/usr/bin/logboost'):
                     execute_task('update_geo')
         
         # Check -api flag was not included

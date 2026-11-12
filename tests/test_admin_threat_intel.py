@@ -14,7 +14,7 @@ from unittest.mock import patch, MagicMock
 
 
 @pytest.fixture
-def mock_feed_config(tmp_path):
+def mock_feed_config(tmp_path, monkeypatch):
     """Create a mock feed_config.json file."""
     feed_config = tmp_path / 'feed_config.json'
     feeds = {
@@ -26,6 +26,8 @@ def mock_feed_config(tmp_path):
         ]
     }
     feed_config.write_text(json.dumps(feeds, indent=2))
+    import admin
+    monkeypatch.setattr(admin, 'FEED_CONFIG_PATH', str(feed_config))
     return feed_config
 
 
