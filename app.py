@@ -8,6 +8,7 @@ import csv
 import json
 import sys
 import uuid
+import secrets
 import subprocess
 import tempfile
 import shutil
@@ -722,7 +723,7 @@ def index():
     # Check for shared results
     shared_id = request.args.get('shared')
     if shared_id:
-        shared = get_shared_results(shared_id)
+        shared = get_shared_results_meta(shared_id)
         if shared:
             return render_template('index.html', shared_results=shared_id, threat_db_missing=threat_db_missing)
     return render_template('index.html', threat_db_missing=threat_db_missing)
@@ -1013,7 +1014,15 @@ def health():
 @app.route('/stats')
 @login_required
 def get_stats():
-    """Generate statistics for the current result file."""
+    """Statistics for the current result file, or with ?shared=<id> for a shared result set."""
+    share_id = request.args.get('shared')
+    if share_id:
+        stats = get_shared_results_stats(share_id)
+        if not stats:
+            return render_template('partials/error.html',
+                                   error='Statistics are not available for these shared results')
+        return render_template('partials/stats.html', stats=stats, share_id=share_id)
+
     output_path = current_output_path()
     if not output_path:
         return render_template('partials/error.html', error='No results available for statistics')
@@ -1029,11 +1038,15 @@ STAT_VALUE_SECTIONS = ('threat_summary', 'geo_summary', 'dns_summary', 'whois_su
 @login_required
 def get_stat_values(section: str, name: str):
     """Full value list behind one statistics card, fetched when its modal opens."""
-    output_path = current_output_path()
-    if not output_path or section not in STAT_VALUE_SECTIONS or not name.startswith('all_'):
-        return jsonify({'values': [], 'total_rows': 0})
+    stats = {}
+    if section in STAT_VALUE_SECTIONS and name.startswith('all_'):
+        share_id = request.args.get('shared')
+        if share_id:
+            stats = get_shared_results_stats(share_id) or {}
+        else:
+            output_path = current_output_path()
+            stats = cached_statistics(output_path) if output_path else {}
 
-    stats = cached_statistics(output_path)
     return jsonify({
         'values': stats.get(section, {}).get(name) or [],
         'total_rows': stats.get('total_rows', 0)
@@ -1316,8 +1329,9 @@ def get_unique_column_values(filepath: Path, column_name: str, limit: int = 100)
 # ============================================
 
 from admin import (
-    save_graph, load_graph, list_graphs, delete_graph,
+    save_graph, load_graph, list_graphs, delete_graph, set_graph_shared,
     save_shared_results, get_shared_results, get_shared_results_expiry_days, clear_expired_shared_results,
+    get_shared_results_meta, get_shared_results_stats, list_shared_results, delete_shared_results,
     get_concurrency_settings,
     get_cached_shodan, set_cached_shodan, get_shodan_cache_settings,
     get_cached_shodan_pivot, set_cached_shodan_pivot,
@@ -1808,11 +1822,12 @@ def api_graph_save():
 @app.route('/api/graph/<graph_id>', methods=['GET'])
 @login_required
 def api_graph_load(graph_id):
-    """Load a graph by ID. Only the owning user may load it."""
+    """Load a graph the user owns or that has been shared. is_owner tells the front end
+    whether to open it in place or as the user's own copy."""
     user_id = session.get('user_id')
     graph = load_graph(graph_id, user_id=user_id)
     if graph:
-        graph['is_owner'] = True
+        graph['is_owner'] = graph.get('user_id') in (None, user_id)
         return jsonify(graph)
     return jsonify({'error': 'Graph not found'}), 404
 
@@ -1826,6 +1841,21 @@ def api_graph_delete(graph_id):
         log_audit('graph_deleted', 'graph', graph_id)
         return jsonify({'success': True})
     return jsonify({'error': 'Graph not found or not authorized'}), 404
+
+
+@app.route('/api/graph/<graph_id>/share', methods=['POST', 'DELETE'])
+@login_required
+def api_graph_share(graph_id):
+    """The owner turns link sharing for a graph on (POST) or off (DELETE)."""
+    shared = request.method == 'POST'
+    if not set_graph_shared(graph_id, session.get('user_id'), shared):
+        return jsonify({'error': 'Graph not found or not authorized'}), 404
+    log_audit('graph_shared' if shared else 'graph_unshared', 'graph', graph_id)
+    return jsonify({
+        'success': True,
+        'is_shared': shared,
+        'share_url': url_for('index', graph=graph_id, _external=True)
+    })
 
 
 @app.route('/api/graph/list', methods=['GET'])
@@ -1855,18 +1885,21 @@ def api_graph_export(graph_id):
 # Shared Results Endpoints
 # ============================================
 
+def _shareable_stats(stats: dict) -> dict:
+    """Statistics as stored with a share: everything the Stats tab renders, minus the per-column
+    value tables (the bulk of the data, only needed to build the summaries)."""
+    return {**stats, 'columns': [{**col, 'all_values': []} for col in stats['columns']]}
+
+
 @app.route('/api/results/share', methods=['POST'])
 @login_required
 def api_results_share():
-    """Create a shareable link for current results."""
-    import uuid
-    
-    # Get current results from session
+    """Create a share link for the current results. Rows and statistics are stored with it."""
     output_file = current_output_path()
     if not output_file:
         return jsonify({'error': 'No results to share'}), 400
 
-    # Read the results data - use csv.reader to get list of lists (matching read_csv_all format)
+    # csv.reader gives a list of lists, the format the results template expects
     try:
         with open(output_file, 'r', newline='', encoding='utf-8', errors='replace') as f:
             reader = csv.reader(f)
@@ -1874,85 +1907,63 @@ def api_results_share():
             results_data = list(reader)
     except Exception as e:
         return internal_error(e, 'Failed to read results')
-    
+
     if not results_data:
         return jsonify({'error': 'No data in results'}), 400
-    
-    # Get stats if available
-    stats_data = session.get('current_stats')
-    
-    # Get filename
-    filename = output_file.name
-    
-    # Generate share ID
-    share_id = str(uuid.uuid4())[:12]  # Shorter ID for URLs
-    
-    # Get expiry days from settings
+
+    stats = cached_statistics(output_file)
+    share_id = secrets.token_urlsafe(16)
     expiry_days = get_shared_results_expiry_days()
-    
-    # Save to database
-    user_id = session.get('user_id')
-    save_shared_results(share_id, user_id, filename, results_data, stats_data, headers, expiry_days)
-    
-    # Build share URL
-    share_url = url_for('view_shared_results', share_id=share_id, _external=True)
-    
+    save_shared_results(share_id, session.get('user_id'), output_file.name, results_data,
+                        None if 'error' in stats else _shareable_stats(stats), headers, expiry_days)
+    log_audit('shared_results_created', 'shared_results', share_id,
+              {'filename': output_file.name, 'row_count': len(results_data)})
+
     return jsonify({
         'success': True,
         'share_id': share_id,
-        'share_url': share_url,
+        'share_url': url_for('view_shared_results', share_id=share_id, _external=True),
         'expires_in_days': expiry_days
     })
 
 
-@app.route('/shared/results/<share_id>')
-def view_shared_results(share_id):
-    """View shared results page."""
-    shared = get_shared_results(share_id)
+def _shared_access(share_id, action, with_rows=True):
+    """Look up an unexpired share and audit the access. None when it is missing or expired."""
+    shared = get_shared_results(share_id) if with_rows else get_shared_results_meta(share_id)
     if not shared:
-        # Log failed access attempt
         log_audit('shared_results_access', 'shared_results', share_id, {
-            'action': 'view',
+            'action': action,
             'success': False,
             'reason': 'not_found_or_expired'
         })
-        return render_template('index.html', error='Shared results not found or expired'), 404
-    
-    # Log successful access
+        return None
     log_audit('shared_results_access', 'shared_results', share_id, {
-        'action': 'view',
+        'action': action,
         'success': True,
         'owner_user_id': shared.get('user_id'),
         'filename': shared.get('filename'),
-        'row_count': len(shared.get('results_data', []))
+        'row_count': shared.get('row_count')
     })
-    
-    # Redirect to main page with shared results context
+    return shared
+
+
+@app.route('/shared/results/<share_id>')
+@login_required
+def view_shared_results(share_id):
+    """Share link target: sends the user to the main page, which loads the shared results."""
+    if not _shared_access(share_id, 'view', with_rows=False):
+        return render_template('index.html', error='Shared results not found or expired'), 404
     return redirect(url_for('index', shared=share_id))
 
 
 @app.route('/api/shared/results/<share_id>', methods=['GET'])
+@login_required
 def api_shared_results(share_id):
     """Get shared results data."""
-    shared = get_shared_results(share_id)
+    shared = _shared_access(share_id, 'api_fetch')
     if not shared:
-        # Log failed access attempt
-        log_audit('shared_results_access', 'shared_results', share_id, {
-            'action': 'api_fetch',
-            'success': False,
-            'reason': 'not_found_or_expired'
-        })
         return jsonify({'error': 'Shared results not found or expired'}), 404
-    
-    # Log successful access
-    log_audit('shared_results_access', 'shared_results', share_id, {
-        'action': 'api_fetch',
-        'success': True,
-        'owner_user_id': shared.get('user_id'),
-        'filename': shared.get('filename'),
-        'row_count': len(shared.get('results_data', []))
-    })
-    
+
     return jsonify({
         'success': True,
         'id': share_id,
@@ -1966,40 +1977,42 @@ def api_shared_results(share_id):
 
 
 @app.route('/api/shared/results/<share_id>/render', methods=['GET'])
+@login_required
 def api_shared_results_render(share_id):
     """Render shared results as HTML partial."""
-    shared = get_shared_results(share_id)
+    shared = _shared_access(share_id, 'render')
     if not shared:
-        # Log failed access attempt
-        log_audit('shared_results_access', 'shared_results', share_id, {
-            'action': 'render',
-            'success': False,
-            'reason': 'not_found_or_expired'
-        })
         return render_template('partials/error.html', error='Shared results not found or expired'), 404
-    
-    # Log successful access
-    log_audit('shared_results_access', 'shared_results', share_id, {
-        'action': 'render',
-        'success': True,
-        'owner_user_id': shared.get('user_id'),
-        'filename': shared.get('filename'),
-        'row_count': len(shared.get('results_data', []))
-    })
-    
-    # Prepare data for the results template
-    headers = shared['headers'] or []
-    results = shared['results_data'] or []
-    stats = shared['stats_data'] or {}
-    
+
+    rows = shared['results_data'] or []
     return render_template('partials/results.html',
-                         headers=headers,
-                         rows=results,
-                         total_rows=len(results),
-                         original_filename=shared['filename'],
-                         ip_count=stats.get('total_ips') if stats else None,
-                         stats=stats,
-                         is_shared=True)
+                           headers=shared['headers'] or [],
+                           rows=rows,
+                           total_rows=len(rows),
+                           original_filename=shared['filename'],
+                           is_shared=True,
+                           share_id=share_id)
+
+
+@app.route('/shares')
+@login_required
+def my_shares():
+    """The user's shared result links; an admin sees everyone's."""
+    admin_view = is_admin()
+    shares = list_shared_results(None if admin_view else session.get('user_id'))
+    return render_template('shares.html', shares=shares, admin_view=admin_view)
+
+
+@app.route('/shares/<share_id>/delete', methods=['POST'])
+@login_required
+def delete_share(share_id):
+    """Delete a share link: its owner, or an admin."""
+    if delete_shared_results(share_id, None if is_admin() else session.get('user_id')):
+        log_audit('shared_results_deleted', 'shared_results', share_id)
+        flash('Share link deleted', 'success')
+    else:
+        flash('Share link not found', 'error')
+    return redirect(url_for('my_shares'))
 
 
 @app.route('/api/settings/concurrency', methods=['GET'])

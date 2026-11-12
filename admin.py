@@ -336,6 +336,9 @@ def init_db():
         columns = [col[1] for col in cursor.fetchall()]
         if 'user_id' not in columns:
             cursor.execute('ALTER TABLE saved_graphs ADD COLUMN user_id INTEGER')
+        # is_shared: the owner has handed out a link; any logged-in user may open a copy
+        if 'is_shared' not in columns:
+            cursor.execute('ALTER TABLE saved_graphs ADD COLUMN is_shared INTEGER NOT NULL DEFAULT 0')
     
         # Shared results table for sharing LogBoost enrichment results
         cursor.execute('''
@@ -352,6 +355,15 @@ def init_db():
             )
         ''')
     
+        # row_count lets listings and audit entries skip parsing the stored rows
+        cursor.execute("PRAGMA table_info(shared_results)")
+        if 'row_count' not in [col[1] for col in cursor.fetchall()]:
+            cursor.execute('ALTER TABLE shared_results ADD COLUMN row_count INTEGER')
+            try:
+                cursor.execute('UPDATE shared_results SET row_count = json_array_length(results_data)')
+            except sqlite3.OperationalError:
+                pass  # SQLite without JSON functions: existing shares just have no count
+
         # Audit logs table
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS audit_logs (
@@ -2908,44 +2920,32 @@ def clear_expired_chaos_cache():
 
 def save_graph(graph_id, name, data, user_id=None):
     """Save or update a graph. Only owner can update existing graph."""
-    import json
     with db() as conn:
-        cursor = conn.cursor()
-    
-        # Check if graph exists and get its owner
-        cursor.execute('SELECT user_id FROM saved_graphs WHERE id = ?', (graph_id,))
-        existing = cursor.fetchone()
-    
-        if existing:
-            # Graph exists - only update if same owner or no owner set
-            existing_user_id = existing['user_id']
-            if existing_user_id is not None and existing_user_id != user_id:
-                # Different owner - don't allow update (caller should create new graph)
-                return False
-    
-        cursor.execute('''
-            INSERT OR REPLACE INTO saved_graphs (id, name, data, user_id, created_at, updated_at)
-            VALUES (?, ?, ?, ?,
-                COALESCE((SELECT created_at FROM saved_graphs WHERE id = ?), CURRENT_TIMESTAMP),
-                CURRENT_TIMESTAMP)
-        ''', (graph_id, name, json.dumps(data), user_id, graph_id))
-    
+        existing = conn.execute('SELECT user_id FROM saved_graphs WHERE id = ?', (graph_id,)).fetchone()
+        if existing and existing['user_id'] is not None and existing['user_id'] != user_id:
+            return False  # someone else's graph: the caller saves a copy under a new ID
+
+        # Upsert, so created_at and is_shared survive an update
+        conn.execute('''
+            INSERT INTO saved_graphs (id, name, data, user_id) VALUES (?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                name = excluded.name, data = excluded.data, user_id = excluded.user_id,
+                updated_at = CURRENT_TIMESTAMP
+        ''', (graph_id, name, json.dumps(data), user_id))
         conn.commit()
         return True
 
 
 def load_graph(graph_id, user_id=None):
-    """Load a graph by ID. Requires ownership unless user_id is None (admin path)."""
+    """Load a graph the user owns, or one its owner has shared. user_id=None skips the check."""
     with db() as conn:
-        cursor = conn.cursor()
         if user_id is not None:
-            cursor.execute(
-                'SELECT * FROM saved_graphs WHERE id = ? AND user_id = ?',
+            row = conn.execute(
+                'SELECT * FROM saved_graphs WHERE id = ? AND (user_id = ? OR is_shared = 1)',
                 (graph_id, user_id)
-            )
+            ).fetchone()
         else:
-            cursor.execute('SELECT * FROM saved_graphs WHERE id = ?', (graph_id,))
-        row = cursor.fetchone()
+            row = conn.execute('SELECT * FROM saved_graphs WHERE id = ?', (graph_id,)).fetchone()
         if not row:
             return None
         result = dict(row)
@@ -2955,85 +2955,125 @@ def load_graph(graph_id, user_id=None):
 
 def list_graphs(user_id=None):
     """List saved graphs for a specific user."""
+    columns = 'id, name, is_shared, created_at, updated_at'
     with db() as conn:
-        cursor = conn.cursor()
-    
         if user_id is not None:
-            cursor.execute(
-                'SELECT id, name, created_at, updated_at FROM saved_graphs WHERE user_id = ? ORDER BY updated_at DESC',
+            rows = conn.execute(
+                f'SELECT {columns} FROM saved_graphs WHERE user_id = ? ORDER BY updated_at DESC',
                 (user_id,)
-            )
+            ).fetchall()
         else:
             # Fallback for backwards compatibility - list all (shouldn't be used normally)
-            cursor.execute('SELECT id, name, created_at, updated_at FROM saved_graphs ORDER BY updated_at DESC')
-    
-        rows = cursor.fetchall()
-    
+            rows = conn.execute(f'SELECT {columns} FROM saved_graphs ORDER BY updated_at DESC').fetchall()
         return [dict(row) for row in rows]
 
 
 def delete_graph(graph_id, user_id=None):
     """Delete a graph by ID. Only owner can delete."""
     with db() as conn:
-        cursor = conn.cursor()
-    
         if user_id is not None:
-            cursor.execute('DELETE FROM saved_graphs WHERE id = ? AND user_id = ?', (graph_id, user_id))
+            cursor = conn.execute('DELETE FROM saved_graphs WHERE id = ? AND user_id = ?', (graph_id, user_id))
         else:
-            cursor.execute('DELETE FROM saved_graphs WHERE id = ?', (graph_id,))
-    
-        deleted = cursor.rowcount > 0
+            cursor = conn.execute('DELETE FROM saved_graphs WHERE id = ?', (graph_id,))
         conn.commit()
-        return deleted
+        return cursor.rowcount > 0
+
+
+def set_graph_shared(graph_id, user_id, shared):
+    """The owner turns link sharing on or off. False when the graph is not theirs."""
+    with db() as conn:
+        cursor = conn.execute(
+            'UPDATE saved_graphs SET is_shared = ? WHERE id = ? AND user_id = ?',
+            (1 if shared else 0, graph_id, user_id)
+        )
+        conn.commit()
+        return cursor.rowcount > 0
 
 
 # ============================================
 # Shared Results Functions
 # ============================================
 
+_SHARE_META_COLUMNS = 's.id, s.user_id, s.filename, s.row_count, s.created_at, s.expires_at'
+
+
 def save_shared_results(share_id, user_id, filename, results_data, stats_data, headers, expiry_days=30):
     """Save shared results with expiration."""
-    import json
-    
     with db() as conn:
-        cursor = conn.cursor()
-    
         # Use SQLite's datetime function for timezone-consistent expiration
-        cursor.execute('''
-            INSERT INTO shared_results (id, user_id, filename, results_data, stats_data, headers, expires_at)
-            VALUES (?, ?, ?, ?, ?, ?, datetime(CURRENT_TIMESTAMP, '+' || ? || ' days'))
-        ''', (share_id, user_id, filename, json.dumps(results_data), json.dumps(stats_data) if stats_data else None, 
-              json.dumps(headers) if headers else None, expiry_days))
-    
+        conn.execute('''
+            INSERT INTO shared_results (id, user_id, filename, results_data, stats_data, headers, row_count, expires_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, datetime(CURRENT_TIMESTAMP, '+' || ? || ' days'))
+        ''', (share_id, user_id, filename, json.dumps(results_data),
+              json.dumps(stats_data) if stats_data else None,
+              json.dumps(headers) if headers else None, len(results_data), expiry_days))
         conn.commit()
         return True
 
 
 def get_shared_results(share_id):
-    """Get shared results by ID if not expired."""
-    import json
+    """Get shared results by ID if not expired, rows included."""
     with db() as conn:
-        cursor = conn.cursor()
-    
-        cursor.execute('''
-            SELECT * FROM shared_results 
-            WHERE id = ? AND expires_at > CURRENT_TIMESTAMP
-        ''', (share_id,))
-    
-        row = cursor.fetchone()
-    
-        if row:
-            return {
-                'id': row['id'],
-                'user_id': row['user_id'],
-                'filename': row['filename'],
-                'results_data': json.loads(row['results_data']),
-                'stats_data': json.loads(row['stats_data']) if row['stats_data'] else None,
-                'headers': json.loads(row['headers']) if row['headers'] else None,
-                'created_at': row['created_at'],
-                'expires_at': row['expires_at']
-            }
+        row = conn.execute(
+            'SELECT * FROM shared_results WHERE id = ? AND expires_at > CURRENT_TIMESTAMP', (share_id,)
+        ).fetchone()
+    if not row:
         return None
+    results_data = json.loads(row['results_data'])
+    return {
+        'id': row['id'],
+        'user_id': row['user_id'],
+        'filename': row['filename'],
+        'results_data': results_data,
+        'stats_data': json.loads(row['stats_data']) if row['stats_data'] else None,
+        'headers': json.loads(row['headers']) if row['headers'] else None,
+        'row_count': row['row_count'] if row['row_count'] is not None else len(results_data),
+        'created_at': row['created_at'],
+        'expires_at': row['expires_at']
+    }
+
+
+def get_shared_results_meta(share_id):
+    """Owner, filename, row count and dates of an unexpired share, without loading its rows."""
+    with db() as conn:
+        row = conn.execute(
+            f'SELECT {_SHARE_META_COLUMNS} FROM shared_results s WHERE s.id = ? AND s.expires_at > CURRENT_TIMESTAMP',
+            (share_id,)
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def get_shared_results_stats(share_id):
+    """Statistics stored with an unexpired share, or None (shares created before they were stored)."""
+    with db() as conn:
+        row = conn.execute(
+            'SELECT stats_data FROM shared_results WHERE id = ? AND expires_at > CURRENT_TIMESTAMP', (share_id,)
+        ).fetchone()
+    return json.loads(row['stats_data']) if row and row['stats_data'] else None
+
+
+def list_shared_results(user_id=None):
+    """Unexpired shares, newest first: one user's, or everyone's (user_id=None) for the admin view."""
+    query = f'''
+        SELECT {_SHARE_META_COLUMNS}, u.username
+        FROM shared_results s LEFT JOIN users u ON u.id = s.user_id
+        WHERE s.expires_at > CURRENT_TIMESTAMP {'AND s.user_id = ?' if user_id is not None else ''}
+        ORDER BY s.created_at DESC
+    '''
+    with db() as conn:
+        rows = conn.execute(query, (user_id,) if user_id is not None else ()).fetchall()
+    return [dict(row) for row in rows]
+
+
+def delete_shared_results(share_id, user_id=None):
+    """Delete a share. With user_id, only when that user owns it. True when a row was removed."""
+    with db() as conn:
+        if user_id is not None:
+            cursor = conn.execute('DELETE FROM shared_results WHERE id = ? AND user_id = ?', (share_id, user_id))
+        else:
+            cursor = conn.execute('DELETE FROM shared_results WHERE id = ?', (share_id,))
+        conn.commit()
+        return cursor.rowcount > 0
 
 
 def clear_expired_shared_results():

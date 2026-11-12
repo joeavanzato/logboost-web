@@ -588,7 +588,7 @@ window.expandStatCard = function(btn, title, column) {
     const key = btn.dataset.valuesKey;
     if (!key) return;
 
-    fetch('/stats/values/' + key, { credentials: 'same-origin' })
+    fetch('/stats/values/' + key + {{ ('?shared=' ~ share_id if share_id else '') | tojson }}, { credentials: 'same-origin' })
         .then(response => response.json())
         .then(data => {
             modalData.values = data.values || [];

@@ -220,7 +220,7 @@ class TestLargeFileWarning:
 class TestSharedResultsAuditLogging:
     """Tests for shared results audit logging."""
     
-    def test_shared_results_access_logged_on_success(self, client, test_db):
+    def test_shared_results_access_logged_on_success(self, authenticated_client, test_db):
         """Test that successful shared results access is logged."""
         import admin
         
@@ -235,7 +235,7 @@ class TestSharedResultsAuditLogging:
         )
         
         with patch('app.log_audit') as mock_audit:
-            response = client.get(f'/api/shared/results/{share_id}')
+            response = authenticated_client.get(f'/api/shared/results/{share_id}')
             
             assert response.status_code == 200
             
@@ -247,10 +247,10 @@ class TestSharedResultsAuditLogging:
             assert call_args[0][2] == share_id
             assert call_args[0][3]['success'] == True
     
-    def test_shared_results_access_logged_on_failure(self, client, test_db):
+    def test_shared_results_access_logged_on_failure(self, authenticated_client, test_db):
         """Test that failed shared results access is logged."""
         with patch('app.log_audit') as mock_audit:
-            response = client.get('/api/shared/results/nonexistent')
+            response = authenticated_client.get('/api/shared/results/nonexistent')
             
             assert response.status_code == 404
             

@@ -62,8 +62,8 @@ class TestResultsShareApi:
                 assert 'expires_in_days' in data
                 mock_save.assert_called_once()
     
-    def test_results_share_generates_short_id(self, authenticated_client, app, tmp_path):
-        """Test that share ID is short (12 chars)."""
+    def test_results_share_generates_unguessable_id(self, authenticated_client, app, tmp_path):
+        """Share IDs carry 128 bits (22 URL-safe characters)."""
         csv_file = tmp_path / "results.csv"
         csv_file.write_text("ip\n8.8.8.8\n")
         
@@ -75,7 +75,7 @@ class TestResultsShareApi:
                 response = authenticated_client.post('/api/results/share')
                 assert response.status_code == 200
                 data = json.loads(response.data)
-                assert len(data['share_id']) == 12
+                assert len(data['share_id']) == 22
     
     def test_results_share_empty_data(self, authenticated_client, app, tmp_path):
         """Test error when results file is empty (only headers)."""
@@ -108,7 +108,7 @@ class TestResultsShareApi:
 class TestSharedResultsApi:
     """Tests for GET /api/shared/results/<share_id> endpoint."""
     
-    def test_shared_results_get_success(self, client):
+    def test_shared_results_get_success(self, authenticated_client):
         """Test getting shared results data."""
         mock_shared = {
             'filename': 'results.csv',
@@ -120,7 +120,7 @@ class TestSharedResultsApi:
         }
         
         with patch('app.get_shared_results', return_value=mock_shared):
-            response = client.get('/api/shared/results/abc123')
+            response = authenticated_client.get('/api/shared/results/abc123')
             assert response.status_code == 200
             data = json.loads(response.data)
             assert data['success'] == True
@@ -130,36 +130,26 @@ class TestSharedResultsApi:
             assert 'results' in data
             assert 'stats' in data
     
-    def test_shared_results_not_found(self, client):
+    def test_shared_results_not_found(self, authenticated_client):
         """Test getting non-existent shared results."""
         with patch('app.get_shared_results', return_value=None):
-            response = client.get('/api/shared/results/nonexistent')
+            response = authenticated_client.get('/api/shared/results/nonexistent')
             assert response.status_code == 404
             data = json.loads(response.data)
             assert 'error' in data
             assert 'not found' in data['error'].lower() or 'expired' in data['error'].lower()
     
-    def test_shared_results_no_auth_required(self, client):
-        """Test that shared results don't require authentication."""
-        mock_shared = {
-            'filename': 'results.csv',
-            'headers': ['ip'],
-            'results_data': [['8.8.8.8']],
-            'stats_data': None,
-            'created_at': '2024-01-01 00:00:00',
-            'expires_at': '2024-01-31 00:00:00'
-        }
-        
-        with patch('app.get_shared_results', return_value=mock_shared):
-            # Using unauthenticated client
-            response = client.get('/api/shared/results/abc123')
-            assert response.status_code == 200
+    def test_shared_results_requires_login(self, client):
+        """Shared results are only for signed-in users."""
+        response = client.get('/api/shared/results/abc123')
+        assert response.status_code == 302
+        assert '/login' in response.location
 
 
 class TestSharedResultsRenderApi:
     """Tests for GET /api/shared/results/<share_id>/render endpoint."""
     
-    def test_shared_results_render_success(self, client):
+    def test_shared_results_render_success(self, authenticated_client):
         """Test rendering shared results as HTML."""
         mock_shared = {
             'filename': 'results.csv',
@@ -171,37 +161,28 @@ class TestSharedResultsRenderApi:
         }
         
         with patch('app.get_shared_results', return_value=mock_shared):
-            response = client.get('/api/shared/results/abc123/render')
+            response = authenticated_client.get('/api/shared/results/abc123/render')
             assert response.status_code == 200
             # Should return HTML
             assert b'<!DOCTYPE html>' in response.data or b'<' in response.data
     
-    def test_shared_results_render_not_found(self, client):
+    def test_shared_results_render_not_found(self, authenticated_client):
         """Test rendering non-existent shared results."""
         with patch('app.get_shared_results', return_value=None):
-            response = client.get('/api/shared/results/nonexistent/render')
+            response = authenticated_client.get('/api/shared/results/nonexistent/render')
             assert response.status_code == 404
     
-    def test_shared_results_render_no_auth_required(self, client):
-        """Test that render endpoint doesn't require authentication."""
-        mock_shared = {
-            'filename': 'results.csv',
-            'headers': ['ip'],
-            'results_data': [['8.8.8.8']],
-            'stats_data': None,
-            'created_at': '2024-01-01 00:00:00',
-            'expires_at': '2024-01-31 00:00:00'
-        }
-        
-        with patch('app.get_shared_results', return_value=mock_shared):
-            response = client.get('/api/shared/results/abc123/render')
-            assert response.status_code == 200
+    def test_shared_results_render_requires_login(self, client):
+        """Shared results are only for signed-in users."""
+        response = client.get('/api/shared/results/abc123/render')
+        assert response.status_code == 302
+        assert '/login' in response.location
 
 
 class TestViewSharedResults:
     """Tests for GET /shared/results/<share_id> endpoint."""
     
-    def test_view_shared_results_success(self, client):
+    def test_view_shared_results_success(self, authenticated_client):
         """Test viewing shared results page redirects to main page."""
         mock_shared = {
             'filename': 'results.csv',
@@ -212,30 +193,20 @@ class TestViewSharedResults:
             'expires_at': '2024-01-31 00:00:00'
         }
         
-        with patch('app.get_shared_results', return_value=mock_shared):
-            response = client.get('/shared/results/abc123')
+        with patch('app.get_shared_results_meta', return_value=mock_shared):
+            response = authenticated_client.get('/shared/results/abc123')
             # Should redirect
             assert response.status_code == 302
             assert 'shared=abc123' in response.location
     
-    def test_view_shared_results_not_found(self, client):
+    def test_view_shared_results_not_found(self, authenticated_client):
         """Test viewing non-existent shared results."""
-        with patch('app.get_shared_results', return_value=None):
-            response = client.get('/shared/results/nonexistent')
+        with patch('app.get_shared_results_meta', return_value=None):
+            response = authenticated_client.get('/shared/results/nonexistent')
             assert response.status_code == 404
     
-    def test_view_shared_results_no_auth_required(self, client):
-        """Test that viewing shared results doesn't require authentication."""
-        mock_shared = {
-            'filename': 'results.csv',
-            'headers': ['ip'],
-            'results_data': [['8.8.8.8']],
-            'stats_data': None,
-            'created_at': '2024-01-01 00:00:00',
-            'expires_at': '2024-01-31 00:00:00'
-        }
-        
-        with patch('app.get_shared_results', return_value=mock_shared):
-            response = client.get('/shared/results/abc123')
-            # Should redirect (not require login)
-            assert response.status_code == 302
+    def test_view_shared_results_requires_login(self, client):
+        """Shared results are only for signed-in users."""
+        response = client.get('/shared/results/abc123')
+        assert response.status_code == 302
+        assert '/login' in response.location

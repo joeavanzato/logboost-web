@@ -11,7 +11,7 @@ the session reaches its maximum age.
 
 import time
 from functools import wraps
-from flask import session, redirect, url_for, flash
+from flask import session, redirect, url_for, flash, request
 
 SESSION_LIFETIME = 7 * 24 * 3600  # seconds from login until the user must sign in again
 
@@ -44,6 +44,10 @@ def _require(admin_only):
             user = current_user()
             if not user:
                 session.clear()
+                # A share link opened while signed out: come back to it after login
+                if request.method == 'GET' and (request.path.startswith('/shared/results/')
+                                                or (request.path == '/' and request.query_string)):
+                    session['next'] = request.full_path
                 return redirect(url_for('auth_routes.login'))
             if admin_only and user['role'] != 'admin':
                 flash('Admin access required', 'error')

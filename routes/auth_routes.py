@@ -118,6 +118,7 @@ def login():
 
         if user and password_ok and user['is_active']:
             clear_login_failures(username, ip)
+            next_url = session.get('next', '')  # set by login_required for share links
             session.clear()
             session['logged_in'] = True
             session['username'] = username
@@ -128,6 +129,9 @@ def login():
             session['session_id'] = str(uuid.uuid4())  # names this session's upload/output dirs
 
             log_audit('login', 'user', str(user['id']), {'role': user['role']}, success=True)
+
+            if next_url.startswith('/') and not next_url.startswith('//'):
+                return redirect(next_url)
 
             # Redirect admins to admin panel, users to main app
             if user['role'] == ROLE_ADMIN:

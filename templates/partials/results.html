@@ -45,6 +45,16 @@
         </div>
         <div class="results-actions">
             {% if not is_shared %}
+            <a class="share-btn" href="/shares" target="_blank" rel="noopener" title="Manage my share links" style="text-decoration: none;">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="8" y1="6" x2="21" y2="6"/>
+                    <line x1="8" y1="12" x2="21" y2="12"/>
+                    <line x1="8" y1="18" x2="21" y2="18"/>
+                    <line x1="3" y1="6" x2="3.01" y2="6"/>
+                    <line x1="3" y1="12" x2="3.01" y2="12"/>
+                    <line x1="3" y1="18" x2="3.01" y2="18"/>
+                </svg>
+            </a>
             <button class="share-btn" onclick="window.shareResults()" id="share-results-btn" title="Share results">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <circle cx="18" cy="5" r="3"/>
@@ -894,7 +904,7 @@
         var container = document.getElementById('stats-container');
         if (!container || container.dataset.loaded === 'true') return;
         
-        htmx.ajax('GET', '/stats', {
+        htmx.ajax('GET', '/stats' + {{ ('?shared=' ~ share_id if share_id else '') | tojson }}, {
             target: '#stats-container',
             swap: 'innerHTML'
         }).then(function() {
