@@ -18,7 +18,7 @@ import requests
 from contextlib import contextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
-from flask import Blueprint, render_template, request, redirect, url_for, session, flash, jsonify
+from flask import Blueprint, render_template, request, redirect, url_for, session, flash, jsonify, g, has_request_context
 from auth import login_required, admin_required
 
 # Get logger
@@ -812,32 +812,13 @@ def settings():
         if shodan_key:
             shodan_info = get_shodan_account_info(shodan_key)
     
-        # Get DNS settings
-        cursor.execute("SELECT value FROM settings WHERE key = 'dns_servers'")
-        dns_servers_row = cursor.fetchone()
-        dns_servers = dns_servers_row['value'] if dns_servers_row else '8.8.8.8,8.8.4.4,1.1.1.1'
-    
-        cursor.execute("SELECT value FROM settings WHERE key = 'dns_cache_ttl'")
-        dns_cache_ttl_row = cursor.fetchone()
-        dns_cache_ttl = int(dns_cache_ttl_row['value']) if dns_cache_ttl_row else 3600
-    
-        cursor.execute("SELECT value FROM settings WHERE key = 'dns_timeout'")
-        dns_timeout_row = cursor.fetchone()
-        dns_timeout = int(dns_timeout_row['value']) if dns_timeout_row else 5
-    
-        cursor.execute("SELECT value FROM settings WHERE key = 'dns_max_domains'")
-        dns_max_domains_row = cursor.fetchone()
-        dns_max_domains = int(dns_max_domains_row['value']) if dns_max_domains_row else 100
-    
-        # Get concurrency settings
-        cursor.execute("SELECT value FROM settings WHERE key = 'dns_concurrency'")
-        dns_concurrency_row = cursor.fetchone()
-        dns_concurrency = int(dns_concurrency_row['value']) if dns_concurrency_row else 10
-    
-        cursor.execute("SELECT value FROM settings WHERE key = 'whois_concurrency'")
-        whois_concurrency_row = cursor.fetchone()
-        whois_concurrency = int(whois_concurrency_row['value']) if whois_concurrency_row else 5
-    
+        # DNS and concurrency settings (tolerant of bad stored values)
+        _dns = get_dns_settings()
+        dns_servers, dns_cache_ttl = _dns['servers'], _dns['cache_ttl']
+        dns_timeout, dns_max_domains = _dns['timeout'], _dns['max_domains']
+        _conc = get_concurrency_settings()
+        dns_concurrency, whois_concurrency = _conc['dns_concurrency'], _conc['whois_concurrency']
+
         # Get WHOIS cache TTL
         cursor.execute("SELECT value FROM settings WHERE key = 'whois_cache_ttl'")
         whois_cache_ttl_row = cursor.fetchone()
@@ -2221,60 +2202,20 @@ scheduler = TaskScheduler()
 
 def get_dns_settings():
     """Get DNS settings from database."""
-    with db() as conn:
-        cursor = conn.cursor()
-    
-        settings = {
-            'servers': '8.8.8.8,8.8.4.4,1.1.1.1',
-            'cache_ttl': 3600,
-            'timeout': 5,
-            'max_domains': 100
-        }
-    
-        cursor.execute("SELECT value FROM settings WHERE key = 'dns_servers'")
-        row = cursor.fetchone()
-        if row:
-            settings['servers'] = row['value']
-    
-        cursor.execute("SELECT value FROM settings WHERE key = 'dns_cache_ttl'")
-        row = cursor.fetchone()
-        if row:
-            settings['cache_ttl'] = int(row['value'])
-    
-        cursor.execute("SELECT value FROM settings WHERE key = 'dns_timeout'")
-        row = cursor.fetchone()
-        if row:
-            settings['timeout'] = int(row['value'])
-    
-        cursor.execute("SELECT value FROM settings WHERE key = 'dns_max_domains'")
-        row = cursor.fetchone()
-        if row:
-            settings['max_domains'] = int(row['value'])
-    
-        return settings
+    return {
+        'servers': get_setting('dns_servers') or '8.8.8.8,8.8.4.4,1.1.1.1',
+        'cache_ttl': get_int_setting('dns_cache_ttl', 3600, lo=0),
+        'timeout': get_int_setting('dns_timeout', 5, lo=1, hi=60),
+        'max_domains': get_int_setting('dns_max_domains', 100, lo=1),
+    }
 
 
 def get_concurrency_settings():
     """Get concurrency settings from database."""
-    with db() as conn:
-        cursor = conn.cursor()
-    
-        settings = {
-            'dns_concurrency': 10,
-            'whois_concurrency': 5
-        }
-    
-        cursor.execute("SELECT value FROM settings WHERE key = 'dns_concurrency'")
-        row = cursor.fetchone()
-        if row:
-            settings['dns_concurrency'] = int(row['value'])
-    
-        cursor.execute("SELECT value FROM settings WHERE key = 'whois_concurrency'")
-        row = cursor.fetchone()
-        if row:
-            settings['whois_concurrency'] = int(row['value'])
-    
-        return settings
+    return {
+        'dns_concurrency': get_int_setting('dns_concurrency', 10, lo=1, hi=50),
+        'whois_concurrency': get_int_setting('whois_concurrency', 5, lo=1, hi=20),
+    }
 
 
 def get_cached_dns(query, record_type):
@@ -2981,24 +2922,49 @@ def get_shared_results_expiry_days():
 # Settings Helper Functions
 # ============================================
 
+def _all_settings():
+    """Every setting as {key: value}: one query, reused for the rest of the request.
+
+    ponytail: request-scoped cache, so there is no invalidation to get wrong.
+    Background threads query each time; add a TTL cache if that ever shows up in a profile.
+    """
+    if has_request_context() and '_settings' in g:
+        return g._settings
+    with db() as conn:
+        settings = {row['key']: row['value'] for row in conn.execute('SELECT key, value FROM settings')}
+    if has_request_context():
+        g._settings = settings
+    return settings
+
+
 def get_setting(key, default=None):
     """Get a setting value from the database."""
-    with db() as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT value FROM settings WHERE key = ?", (key,))
-        row = cursor.fetchone()
-        return row['value'] if row else default
+    return _all_settings().get(key, default)
+
+
+def get_int_setting(key, default, lo=None, hi=None):
+    """Integer setting; a missing, non-numeric or out-of-range stored value never raises."""
+    try:
+        value = int(get_setting(key, default))
+    except (TypeError, ValueError):
+        return default
+    if lo is not None:
+        value = max(lo, value)
+    if hi is not None:
+        value = min(hi, value)
+    return value
 
 
 def set_setting(key, value):
     """Set a setting value in the database."""
     with db() as conn:
-        cursor = conn.cursor()
-        cursor.execute('''
-            INSERT OR REPLACE INTO settings (key, value, updated_at) 
+        conn.execute('''
+            INSERT OR REPLACE INTO settings (key, value, updated_at)
             VALUES (?, ?, CURRENT_TIMESTAMP)
         ''', (key, value))
         conn.commit()
+    if has_request_context():
+        g.pop('_settings', None)
 
 
 def get_feed_config_path():

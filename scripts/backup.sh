@@ -45,6 +45,11 @@ log_info()  { echo "${GREEN}[INFO]${NC} $1"; }
 log_warn()  { echo "${YELLOW}[WARN]${NC} $1"; }
 log_error() { echo "${RED}[ERROR]${NC} $1" >&2; }
 
+# The admin DB runs in WAL mode; a plain file copy can miss committed data.
+require_sqlite3() {
+    command -v sqlite3 >/dev/null 2>&1 || { log_error "sqlite3 is required for a consistent backup/restore."; exit 1; }
+}
+
 usage() {
     sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'
 }
@@ -54,6 +59,7 @@ usage() {
 # ============================================================
 cmd_backup() {
     BACKUP_DIR="${1:-./backups}"
+    require_sqlite3
 
     mkdir -p "${BACKUP_DIR}/latest"
 
@@ -185,6 +191,7 @@ restore_db() {
 }
 
 cmd_restore() {
+    require_sqlite3
     SRC_ADMIN=""
     SRC_THREAT=""
     FROM_DIR=""

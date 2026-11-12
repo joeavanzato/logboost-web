@@ -337,3 +337,11 @@ class TestAdminSettingsPage:
         """Test that settings page loads for admin."""
         response = admin_client.get('/admin/settings')
         assert response.status_code == 200
+
+
+def test_settings_page_survives_bad_stored_dns_value(admin_client, test_db):
+    """A non-numeric DNS setting in the DB must not break the settings page (audit B5)."""
+    import admin
+    admin.set_setting('dns_timeout', 'not-a-number')
+    assert admin_client.get('/admin/settings').status_code == 200
+    assert admin.get_dns_settings()['timeout'] == 5
