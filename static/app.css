@@ -34,17 +34,23 @@ button, input, select, textarea { font: inherit; color: inherit; }
 /* ---------- shell ---------- */
 .app { display: grid; grid-template-columns: 232px minmax(0, 1fr); height: 100vh; }
 .side { background: var(--bg-side); border-right: 1px solid var(--border-side); padding: 20px 12px; display: flex; flex-direction: column; overflow-y: auto; }
-.logo { display: flex; align-items: center; gap: 10px; padding: 2px 10px 18px; font-weight: 600; font-size: 16px; }
+.side-top { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 0 0 16px 10px; min-height: 48px; }
+.logo { display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: 16px; color: var(--text); }
+.logo:hover { color: var(--text); }
+.ico { width: 18px; height: 18px; flex: none; }
+.side-toggle { width: 32px; height: 32px; flex: none; display: grid; place-items: center; background: none; border: 1px solid transparent; border-radius: 6px; color: var(--dim); cursor: pointer; }
+.side-toggle:hover { color: var(--text); background: var(--active); }
 .bars { display: flex; align-items: flex-end; gap: 3px; height: 20px; }
 .bars i { width: 5px; border-radius: 1.5px; background: var(--green); }
 .bars i:nth-child(1) { height: 15px; } .bars i:nth-child(2) { height: 20px; } .bars i:nth-child(3) { height: 12px; background: var(--green-deep); }
-.side .eyebrow { padding: 16px 10px 6px; }
+.side .eyebrow { padding: 16px 10px 6px; min-height: 35px; }
 .nav { display: flex; flex-direction: column; gap: 2px; }
-.nav a { position: relative; display: flex; justify-content: space-between; align-items: center; padding: 8px 10px; border-radius: 6px; color: #98a3ad; }
+.nav a { position: relative; display: flex; align-items: center; gap: 10px; padding: 7px 10px; min-height: 32px; border-radius: 6px; color: #98a3ad; }
+.nav a .lbl { flex: 1; min-width: 0; }
 .nav a:hover { color: var(--text); }
 .nav a.on { background: var(--active); color: var(--text); }
 .nav a.on::before { content: ''; position: absolute; left: 0; top: 8px; bottom: 8px; width: 2px; border-radius: 2px; background: var(--green); }
-.nav a span { font: 11px var(--mono); color: var(--muted); }
+.nav a .badge { font: 11px var(--mono); color: var(--muted); }
 .side-foot { margin-top: auto; display: flex; flex-direction: column; gap: 12px; padding-top: 16px; }
 .setup-card { border: 1px solid #2a2418; background: #16130d; border-radius: 8px; padding: 12px; display: flex; flex-direction: column; gap: 8px; color: var(--text); font-size: 13px; }
 .setup-card:hover { color: var(--text); border-color: var(--amber-border); }
@@ -52,6 +58,12 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .bar i { display: block; height: 100%; background: var(--amber); border-radius: 2px; }
 .bar.g { background: var(--border-input); } .bar.g i { background: var(--green); }
 .user { display: flex; align-items: center; gap: 10px; padding: 14px 6px 0; border-top: 1px solid var(--border-side); font-size: 13px; }
+.user-link { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; color: var(--text); }
+.user-link:hover { color: var(--text); }
+.user form { margin: 0; }
+.signout { display: inline-flex; align-items: center; gap: 6px; }
+.signout .ico { display: none; }
+.setup-count { font-size: 12px; }
 .avatar { width: 30px; height: 30px; border-radius: 50%; background: var(--active); color: var(--green); display: grid; place-items: center; font-weight: 600; flex: none; }
 .main { overflow-y: auto; padding: 36px 40px 56px; position: relative; }
 .screen { display: none; flex-direction: column; gap: 22px; min-height: 100%; }
@@ -211,3 +223,24 @@ td form, .line form { margin: 0; }
 .seg a:last-child { border-right: 0; }
 .seg a.on { background: var(--active); color: var(--text); font-weight: 500; }
 .seg a:hover { color: var(--text); }
+
+/* ---------- collapsed sidebar: icons only ---------- */
+/* The class is on <html> (set by js/sidebar.js before first paint). 56px = a 32px icon button plus the side padding. */
+.side-collapsed .app { grid-template-columns: 56px minmax(0, 1fr); }
+.side-collapsed .side { padding: 20px 12px; overflow-x: hidden; }
+.side-collapsed .side .lbl, .side-collapsed .nav a .badge { display: none; }
+.side-collapsed .side-top { flex-direction: column; padding: 0 0 8px; gap: 10px; }
+.side-collapsed .logo { width: 32px; height: 32px; justify-content: center; }
+.side-collapsed .side-toggle .ico { transform: rotate(180deg); }
+.side-collapsed .side .eyebrow { padding: 0; min-height: 0; margin: 10px 4px; border-top: 1px solid var(--border-side); }
+.side-collapsed .nav a { width: 32px; height: 32px; padding: 0; justify-content: center; }
+.side-collapsed .nav a.on::before { left: -12px; top: 6px; bottom: 6px; }
+.side-collapsed .setup-card { padding: 6px 0; align-items: center; gap: 5px; }
+.side-collapsed .setup-card .row { justify-content: center !important; }
+.side-collapsed .setup-count { font-size: 11px; }
+.side-collapsed .setup-card .bar { width: 22px; }
+.side-collapsed .user { flex-direction: column; padding: 12px 0 0; gap: 8px; }
+.side-collapsed .user-link { flex: none; }
+.side-collapsed .signout { width: 32px; height: 32px; justify-content: center; border-radius: 6px; }
+.side-collapsed .signout:hover { background: var(--active); }
+.side-collapsed .signout .ico { display: block; }

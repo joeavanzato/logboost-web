@@ -53,3 +53,15 @@ def test_setup_steps_counts_completed_steps(app, test_db, monkeypatch):
     assert status['total'] == 5
     assert status['steps'] == {'admin': True, 'geo': True, 'threat_db': True, 'shodan': False, 'schedules': True}
     assert status['done'] == 4
+
+
+def test_sidebar_has_a_collapse_toggle_and_an_icon_and_tooltip_per_item(admin_client):
+    html = admin_client.get('/account/password').get_data(as_text=True)
+    head = html.split('</head>')[0]
+    assert '/static/js/sidebar.js' in head  # in the head, so the stored state applies before first paint
+    assert 'data-side-toggle' in html
+    # every navigation link carries an icon and a title that names it when labels are hidden
+    links = [chunk.split('</a>')[0] for chunk in html.split('data-nav="')[1:]]
+    assert len(links) == 11
+    assert all('<svg class="ico"' in link and 'title="' in link for link in links)
+    assert 'title="Sign out"' in html

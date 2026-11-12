@@ -6,18 +6,43 @@
 <meta name="csrf-token" content="{{ csrf_token() }}">
 <title>{% block title %}LogBoost{% endblock %}</title>
 <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+{#- Loaded in the head so a collapsed sidebar is applied before the first paint. -#}
+<script src="{{ url_for('static', filename='js/sidebar.js') }}"></script>
 {% block head %}{% endblock %}
 </head>
 {#- Child templates set `active` to the key of their sidebar item. -#}
 {%- set is_admin = session.get('user_role') == 'admin' -%}
+{#- Sidebar icons: static markup, 24x24, drawn with the current text colour. -#}
+{%- set ICONS = {
+  'enrich': '<circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/>',
+  'graph': '<circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="6" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="M8.2 10.9l7.6-3.8M8.2 13.1l7.6 3.8"/>',
+  'intel': '<path d="M12 3l7 3v6c0 4.5-3 7.8-7 9-4-1.2-7-4.5-7-9V6z"/>',
+  'shares': '<path d="M10 14a4 4 0 005.7 0l3-3a4 4 0 00-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 00-5.7 0l-3 3a4 4 0 005.7 5.7l1-1"/>',
+  'overview': '<rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/>',
+  'tasks': '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
+  'feeds': '<path d="M5 11a8 8 0 018 8M5 5a14 14 0 0114 14"/><circle cx="6" cy="18" r="1.5"/>',
+  'sources': '<ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v6c0 1.7 3.1 3 7 3s7-1.3 7-3V6M5 12v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6"/>',
+  'settings': '<path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/>',
+  'audit': '<path d="M8 6h12M8 12h12M8 18h12"/><circle cx="4" cy="6" r="1"/><circle cx="4" cy="12" r="1"/><circle cx="4" cy="18" r="1"/>',
+  'accounts': '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0113 0"/><path d="M16 4.6a3.5 3.5 0 010 6.8M18 14.2a6.5 6.5 0 013.5 5.8"/>',
+  'signout': '<path d="M15 4h3a2 2 0 012 2v12a2 2 0 01-2 2h-3"/><path d="M10 16l-4-4 4-4M6 12h10"/>',
+  'collapse': '<path d="M11 6l-6 6 6 6M19 6l-6 6 6 6"/>',
+} -%}
+{%- macro icon(name) -%}
+<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{{ ICONS[name] | safe }}</svg>
+{%- endmacro %}
+{#- `title` names the item when the sidebar is collapsed to icons. -#}
 {%- macro nav_item(key, label, href, badge=None) -%}
-<a href="{{ href }}" data-nav="{{ key }}"{% if active == key %} class="on" aria-current="page"{% endif %}>{{ label }}{% if badge is not none %} <span>{{ badge }}</span>{% endif %}</a>
+<a href="{{ href }}" data-nav="{{ key }}" title="{{ label }}"{% if active == key %} class="on" aria-current="page"{% endif %}>{{ icon(key) }}<span class="lbl">{{ label }}</span>{% if badge is not none %}<span class="badge">{{ badge }}</span>{% endif %}</a>
 {%- endmacro %}
 <body{% block body_attrs %}{% endblock %}>
 <div class="app">
   <aside class="side">
-    <a class="logo" href="{{ url_for('index') }}" style="color:var(--text)"><span class="bars"><i></i><i></i><i></i></span>LogBoost</a>
-    <div class="eyebrow">Workspace</div>
+    <div class="side-top">
+      <a class="logo" href="{{ url_for('index') }}" title="LogBoost"><span class="bars"><i></i><i></i><i></i></span><span class="lbl">LogBoost</span></a>
+      <button type="button" class="side-toggle" data-side-toggle aria-expanded="true" aria-label="Collapse sidebar" title="Collapse sidebar">{{ icon('collapse') }}</button>
+    </div>
+    <div class="eyebrow"><span class="lbl">Workspace</span></div>
     <nav class="nav" aria-label="Workspace">
       {{ nav_item('enrich', 'Enrich', url_for('index') ~ '#adhoc') }}
       {{ nav_item('graph', 'Graph', url_for('index') ~ '#graph') }}
@@ -25,7 +50,7 @@
       {{ nav_item('shares', 'Shares', url_for('my_shares')) }}
     </nav>
     {% if is_admin %}
-    <div class="eyebrow">Admin</div>
+    <div class="eyebrow"><span class="lbl">Admin</span></div>
     <nav class="nav" aria-label="Admin">
       {{ nav_item('overview', 'Overview', url_for('admin.dashboard')) }}
       {{ nav_item('tasks', 'Tasks', url_for('admin.tasks')) }}
@@ -40,18 +65,20 @@
       {% if is_admin %}
         {% set setup = setup_steps() %}
         {% if setup.done < setup.total %}
-        <a class="setup-card" href="{{ url_for('admin.dashboard') }}">
-          <span class="row" style="justify-content:space-between"><span>Finish setup</span><span class="mono amber" style="font-size:12px">{{ setup.done }} / {{ setup.total }}</span></span>
+        <a class="setup-card" href="{{ url_for('admin.dashboard') }}" title="Finish setup: {{ setup.done }} of {{ setup.total }} steps done">
+          <span class="row" style="justify-content:space-between"><span class="lbl">Finish setup</span><span class="mono amber setup-count">{{ setup.done }}/{{ setup.total }}</span></span>
           <span class="bar"><i style="width:{{ (100 * setup.done / setup.total) | round | int }}%"></i></span>
         </a>
         {% endif %}
       {% endif %}
       <div class="user">
-        <span class="avatar">{{ (session.get('username') or '?')[:1] | upper }}</span>
-        <a href="{{ url_for('auth_routes.account_password') }}" class="grow ell" style="color:var(--text)" title="Your account">{{ session.get('username', '') }}<br><span class="faint" style="font-size:12px">{{ 'Administrator' if is_admin else 'User' }}</span></a>
+        <a class="user-link" href="{{ url_for('auth_routes.account_password') }}" title="Your account: {{ session.get('username', '') }}">
+          <span class="avatar">{{ (session.get('username') or '?')[:1] | upper }}</span>
+          <span class="lbl ell">{{ session.get('username', '') }}<br><span class="faint" style="font-size:12px">{{ 'Administrator' if is_admin else 'User' }}</span></span>
+        </a>
         <form method="post" action="{{ url_for('auth_routes.logout') }}">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-          <button type="submit" class="linkbtn">Sign out</button>
+          <button type="submit" class="linkbtn signout" title="Sign out" aria-label="Sign out">{{ icon('signout') }}<span class="lbl">Sign out</span></button>
         </form>
       </div>
     </div>
