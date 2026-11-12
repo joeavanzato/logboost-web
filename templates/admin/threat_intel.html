@@ -13,7 +13,11 @@
     {% if error %}
     <div class="sub">The feed list could not be loaded.</div>
     {% else %}
-    <div class="sub" id="feeds-sub">{{ feeds | length }} source{{ 's' if feeds | length != 1 }} · {{ all_tags | length }} tag{{ 's' if all_tags | length != 1 }}</div>
+    {% if indexed_ips is not none and intel_updated %}
+    <div class="sub" id="feeds-sub">{{ feeds | length }} source{{ 's' if feeds | length != 1 }} · {{ '{:,}'.format(indexed_ips) }} IP{{ 's' if indexed_ips != 1 }} indexed · <span title="{{ intel_updated }}">updated {{ intel_updated | ago }}</span></div>
+    {% else %}
+    <div class="sub" id="feeds-sub" data-tag-count>{{ feeds | length }} source{{ 's' if feeds | length != 1 }} · {{ all_tags | length }} tag{{ 's' if all_tags | length != 1 }}</div>
+    {% endif %}
     {% endif %}
   </div>
   <div class="actions">
@@ -40,6 +44,13 @@
   </div>
 </div>
 {% else %}
+<div class="row" id="health-pills" role="group" aria-label="Filter by health" style="flex-wrap:wrap">
+  <button type="button" class="pill" data-health="healthy" aria-pressed="false"><span class="dot green"></span><span><span data-count>{{ health_counts.healthy }}</span> healthy</span></button>
+  <button type="button" class="pill red{{ ' hide' if not health_counts.failing }}" data-health="failing" aria-pressed="false"><span class="dot red"></span><span><span data-count>{{ health_counts.failing }}</span> failing</span></button>
+  <button type="button" class="pill amber{{ ' hide' if not health_counts.stale }}" data-health="stale" aria-pressed="false"><span class="dot amber"></span><span><span data-count>{{ health_counts.stale }}</span> stale (over 2 days)</span></button>
+  <button type="button" class="pill{{ ' hide' if not health_counts.none }}" data-health="none" aria-pressed="false"><span class="dot grey"></span><span><span data-count>{{ health_counts.none }}</span> not fetched yet</span></button>
+</div>
+
 <div class="row" style="align-items:flex-start">
   <input class="input" type="search" id="feed-search" placeholder="Search name or URL" aria-label="Search name or URL" style="width:260px;flex:none">
   <div class="chips" id="tag-chips" role="group" aria-label="Filter by tag">
@@ -54,14 +65,17 @@
 
 <div class="card">
   <table>
-    <thead><tr><th>Feed</th><th>Tags</th><th>Test</th><th></th></tr></thead>
+    <thead><tr><th>Feed</th><th>Tags</th><th class="num">Entries</th><th>Fetched</th><th>Status</th><th></th></tr></thead>
     <tbody id="feed-rows">
       {% for feed in feeds %}
       {% set url = (feed.url or '') ~ '' %}
-      <tr data-index="{{ loop.index0 }}" data-name="{{ feed.name }}" data-url="{{ url }}">
+      {% set h = health[loop.index0] %}
+      <tr data-index="{{ loop.index0 }}" data-name="{{ feed.name }}" data-url="{{ url }}" data-health="{{ h.state }}">
         <td style="overflow-wrap:anywhere"><b data-feed-name>{{ feed.name }}</b><small data-feed-url title="{{ url }}">{{ url.split('://', 1)[-1] }}</small></td>
         <td><div class="row" data-feed-tags style="flex-wrap:wrap;gap:6px">{{ feed_tags(feed) }}</div></td>
-        <td data-feed-test style="max-width:280px;font-size:13px"></td>
+        <td class="num">{{ '{:,}'.format(h.entries) if h.entries is not none else '—' }}</td>
+        <td class="muted" data-feed-fetched style="white-space:nowrap"{% if h.fetched %} title="{{ h.fetched.strftime('%Y-%m-%d %H:%M:%S') }}"{% endif %}>{{ h.fetched | ago if h.fetched else '—' }}</td>
+        <td data-feed-status style="max-width:260px;font-size:13px"><span class="dot {{ h.dot }}"{% if h.title %} title="{{ h.title }}"{% endif %}>{{ h.label }}</span></td>
         <td>
           <div class="row" style="justify-content:flex-end;gap:6px">
             <button type="button" class="btn sm" data-feed-edit>Edit</button>

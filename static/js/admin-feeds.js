@@ -1,4 +1,4 @@
-// Threat feeds page: search and tag filter, add/edit dialog, connectivity tests, delete.
+// Threat feeds page: search, tag and health filters, add/edit dialog, connectivity tests, delete.
 // Feed names, URLs and tags are untrusted: everything is written with textContent or dataset.
 (function () {
   'use strict';
@@ -14,6 +14,7 @@
   var sub = document.getElementById('feeds-sub');
   var search = document.getElementById('feed-search');
   var chips = document.getElementById('tag-chips');
+  var pills = document.getElementById('health-pills');
   var tbody = document.getElementById('feed-rows');
   var noMatch = document.getElementById('feeds-no-match');
   var testAllBtn = document.getElementById('test-all');
@@ -30,6 +31,7 @@
   var submitBtn = document.getElementById('feed-submit');
 
   var selectedTag = null;   // null = "All"
+  var selectedHealth = null;   // null = any; else healthy, failing, stale or none
   var editingRow = null;    // null while adding
   var dialogTags = [];
 
@@ -85,7 +87,8 @@
       var tags = rowTags(row);
       var haystack = [row.dataset.name, row.dataset.url].concat(tags).join('\n').toLowerCase();
       var match = (!query || haystack.indexOf(query) !== -1) &&
-                  (selectedTag === null || tags.indexOf(selectedTag) !== -1);
+                  (selectedTag === null || tags.indexOf(selectedTag) !== -1) &&
+                  (selectedHealth === null || row.dataset.health === selectedHealth);
       row.classList.toggle('hide', !match);
       if (match) shown += 1;
     });
@@ -122,8 +125,29 @@
       option.value = tag;
       suggestions.appendChild(option);
     });
-    sub.textContent = all.length + (all.length === 1 ? ' source' : ' sources') + ' · ' +
-                      names.length + (names.length === 1 ? ' tag' : ' tags');
+    // With intel statistics the subtitle is the server's "N sources · X IPs indexed · updated …".
+    if ('tagCount' in sub.dataset) {
+      sub.textContent = all.length + (all.length === 1 ? ' source' : ' sources') + ' · ' +
+                        names.length + (names.length === 1 ? ' tag' : ' tags');
+    }
+    applyFilter();
+  }
+
+  // Recount the health pills from the rows (after a test) and re-apply the filters.
+  function refreshHealth() {
+    if (!pills) return;
+    var counts = {};
+    rows().forEach(function (row) { counts[row.dataset.health] = (counts[row.dataset.health] || 0) + 1; });
+    Array.prototype.forEach.call(pills.querySelectorAll('.pill'), function (pill) {
+      var state = pill.dataset.health;
+      var count = counts[state] || 0;
+      pill.querySelector('[data-count]').textContent = String(count);
+      if (!count && state === selectedHealth) selectedHealth = null;
+      pill.classList.toggle('hide', !count && state !== 'healthy');
+      var on = state === selectedHealth;
+      pill.setAttribute('aria-pressed', on ? 'true' : 'false');
+      pill.style.outline = on ? '2px solid currentColor' : '';
+    });
     applyFilter();
   }
 
@@ -140,17 +164,26 @@
       });
       applyFilter();
     });
+    if (pills) {
+      pills.addEventListener('click', function (event) {
+        var clicked = event.target.closest('.pill');
+        if (!clicked) return;
+        selectedHealth = clicked.dataset.health === selectedHealth ? null : clicked.dataset.health;
+        refreshHealth();
+      });
+    }
   }
 
   // ---------- connectivity tests ----------
 
+  // A test result becomes the row's status, as the server has just recorded it.
   function showTest(row, data) {
-    var cell = row.querySelector('[data-feed-test]');
+    var cell = row.querySelector('[data-feed-status]');
     var result;
     if (data === null) {
       result = el('span', 'muted', 'Testing…');
     } else if (data.ok) {
-      result = el('span', 'dot green', 'Reachable');
+      result = el('span', 'dot green', 'Healthy');
       var parts = [];
       if (data.status_code) parts.push('HTTP ' + data.status_code);
       if (data.elapsed_ms != null) parts.push(data.elapsed_ms + ' ms');
@@ -159,12 +192,18 @@
       if (data.content_length != null) parts.push(Number(data.content_length).toLocaleString() + ' bytes');
       if (data.redirect) parts.push('redirects to ' + data.redirect);
       result.title = parts.join(' · ');
+      var fetched = row.querySelector('[data-feed-fetched]');
+      fetched.textContent = 'just now';
+      fetched.title = new Date().toLocaleString();
+      row.dataset.health = 'healthy';
     } else {
-      result = el('span', 'dot red', data.error || 'Failed');
-      result.style.whiteSpace = 'normal';
-      result.style.overflowWrap = 'anywhere';
+      var error = String(data.error || 'Failed');
+      result = el('span', 'dot red', error.length > 40 ? error.slice(0, 40).trim() + '…' : error);
+      result.title = error;
+      row.dataset.health = 'failing';
     }
     cell.replaceChildren(result);
+    if (data !== null) refreshHealth();
   }
 
   // Resolves to true when the feed answered.
@@ -267,7 +306,6 @@
     var name = String(feed.name == null ? '' : feed.name);
     var url = String(feed.url == null ? '' : feed.url);
     var tags = Array.isArray(feed.type) ? feed.type : [];
-    if (url !== row.dataset.url) row.querySelector('[data-feed-test]').replaceChildren();
     row.dataset.name = name;
     row.dataset.url = url;
     row.querySelector('[data-feed-name]').textContent = name;
@@ -306,9 +344,9 @@
 
     var row = editingRow;
     var pending;
+    var changes = {};
     if (row) {
       // Send only what changed, as the old inline edits did.
-      var changes = {};
       if (name !== row.dataset.name) changes.name = name;
       if (url !== row.dataset.url) changes.url = url;
       if (dialogTags.join('\n') !== rowTags(row).join('\n')) changes.type = dialogTags.slice();
@@ -326,6 +364,8 @@
     pending.then(function (data) {
       if (data.error) throw new Error(data.error);
       if (!row) { reloadWith('Added feed "' + name + '".'); return; }
+      // Entries follow the name and health follows the URL: let the server render them again.
+      if ('name' in changes || 'url' in changes) { reloadWith('Saved "' + name + '".'); return; }
       updateRow(row, data.feed || { name: name, url: url, type: dialogTags });
       refreshTags();
       dialog.close();

@@ -29,9 +29,9 @@ document.addEventListener('DOMContentLoaded', function () {
 
 // ---- views ----
 // Each view is a .tab-panel with id "<name>-panel"; the URL hash names the open view.
-const WORKSPACE_VIEWS = ['adhoc', 'upload', 'graph', 'graph-stats', 'intel-browser'];
+const WORKSPACE_VIEWS = ['adhoc', 'upload', 'runs', 'graph', 'graph-stats', 'intel-browser'];
 // Which sidebar item is highlighted for each view
-const VIEW_NAV = { 'adhoc': 'enrich', 'upload': 'enrich', 'graph': 'graph', 'graph-stats': 'graph', 'intel-browser': 'intel' };
+const VIEW_NAV = { 'adhoc': 'enrich', 'upload': 'enrich', 'runs': 'enrich', 'graph': 'graph', 'graph-stats': 'graph', 'intel-browser': 'intel' };
 
 function switchTab(tabName, updateUrl = true) {
     if (!WORKSPACE_VIEWS.includes(tabName)) return;
@@ -54,11 +54,12 @@ function switchTab(tabName, updateUrl = true) {
     // Results belong to the Enrich views
     const resultsContainer = document.getElementById('results-container');
     if (resultsContainer) {
-        resultsContainer.style.display = (tabName === 'adhoc' || tabName === 'upload') ? '' : 'none';
+        resultsContainer.style.display = ['adhoc', 'upload', 'runs'].includes(tabName) ? '' : 'none';
     }
 
     if (tabName === 'graph-stats' && window.refreshGraphStats) window.refreshGraphStats();
     if (tabName === 'intel-browser' && window.intelInit) window.intelInit();  // lazy first load
+    if (tabName === 'runs' && window.runsRefresh) window.runsRefresh();
 
     if (updateUrl) window.history.replaceState({}, '', `#${tabName}`);
     const main = document.querySelector('.main');

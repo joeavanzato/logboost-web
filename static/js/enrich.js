@@ -513,7 +513,7 @@ async function loadSharedResults(shareId) {
         });
         window.addEventListener('hashchange', () => {
             const name = window.location.hash.slice(1);
-            if (name && name !== 'adhoc' && name !== 'upload') closeDrawer();
+            if (name && !['adhoc', 'upload', 'runs'].includes(name)) closeDrawer();
         });
     }
 

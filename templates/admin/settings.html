@@ -51,11 +51,12 @@
     </div>
 
     <div class="card">
-      <div class="card-h"><h2>Sharing</h2></div>
+      <div class="card-h"><h2>Sharing and history</h2></div>
       <form method="post" action="{{ url_for('admin.save_sharing_settings') }}">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         {{ num('shared_results_expiry_days', 'Share links expire after', shared_results_expiry_days, 'Default: 30 days. After this, shared links stop working and their data is deleted.', 1, 365, 'days', 74) }}
-        {{ save('Save sharing') }}
+        {{ num('run_history_days', 'Keep past runs for', run_history_days(), 'Default: 7 days. Each user\'s enrichment results are kept this long so they can be reopened; only that user can see them.', 1, 365, 'days', 74) }}
+        {{ save('Save sharing and history') }}
       </form>
     </div>
   </div>

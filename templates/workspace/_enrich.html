@@ -11,6 +11,7 @@
     <div class="seg" role="group" aria-label="Input">
       <a href="#adhoc" data-tab="adhoc">Paste</a>
       <a href="#upload" data-tab="upload">Upload file</a>
+      <a href="#runs" data-tab="runs">Past runs</a>
     </div>
   </div>
 </div>
@@ -182,4 +183,21 @@
     </div>
     {{ sources_card('upload', 'Process and enrich file', 'Results appear below') }}
   </form>
+</div>
+
+{# Past runs: the signed-in user's own enrichments, reopened from the stored result file. #}
+<div id="runs-panel" class="tab-panel">
+  {{ enrich_head() }}
+  <div class="card">
+    <div class="card-h">
+      <h2>Past runs</h2>
+      <span class="muted">Only you can see these · kept for {{ run_history_days() }} days</span>
+    </div>
+    <table id="runs-table" class="hide">
+      <thead><tr><th>Input</th><th class="num">IPs</th><th class="num">Rows</th><th>Extra sources</th><th>When</th><th></th></tr></thead>
+      <tbody id="runs-rows"></tbody>
+    </table>
+    <div class="empty" id="runs-empty">No runs yet. Each enrichment you run is kept here so you can reopen its results.</div>
+  </div>
+  <div class="muted" id="runs-status" role="status" style="font-size:13px"></div>
 </div>

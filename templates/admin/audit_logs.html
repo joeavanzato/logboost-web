@@ -135,8 +135,22 @@
             <dt>Timestamp (UTC)</dt><dd>{{ log.timestamp }}</dd>
             <dt>Resource type</dt><dd>{{ log.resource_type or '—' }}</dd>
             <dt>Resource ID</dt><dd>{{ log.resource_id or '—' }}</dd>
+            <dt>Client</dt><dd>{{ log.client or '—' }}</dd>
             <dt>User agent</dt><dd>{{ log.user_agent or '—' }}</dd>
             <dt>Result</dt><dd>{{ 'Success' if log.success else 'Failed' }}</dd>
+            {% if log.changes %}
+            <dt>Changes</dt>
+            <dd>
+              <table>
+                <thead><tr><th>Setting</th><th>Previous</th><th>New</th></tr></thead>
+                <tbody>
+                  {% for change in log.changes %}
+                  <tr><td class="mono">{{ change.setting }}</td><td class="mono" style="overflow-wrap:anywhere">{{ change.previous or '—' }}</td><td class="mono" style="overflow-wrap:anywhere">{{ change.new or '—' }}</td></tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </dd>
+            {% endif %}
             <dt>Details</dt>
             <dd>{% if log.details_text %}<pre class="mono" style="margin:0;white-space:pre-wrap;overflow-wrap:anywhere">{{ log.details_text }}</pre>{% else %}—{% endif %}</dd>
           </dl>

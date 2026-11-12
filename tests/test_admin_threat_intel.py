@@ -240,3 +240,106 @@ class TestShodanPivotSettings:
         import admin
         limit = admin.get_shodan_pivot_limit()
         assert limit == 200
+
+
+FETCH_OUTPUT = '\n'.join([
+    r'10:00AM INF Downloading File https://example.com/feed1.txt to path: intel\Test Feed 1.txt',
+    '10:00AM INF Successfully Downloaded: https://example.com/feed1.txt',
+    r'{"level":"info","time":"2026-11-12T10:00:01Z","message":"Downloading File https://example.com/feed2.csv to path: intel\Test Feed 2.txt"}',
+    '{"level":"error","time":"2026-11-12T10:00:02Z","message":"Error Getting File from https://example.com/feed2.csv: '
+    'Get \\"https://example.com/feed2.csv\\": unexpected status 429 Too Many Requests"}',
+    r'10:00AM INF Ingesting intel\Test Feed 1.txt',
+])
+
+
+def _feed_status_rows():
+    import admin
+    with admin.db() as conn:
+        return {row['url']: dict(row) for row in conn.execute('SELECT * FROM feed_status')}
+
+
+class TestFeedHealth:
+    """Per-feed fetch results: parsed from task output, recorded, and shown on the page."""
+
+    def test_parse_feed_fetch_results(self):
+        import admin
+        results = admin.parse_feed_fetch_results(FETCH_OUTPUT)
+        assert results == {
+            'https://example.com/feed1.txt': (True, ''),
+            'https://example.com/feed2.csv':
+                (False, 'Get "https://example.com/feed2.csv": unexpected status 429 Too Many Requests'),
+        }
+        assert admin.parse_feed_fetch_results('nothing about feeds here') == {}
+
+    def test_finished_task_records_statuses(self, test_db, mock_feed_config):
+        import admin
+        admin.record_task_feed_results(FETCH_OUTPUT)
+        rows = _feed_status_rows()
+        ok, failed = rows['https://example.com/feed1.txt'], rows['https://example.com/feed2.csv']
+        assert ok['ok'] == 1 and ok['last_ok_at'] and ok['name'] == 'Test Feed 1' and ok['source'] == 'fetch'
+        assert failed['ok'] == 0 and failed['last_ok_at'] is None and '429' in failed['detail']
+
+    def test_task_falls_back_to_the_log_file(self, test_db, mock_feed_config, tmp_path):
+        import admin
+        log = tmp_path / 'logboost.log'
+        earlier = '{"level":"info","message":"Successfully Downloaded: https://example.com/feed2.csv"}\n'
+        log.write_text(earlier + '{"level":"info","message":"Successfully Downloaded: https://example.com/feed1.txt"}\n')
+        admin.record_task_feed_results('Done.\n', log, len(earlier))
+        assert list(_feed_status_rows()) == ['https://example.com/feed1.txt']   # only this run's part
+        admin.record_task_feed_results('Done.\n', tmp_path / 'missing.log', 0)  # tolerated
+
+    def test_test_feed_records_a_configured_url(self, admin_client, test_db, mock_feed_config):
+        response = MagicMock(status_code=503, headers={}, is_redirect=False)
+        with patch('security.validate_url_for_ssrf', return_value=(True, None)), \
+             patch('admin.requests.head', return_value=response):
+            configured = admin_client.post('/admin/api/threat-intel/test-feed',
+                                           json={'url': 'https://example.com/feed1.txt'})
+            admin_client.post('/admin/api/threat-intel/test-feed', json={'url': 'https://example.com/other.txt'})
+        assert configured.status_code == 200
+        assert configured.get_json()['ok'] is False and configured.get_json()['error'] == 'HTTP 503'
+        rows = _feed_status_rows()
+        assert list(rows) == ['https://example.com/feed1.txt']
+        assert rows['https://example.com/feed1.txt']['source'] == 'test'
+        assert rows['https://example.com/feed1.txt']['detail'] == 'HTTP 503'
+
+    def test_page_shows_health_and_entries(self, admin_client, test_db, mock_feed_config, monkeypatch):
+        import re
+        import admin
+        import app as app_module
+        mock_feed_config.write_text(json.dumps({'feeds': [
+            {'name': 'Good', 'url': 'https://example.com/good.txt', 'type': ['malware']},
+            {'name': 'Bad', 'url': 'https://example.com/bad.txt', 'type': ['malware']},
+            {'name': 'New', 'url': 'https://example.com/new.txt', 'type': ['c2']},
+        ]}))
+        admin.record_feed_statuses({
+            'https://example.com/good.txt': (True, ''),
+            'https://example.com/bad.txt': (False, 'unexpected status 429 Too Many Requests'),
+        }, 'fetch')
+        monkeypatch.setattr(app_module, '_get_intel_stats', lambda: {
+            'total_entries': 1250, 'unique_ips': 1200,
+            'sources': [{'id': 1, 'name': 'Good', 'count': 1250}], 'tags': []})
+        with admin.db() as conn:
+            conn.execute("UPDATE scheduled_tasks SET last_run = ? WHERE task_type = 'update_ti'",
+                         (admin.datetime.now(),))
+            conn.commit()
+
+        page = admin_client.get('/admin/threat-intel').data.decode()
+
+        assert '3 sources · 1,200 IPs indexed · ' in page and 'updated just now' in page
+        assert '<span class="dot green">Healthy</span>' in page
+        assert re.search(r'<span class="dot red" title="unexpected status 429 Too Many Requests[^"]*">HTTP 429</span>', page)
+        assert '<span class="dot grey">Not fetched yet</span>' in page
+        assert '<td class="num">1,250</td>' in page and page.count('<td class="num">—</td>') == 2
+        for state in ('healthy', 'failing', 'none'):
+            assert re.search(r'data-health="%s"[^>]*>.*?<span data-count>1</span>' % state, page)
+        assert re.search(r'class="pill amber hide" data-health="stale"', page)
+
+    def test_stale_after_two_days(self, test_db, mock_feed_config):
+        import admin
+        admin.record_feed_statuses({'https://example.com/feed1.txt': (True, '')}, 'fetch')
+        with admin.db() as conn:
+            conn.execute('UPDATE feed_status SET last_ok_at = ?', (admin.datetime.now() - admin.timedelta(days=3),))
+            conn.commit()
+        first, second = admin.feed_health(admin.load_feeds())
+        assert (first['state'], first['label']) == ('stale', 'Stale · 3d')
+        assert second['state'] == 'none'
