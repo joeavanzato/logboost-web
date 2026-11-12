@@ -27,7 +27,7 @@
     <div class="grow">
       <b>{{ label[0] }}</b>
       <small>{{ label[1] }}</small>
-      {% if needs_key %}<small class="amber">Needs a MaxMind key · <a href="{{ url_for('admin.settings') }}">Add key</a></small>{% endif %}
+      {% if needs_key %}<small class="amber">Needs a MaxMind key · <a href="{{ url_for('admin.sources') }}">Add key</a></small>{% endif %}
       <small class="faint">Last run {{ task.last_run | ago if task.last_run else 'never' }}{% if task.enabled and task.next_run %} · next {{ task.next_run | ago }}{% else %} · schedule off{% endif %}</small>
     </div>
     <form class="row" method="post" action="{{ url_for('admin.configure_task', task_type=task.task_type) }}">

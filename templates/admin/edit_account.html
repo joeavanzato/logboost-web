@@ -1,54 +1,39 @@
-{% extends "admin/base.html" %}
-
-{% block title %}Edit Account{% endblock %}
-
+{% extends 'base.html' %}
+{% set active = 'accounts' %}
+{% block title %}Edit {{ account.username }} · LogBoost{% endblock %}
 {% block content %}
-<div class="admin-page">
-    <div class="page-header">
-        <div>
-            <a href="{{ url_for('admin.accounts') }}" class="back-link">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <line x1="19" y1="12" x2="5" y2="12"/>
-                    <polyline points="12 19 5 12 12 5"/>
-                </svg>
-                Back to Accounts
-            </a>
-            <h1>Edit Account</h1>
-            <p>Update role for {{ account.username }}</p>
-        </div>
+<div class="head">
+  <div>
+    <div class="crumb"><a class="muted" href="{{ url_for('admin.accounts') }}">Accounts</a> / {{ account.username }}</div>
+    <h1>Edit account</h1>
+    <div class="sub">Change the role for {{ account.username }}.</div>
+  </div>
+</div>
+<div class="card" style="max-width:520px">
+  <form class="card-b stack" style="gap:18px" method="post">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="field">
+      <label for="username">Username</label>
+      <input class="input lg" type="text" id="username" value="{{ account.username }}" disabled>
+      <small>A username cannot be changed.</small>
     </div>
-    
-    <div class="form-card">
-        <form method="POST" class="admin-form">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <div class="form-group">
-                <label>Username</label>
-                <input type="text" value="{{ account.username }}" disabled class="disabled-input">
-                <span class="form-hint">Username cannot be changed</span>
-            </div>
-            
-            <div class="form-group">
-                <label for="role">Role</label>
-                <select id="role" name="role" class="form-select">
-                    {% for role in roles %}
-                    <option value="{{ role }}" {% if role == account.role %}selected{% endif %}>{{ role|capitalize }}</option>
-                    {% endfor %}
-                </select>
-                <span class="form-hint">Admins can access the admin panel; Users can only use the main app</span>
-            </div>
-            
-            <div class="form-actions">
-                <a href="{{ url_for('admin.accounts') }}" class="btn secondary">Cancel</a>
-                <button type="submit" class="btn primary">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/>
-                        <polyline points="17 21 17 13 7 13 7 21"/>
-                        <polyline points="7 3 7 8 15 8"/>
-                    </svg>
-                    Save Changes
-                </button>
-            </div>
-        </form>
+    <div class="field">
+      <label for="role">Role</label>
+      <select class="input lg" id="role" name="role">
+        {% for role in roles %}
+        <option value="{{ role }}"{% if role == account.role %} selected{% endif %}>{{ 'Administrator' if role == 'admin' else role | capitalize }}</option>
+        {% endfor %}
+      </select>
+      <small>Administrators can open the admin pages. Users can only use the main app.</small>
     </div>
+    {% if account.id == session.get('user_id') %}
+    <div class="notice plain">This is your own account. You cannot remove your own administrator role.</div>
+    {% endif %}
+    <div class="row">
+      <button type="submit" class="btn primary">Save changes</button>
+      <a class="btn" href="{{ url_for('admin.accounts') }}">Cancel</a>
+    </div>
+  </form>
 </div>
 {% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='js/app.js') }}"></script>{% endblock %}

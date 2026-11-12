@@ -1,0 +1,242 @@
+{% extends 'base.html' %}
+{% set active = 'sources' %}
+{% block title %}Data sources · LogBoost{% endblock %}
+
+{#- A stored key is never sent to the page: the input stays empty and a blank save keeps it. -#}
+{% macro key_input(name, label, stored, empty_placeholder, width=230) -%}
+<input class="input mono" type="password" id="{{ name }}" name="{{ name }}" aria-label="{{ label }}" placeholder="{{ 'Stored · leave blank to keep' if stored else empty_placeholder }}" autocomplete="new-password" style="width:{{ width }}px">
+{%- endmacro %}
+{% macro test_button(name, url, stored) -%}
+<button type="button" class="btn sm" data-test-url="{{ url }}" data-test-input="{{ name }}" data-test-result="{{ name }}_test" data-key-stored="{{ 'true' if stored else 'false' }}">Test</button>
+{%- endmacro %}
+{% macro remove_button(service, stored) -%}
+{% if stored %}<button type="submit" name="remove_key" value="1" class="btn sm danger" data-confirm="Remove the stored {{ service }} key?">Remove key</button>{% endif %}
+{%- endmacro %}
+{% macro num(name, label, value, hint, min=None, max=None, step=None) -%}
+<div class="field">
+  <label for="{{ name }}">{{ label }}</label>
+  <input class="input mono" type="number" id="{{ name }}" name="{{ name }}" value="{{ value }}"{% if min is not none %} min="{{ min }}"{% endif %}{% if max is not none %} max="{{ max }}"{% endif %}{% if step is not none %} step="{{ step }}"{% endif %}>
+  <small>{{ hint }}</small>
+</div>
+{%- endmacro %}
+{% set line_form = 'flex-wrap:wrap;margin:0' %}
+{% set wide = 'flex-basis:100%' %}
+{% set summary = 'cursor:pointer;font-size:13px' %}
+{% set grid = 'display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:16px;padding-top:14px' %}
+{% set mmdb_files = ['GeoLite2-ASN.mmdb', 'GeoLite2-City.mmdb', 'GeoLite2-Country.mmdb'] %}
+
+{% block content %}
+<div class="head">
+  <div>
+    <h1>Data sources</h1>
+    <div class="sub">Keys and databases that enrichment and graph pivots depend on. Stored keys are never shown again.</div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-h">
+    <h2>Geolocation</h2>
+    {% if mmdb_available %}<span class="dot green">{{ mmdb_files | length }} of {{ mmdb_files | length }} databases present</span>{% else %}<span class="dot red">Databases missing</span>{% endif %}
+  </div>
+  <form class="line" method="post" action="{{ url_for('admin.save_maxmind_key') }}" style="{{ line_form }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="grow" style="flex-basis:260px">
+      <b>MaxMind license key</b>
+      <small>Lets the scheduled task download GeoLite2 updates. Format: <span class="mono">ACCOUNT_ID:LICENSE_KEY</span> (for example 123456:abcdef123456). Test with an empty field checks the stored key.</small>
+    </div>
+    {% if maxmind_key_set %}<span class="dot green">Key stored</span>{% else %}<span class="dot grey">No key</span>{% endif %}
+    {{ key_input('maxmind_api_key', 'MaxMind license key', maxmind_key_set, 'ACCOUNT_ID:LICENSE_KEY', 260) }}
+    {{ test_button('maxmind_api_key', url_for('admin.test_maxmind_key'), maxmind_key_set) }}
+    <button type="submit" class="btn sm primary">Save</button>
+    {{ remove_button('MaxMind', maxmind_key_set) }}
+    <div id="maxmind_api_key_test" class="notice hide" role="status" style="{{ wide }}"></div>
+    <details style="{{ wide }}">
+      <summary class="muted" style="{{ summary }}">How to get a key</summary>
+      <ol class="muted" style="font-size:13px;margin:10px 0 0;padding-left:20px">
+        <li>Create a free account at <a href="https://www.maxmind.com/en/geolite2/signup" target="_blank" rel="noopener">MaxMind GeoLite2</a></li>
+        <li>Go to Account, then Manage License Keys</li>
+        <li>Generate a new license key</li>
+        <li>Enter it as <span class="mono">ACCOUNT_ID:LICENSE_KEY</span></li>
+      </ol>
+    </details>
+  </form>
+  <div class="line">
+    <div class="grow">
+      <b>Database files</b>
+      <small>
+        {% for file in mmdb_files %}
+        {% set present = mmdb_available or (mmdb_missing and file not in mmdb_missing) %}
+        <span class="mono">{{ file }}</span> {% if present %}<span class="green">present</span>{% else %}<span class="red">missing</span>{% endif %}{{ ' · ' if not loop.last }}
+        {% endfor %}
+      </small>
+    </div>
+    <button type="button" class="btn sm" data-dialog-open="mmdb-dialog">Upload .mmdb files</button>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-h"><h2>Lookup services</h2><span class="muted">Used by graph pivots</span></div>
+
+  <form class="line" method="post" action="{{ url_for('admin.save_shodan_key') }}" style="{{ line_form }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="grow" style="flex-basis:260px">
+      <b>Shodan</b>
+      <small>Host details, JARM and attribute pivots{% if shodan_key_set %}<span id="shodan-info" class="hide" data-url="{{ url_for('admin.shodan_account_info') }}"> · Plan: <span data-shodan-info="plan"></span> · <span data-shodan-info="query_credits"></span> query credits, <span data-shodan-info="scan_credits"></span> scan credits</span>{% endif %}</small>
+    </div>
+    {% if shodan_key_set %}<span class="dot green">Key stored</span>{% else %}<span class="dot grey">Not connected</span>{% endif %}
+    {{ key_input('shodan_api_key', 'Shodan API key', shodan_key_set, 'Paste key') }}
+    {{ test_button('shodan_api_key', url_for('admin.test_shodan_key'), shodan_key_set) }}
+    <button type="submit" class="btn sm">Save</button>
+    {{ remove_button('Shodan', shodan_key_set) }}
+    <div id="shodan_api_key_test" class="notice hide" role="status" style="{{ wide }}"></div>
+    <details style="{{ wide }}">
+      <summary class="muted" style="{{ summary }}">How to get a key</summary>
+      <ol class="muted" style="font-size:13px;margin:10px 0 0;padding-left:20px">
+        <li>Create an account at <a href="https://account.shodan.io/register" target="_blank" rel="noopener">Shodan</a></li>
+        <li>Go to <a href="https://account.shodan.io" target="_blank" rel="noopener">account.shodan.io</a></li>
+        <li>Copy your API key from the overview page</li>
+        <li>The free tier includes a limited number of API queries</li>
+      </ol>
+    </details>
+  </form>
+
+  <form class="line" method="post" action="{{ url_for('admin.save_circl_settings') }}" style="{{ line_form }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="grow" style="flex-basis:260px">
+      <b>CIRCL passive DNS</b>
+      <small>Historical DNS records · needs a CIRCL username and password. Register at <a href="https://www.circl.lu/services/passive-dns/" target="_blank" rel="noopener">circl.lu</a> for API access.</small>
+    </div>
+    {% if circl_username %}<span class="dot green">Connected</span>{% else %}<span class="dot grey">Not connected</span>{% endif %}
+    <input class="input mono" type="text" id="circl_username" name="circl_username" value="{{ circl_username }}" aria-label="CIRCL username" placeholder="Username" autocomplete="off" style="width:170px">
+    <input class="input mono" type="password" id="circl_password" name="circl_password" aria-label="CIRCL password" placeholder="{{ 'Stored · leave blank to keep' if circl_password_set else 'Password' }}" autocomplete="new-password" style="width:230px">
+    <button type="submit" class="btn sm">Save</button>
+    <details style="{{ wide }}">
+      <summary class="muted" style="{{ summary }}">Advanced</summary>
+      <div style="{{ grid }}">
+        {{ num('circl_max_results', 'Max results', circl_max_results, 'Maximum PDNS records to retrieve per query. Default: 100', 1, 10000) }}
+        {{ num('circl_cache_ttl', 'Cache TTL (seconds)', circl_cache_ttl, 'How long to cache PDNS results. Default: 604800 (7 days)', 3600) }}
+        {{ num('circl_concurrency', 'Concurrent requests', circl_concurrency, 'Max concurrent API requests. Default: 5', 1, 20) }}
+        {{ num('circl_rate_limit', 'Rate limit (requests per second)', circl_rate_limit, 'Max requests per second. Default: 5', 0.1, 100, 0.1) }}
+      </div>
+      <label class="row" style="margin-top:16px;align-items:flex-start">
+        <input type="checkbox" class="check" name="circl_disable_active_query" style="margin-top:3px" {{ 'checked' if circl_disable_active_query }}>
+        <span>Disable active DNS queries<span class="muted" style="display:block;font-size:13px">When on, CIRCL only returns cached and historical data and performs no live DNS lookups.</span></span>
+      </label>
+    </details>
+  </form>
+
+  <form class="line" method="post" action="{{ url_for('admin.save_hackertarget_settings') }}" style="{{ line_form }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="grow" style="flex-basis:260px">
+      <b>HackerTarget</b>
+      <small>Shared name servers · works without a key at the free-tier rate; a key raises the rate limit. See <a href="https://hackertarget.com/find-shared-dns-servers/" target="_blank" rel="noopener">hackertarget.com</a> for API access.</small>
+    </div>
+    {% if hackertarget_api_key_set %}<span class="dot green">Key stored</span>{% else %}<span class="dot green">Free tier</span>{% endif %}
+    {{ key_input('hackertarget_api_key', 'HackerTarget API key (optional)', hackertarget_api_key_set, 'Optional · blank for free tier') }}
+    <button type="submit" class="btn sm">Save</button>
+    {{ remove_button('HackerTarget', hackertarget_api_key_set) }}
+    <details style="{{ wide }}">
+      <summary class="muted" style="{{ summary }}">Advanced</summary>
+      <div style="{{ grid }}">
+        {{ num('hackertarget_cache_ttl', 'Cache TTL (seconds)', hackertarget_cache_ttl, 'How long to cache results. Default: 86400 (1 day)', 3600) }}
+      </div>
+    </details>
+  </form>
+
+  <form class="line" method="post" action="{{ url_for('admin.save_viewdns_settings') }}" style="{{ line_form }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="grow" style="flex-basis:260px">
+      <b>ViewDNS</b>
+      <small>Reverse MX finds domains using a mail server, reverse NS finds domains using a name server, reverse WHOIS finds domains with matching registration details · hidden from the graph menu until a key is added. Get a key at <a href="https://viewdns.info/api/" target="_blank" rel="noopener">viewdns.info/api</a>.</small>
+    </div>
+    {% if viewdns_api_key_set %}<span class="dot green">Key stored</span>{% else %}<span class="dot grey">Not connected</span>{% endif %}
+    {{ key_input('viewdns_api_key', 'ViewDNS API key', viewdns_api_key_set, 'Paste key') }}
+    <button type="submit" class="btn sm">Save</button>
+    {{ remove_button('ViewDNS', viewdns_api_key_set) }}
+    <details style="{{ wide }}">
+      <summary class="muted" style="{{ summary }}">Advanced</summary>
+      <div style="{{ grid }}">
+        {{ num('viewdns_cache_ttl', 'Cache TTL (seconds)', viewdns_cache_ttl, 'How long to cache results. Default: 86400 (1 day)', 3600) }}
+        {{ num('viewdns_rate_limit', 'Rate limit (requests per second)', viewdns_rate_limit, 'Max requests per second. Default: 1', 0.1, 10, 0.1) }}
+        {{ num('viewdns_max_nodes', 'Max nodes per enrichment', viewdns_max_nodes, 'Maximum nodes to create per lookup. Default: 100', 10, 1000) }}
+      </div>
+    </details>
+  </form>
+
+  <form class="line" method="post" action="{{ url_for('admin.save_chaos_settings') }}" style="{{ line_form }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="grow" style="flex-basis:260px">
+      <b>Chaos (ProjectDiscovery)</b>
+      <small>Related subdomains, connected to the base domain in the graph · hidden from the graph menu until a key is added. Get a key at <a href="https://cloud.projectdiscovery.io/" target="_blank" rel="noopener">cloud.projectdiscovery.io</a>.</small>
+    </div>
+    {% if chaos_api_key_set %}<span class="dot green">Key stored</span>{% else %}<span class="dot grey">Not connected</span>{% endif %}
+    {{ key_input('chaos_api_key', 'Chaos API key', chaos_api_key_set, 'Paste key') }}
+    <button type="submit" class="btn sm">Save</button>
+    {{ remove_button('Chaos', chaos_api_key_set) }}
+    <details style="{{ wide }}">
+      <summary class="muted" style="{{ summary }}">Advanced</summary>
+      <div style="{{ grid }}">
+        {{ num('chaos_cache_ttl', 'Cache TTL (seconds)', chaos_cache_ttl, 'How long to cache results. Default: 86400 (1 day)', 3600) }}
+        {{ num('chaos_rate_limit', 'Rate limit (requests per second)', chaos_rate_limit, 'Max requests per second. Default: 5', 0.1, 100, 0.1) }}
+      </div>
+    </details>
+  </form>
+</div>
+
+<div class="card" id="binary" data-check-url="{{ url_for('admin.check_logboost_update') }}" data-install-url="{{ url_for('admin.install_logboost_update') }}">
+  <div class="card-h">
+    <h2>LogBoost binary</h2>
+    {% if binary_exists %}<span class="dot green">Found</span>{% else %}<span class="dot red">Not found</span>{% endif %}
+  </div>
+  <div class="card-b">
+    <dl class="kv" style="grid-template-columns:150px minmax(0,1fr)">
+      <dt>In use</dt><dd>{{ binary_path }}</dd>
+      <dt>Binary found</dt><dd>{% if binary_exists %}Yes{% else %}<span class="red">No, nothing at this path</span>{% endif %}</dd>
+      <dt>Installed</dt><dd id="binary-installed">{{ installed_version }}</dd>
+      <dt>Bundled in image</dt><dd>{{ bundled_version }}</dd>
+      <dt>Override active</dt><dd>{% if override_active %}<span class="amber">Yes, using the updated binary from /data/bin</span>{% else %}No, using the bundled binary{% endif %}</dd>
+      <dt>Latest release</dt><dd id="binary-latest">{{ cached_latest or 'Not checked yet' }}</dd>
+      <dt>Last checked</dt><dd id="binary-checked">{{ last_checked or 'Never' }}</dd>
+    </dl>
+  </div>
+  <div class="line" style="flex-wrap:wrap">
+    <div class="grow muted" style="font-size:13px;flex-basis:260px">Checks GitHub for the latest LogBoost release. An installed update goes to <span class="mono">/data/bin/logboost</span> and overrides the bundled binary.</div>
+    <span id="binary-status" class="dot hide" role="status"></span>
+    <button type="button" class="btn sm" id="check-update-btn">Check for updates</button>
+    <button type="button" class="btn sm" id="install-update-btn" disabled>Download and install</button>
+    <div id="binary-message" class="notice hide" role="status" style="{{ wide }}"></div>
+  </div>
+</div>
+
+<dialog id="mmdb-dialog" aria-labelledby="mmdb-dialog-title">
+  <form id="mmdb-upload-form" data-upload-url="{{ url_for('admin.upload_mmdb') }}" style="margin:0">
+    <div class="card-h">
+      <h2 id="mmdb-dialog-title">Upload GeoLite2 database files</h2>
+      <button type="button" class="x" data-dialog-close aria-label="Close">×</button>
+    </div>
+    <div class="card-b stack" style="gap:14px">
+      <div class="muted" style="font-size:13px">Replaces the existing databases. All three files are required, with these exact names.</div>
+      <div class="drop" id="mmdb-drop" style="min-height:0;padding:22px">
+        <div class="stack" style="gap:10px;align-items:center">
+          <label for="mmdb-file-input">Choose the .mmdb files, or drop them here</label>
+          <input type="file" id="mmdb-file-input" name="mmdb_files" multiple accept=".mmdb">
+        </div>
+      </div>
+      <div class="stack" style="gap:8px">
+        {% for file in mmdb_files %}
+        <div class="row" style="justify-content:space-between" data-mmdb-file="{{ file }}"><span class="mono">{{ file }}</span><span class="dot grey">Not selected</span></div>
+        {% endfor %}
+      </div>
+      <div id="mmdb-upload-status" class="notice hide" role="status"></div>
+    </div>
+    <div class="line" style="justify-content:flex-end">
+      <button type="button" class="btn sm" data-dialog-close>Cancel</button>
+      <button type="submit" class="btn sm primary" id="mmdb-upload-btn" disabled>Upload files</button>
+    </div>
+  </form>
+</dialog>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/app.js') }}"></script>
+<script src="{{ url_for('static', filename='js/admin-sources.js') }}"></script>
+{% endblock %}

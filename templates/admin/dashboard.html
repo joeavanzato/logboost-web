@@ -43,7 +43,7 @@
       </div>
       {% call(kind) step(true, 'Create admin account', 'Done') %}{% endcall %}
       {% call(kind) step(steps.geo, 'Add geolocation data', 'Needed for country, city and ASN. Add a free MaxMind license key, or upload the GeoLite2 .mmdb files.' if not steps.geo else 'Geolocation is available') %}
-        <a class="btn sm {{ kind }}" href="{{ url_for('admin.settings') }}">Add key</a>
+        <a class="btn sm {{ kind }}" href="{{ url_for('admin.sources') }}">Add key</a>
       {% endcall %}
       {% call(kind) step(steps.threat_db, 'Download threat intel', ((feeds ~ ' feeds configured · takes a few minutes') if feeds else 'Fetches the configured feeds · takes a few minutes') if not steps.threat_db else 'Threat database is present') %}
         <form method="post" action="{{ url_for('admin.run_task', task_type='update_ti') }}">
@@ -52,7 +52,7 @@
         </form>
       {% endcall %}
       {% call(kind) step(steps.shodan, 'Connect Shodan', 'Optional · adds host details and pivots in the graph' if not steps.shodan else 'Shodan key is stored') %}
-        <a class="btn sm {{ kind }}" href="{{ url_for('admin.settings') }}">Add key</a>
+        <a class="btn sm {{ kind }}" href="{{ url_for('admin.sources') }}">Add key</a>
       {% endcall %}
       {% call(kind) step(steps.schedules, 'Turn on scheduled updates', 'Keep geolocation, threat intel and backups current automatically' if not steps.schedules else 'At least one schedule is on') %}
         <a class="btn sm {{ kind }}" href="{{ url_for('admin.tasks') }}">Review</a>
@@ -80,7 +80,7 @@
             </td>
             <td class="right">
               {% if task.task_type == 'update_geo' and not maxmind_key_set %}
-              <a href="{{ url_for('admin.settings') }}" style="font-size:13px">Needs MaxMind key</a>
+              <a href="{{ url_for('admin.sources') }}" style="font-size:13px">Needs MaxMind key</a>
               {% else %}
               <form method="post" action="{{ url_for('admin.run_task', task_type=task.task_type) }}">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

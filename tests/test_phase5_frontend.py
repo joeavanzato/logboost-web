@@ -109,7 +109,7 @@ class TestEscapers:
 class TestVendoredScripts:
 
     def test_no_cdn_scripts_and_csp_allows_only_self(self, authenticated_client):
-        for name in ('index.html', 'admin/base.html'):
+        for name in ('index.html', 'base.html'):
             content = _read(name)
             assert 'unpkg.com' not in content and 'cdnjs.cloudflare.com' not in content, name
 
@@ -144,7 +144,7 @@ class TestSettingsSecrets:
     def test_settings_page_does_not_contain_stored_keys(self, admin_client, test_db):
         self._store_keys()
         with patch('admin.get_shodan_account_info') as shodan_info:
-            page = admin_client.get('/admin/settings').data.decode()
+            page = admin_client.get('/admin/sources').data.decode()
 
         for value in self.KEYS.values():
             assert value not in page
@@ -194,5 +194,5 @@ class TestAuditUtcLabels:
     def test_audit_page_labels_times_as_utc(self, admin_client, test_db):
         admin.log_audit('test_action', 'test', '1', username='tester')
         page = admin_client.get('/admin/audit').data.decode()
-        assert 'Start Date (UTC)' in page and 'End Date (UTC)' in page
-        assert 'Timestamp (UTC)' in page
+        assert 'Start date (UTC)' in page and 'End date (UTC)' in page
+        assert 'Time (UTC)' in page and 'Timestamp (UTC)' in page

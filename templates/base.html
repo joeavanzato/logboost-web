@@ -30,7 +30,8 @@
       {{ nav_item('overview', 'Overview', url_for('admin.dashboard')) }}
       {{ nav_item('tasks', 'Tasks', url_for('admin.tasks')) }}
       {{ nav_item('feeds', 'Threat feeds', url_for('admin.threat_intel'), feed_count()) }}
-      {{ nav_item('sources', 'Data sources', url_for('admin.settings')) }}
+      {{ nav_item('sources', 'Data sources', url_for('admin.sources')) }}
+      {{ nav_item('settings', 'Settings', url_for('admin.settings')) }}
       {{ nav_item('audit', 'Audit log', url_for('admin.audit_logs')) }}
       {{ nav_item('accounts', 'Accounts', url_for('admin.accounts')) }}
     </nav>

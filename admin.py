@@ -959,10 +959,25 @@ def set_account_active(account_id):
 # Settings
 # ============================================
 
+@admin_bp.route('/sources')
+@admin_required
+def sources():
+    """Data sources: service keys, GeoIP databases and the LogBoost binary."""
+    from app import check_mmdb_files_exist  # lazy: app imports admin
+    mmdb_available, mmdb_missing = check_mmdb_files_exist()
+    return render_template('admin/sources.html', mmdb_available=mmdb_available, mmdb_missing=mmdb_missing,
+                           **_settings_context(), **_binary_status())
+
+
 @admin_bp.route('/settings')
 @admin_required
 def settings():
-    """Manage settings."""
+    """Limits and timings. Keys and credentials are on the Data sources page."""
+    return render_template('admin/settings.html', **_settings_context())
+
+
+def _settings_context():
+    """Stored settings for the Settings and Data sources pages. Secrets only as *_set flags."""
     with db() as conn:
         cursor = conn.cursor()
     
@@ -1090,7 +1105,7 @@ def settings():
         max_url_fetch_size_mb = int(max_url_fetch_size_row['value']) if max_url_fetch_size_row else 10
     
     
-        return render_template('admin/settings.html',
+        return dict(
                                maxmind_key_set=bool(maxmind_key),
                                shodan_key_set=bool(shodan_key),
                                dns_servers=dns_servers,
@@ -1159,7 +1174,7 @@ def save_maxmind_key():
     
         log_audit('api_key_modified', 'setting', 'maxmind_api_key', {'key_set': bool(api_key)})
         flash('MaxMind API key saved successfully', 'success')
-        return redirect(url_for('admin.settings'))
+        return redirect(url_for('admin.sources'))
 
 
 @admin_bp.route('/settings/upload-mmdb', methods=['POST'])
@@ -1228,7 +1243,7 @@ def save_shodan_key():
     
         log_audit('api_key_modified', 'setting', 'shodan_api_key', {'key_set': bool(api_key)})
         flash('Shodan API key saved successfully', 'success')
-        return redirect(url_for('admin.settings'))
+        return redirect(url_for('admin.sources'))
 
 
 @admin_bp.route('/settings/dns', methods=['POST'])
@@ -1556,7 +1571,7 @@ def save_circl_settings():
             'cache_ttl': circl_cache_ttl
         })
         flash('CIRCL Passive DNS settings saved successfully', 'success')
-        return redirect(url_for('admin.settings'))
+        return redirect(url_for('admin.sources'))
 
 
 @admin_bp.route('/settings/hackertarget', methods=['POST'])
@@ -1592,7 +1607,7 @@ def save_hackertarget_settings():
             'cache_ttl': hackertarget_cache_ttl
         })
         flash('HackerTarget settings saved successfully', 'success')
-        return redirect(url_for('admin.settings'))
+        return redirect(url_for('admin.sources'))
 
 
 @admin_bp.route('/settings/viewdns', methods=['POST'])
@@ -1652,7 +1667,7 @@ def save_viewdns_settings():
             'max_nodes': viewdns_max_nodes
         })
         flash('ViewDNS settings saved successfully', 'success')
-        return redirect(url_for('admin.settings'))
+        return redirect(url_for('admin.sources'))
 
 
 @admin_bp.route('/settings/chaos', methods=['POST'])
@@ -1700,7 +1715,7 @@ def save_chaos_settings():
             'rate_limit': chaos_rate_limit
         })
         flash('Chaos (ProjectDiscovery) settings saved successfully', 'success')
-        return redirect(url_for('admin.settings'))
+        return redirect(url_for('admin.sources'))
 
 
 @admin_bp.route('/settings/test-maxmind', methods=['POST'])
@@ -1970,6 +1985,19 @@ def audit_logs():
     # Calculate pagination
     total_pages = (total_count + per_page - 1) // per_page
     
+    # Display fields for the template: day heading, time of day, ISO stamp, details as stored
+    for log in logs:
+        ts = str(log.get('timestamp') or '')
+        try:
+            dt = datetime.fromisoformat(ts)
+            log['day'] = f'{dt:%A, %b} {dt.day} {dt.year}'
+            log['time'] = f'{dt:%H:%M:%S}'
+            log['utc_iso'] = f'{dt:%Y-%m-%dT%H:%M:%S}Z'
+        except ValueError:
+            log['day'], log['time'], log['utc_iso'] = ts[:10], ts[11:19] or ts, ''
+        details = log.get('details')
+        log['details_text'] = details if isinstance(details, str) else json.dumps(details, indent=2, ensure_ascii=False) if details else ''
+
     # Get retention setting
     retention_days = get_audit_retention_days()
     
@@ -3308,7 +3336,12 @@ def get_effective_logboost_path() -> str:
 @admin_bp.route('/setup')
 @admin_required
 def setup():
-    """LogBoost Setup page -- Docker mode."""
+    """Old LogBoost Setup URL: the binary card is on the Data sources page now."""
+    return redirect(url_for('admin.sources'))
+
+
+def _binary_status():
+    """LogBoost binary status for the Data sources page -- Docker mode."""
     binary_path = get_effective_logboost_path()
     binary_exists = Path(binary_path).exists()
     override_path = get_setting('logboost_override_path')
@@ -3317,7 +3350,7 @@ def setup():
     last_checked = get_setting('github_latest_checked', None)
     cached_latest = get_setting('github_latest_version', None)
 
-    return render_template('admin/setup.html',
+    return dict(
         bundled_version=BUNDLED_LOGBOOST_VERSION,
         binary_path=binary_path,
         binary_exists=binary_exists,

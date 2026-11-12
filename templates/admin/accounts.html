@@ -1,101 +1,57 @@
-{% extends "admin/base.html" %}
-
-{% block title %}User Accounts{% endblock %}
-
+{% extends 'base.html' %}
+{% set active = 'accounts' %}
+{% block title %}Accounts · LogBoost{% endblock %}
 {% block content %}
-<div class="admin-page">
-    <div class="page-header">
-        <div>
-            <h1>User Accounts</h1>
-            <p>Manage user and administrator accounts</p>
-        </div>
-        <a href="{{ url_for('admin.create_account') }}" class="btn primary">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <line x1="12" y1="5" x2="12" y2="19"/>
-                <line x1="5" y1="12" x2="19" y2="12"/>
-            </svg>
-            Add Account
-        </a>
-    </div>
-    
-    <div class="accounts-table-wrapper">
-        <table class="admin-table">
-            <thead>
-                <tr>
-                    <th>Username</th>
-                    <th>Role</th>
-                    <th>Created</th>
-                    <th>Last Updated</th>
-                    <th>Actions</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for account in accounts %}
-                <tr>
-                    <td>
-                        <div class="account-name">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/>
-                                <circle cx="12" cy="7" r="4"/>
-                            </svg>
-                            {{ account.username }}
-                            {% if account.username == session.get('username') %}
-                            <span class="badge info">You</span>
-                            {% endif %}
-                            {% if not account.is_active %}
-                            <span class="badge secondary">Disabled</span>
-                            {% endif %}
-                        </div>
-                    </td>
-                    <td>
-                        {% if account.role == 'admin' %}
-                        <span class="badge success">Admin</span>
-                        {% else %}
-                        <span class="badge secondary">User</span>
-                        {% endif %}
-                    </td>
-                    <td>{{ account.created_at }}</td>
-                    <td>{{ account.updated_at }}</td>
-                    <td>
-                        <div class="action-buttons">
-                            <a href="{{ url_for('admin.edit_account', account_id=account.id) }}" class="btn small secondary">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                    <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/>
-                                    <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/>
-                                </svg>
-                                Edit
-                            </a>
-                            <a href="{{ url_for('admin.change_password', account_id=account.id) }}" class="btn small secondary">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-                                </svg>
-                                Password
-                            </a>
-                            {% if account.id != session.get('user_id') %}
-                            <form action="{{ url_for('admin.set_account_active', account_id=account.id) }}" method="POST" class="inline-form">
-                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                                <input type="hidden" name="active" value="{{ 0 if account.is_active else 1 }}">
-                                <button type="submit" class="btn small secondary">{{ 'Disable' if account.is_active else 'Enable' }}</button>
-                            </form>
-                            <form action="{{ url_for('admin.delete_account', account_id=account.id) }}" method="POST" class="inline-form" onsubmit="return confirm('Are you sure you want to delete this account?');">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                                <button type="submit" class="btn small danger">
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                        <polyline points="3 6 5 6 21 6"/>
-                                        <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/>
-                                        <line x1="10" y1="11" x2="10" y2="17"/>
-                                        <line x1="14" y1="11" x2="14" y2="17"/>
-                                    </svg>
-                                    Delete
-                                </button>
-                            </form>
-                            {% endif %}
-                        </div>
-                    </td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
+{% set admin_count = accounts | selectattr('role', 'equalto', 'admin') | list | length %}
+<div class="head">
+  <div>
+    <h1>Accounts</h1>
+    <div class="sub">{{ accounts | length }} account{{ 's' if accounts | length != 1 }} · {{ admin_count }} administrator{{ 's' if admin_count != 1 }}</div>
+  </div>
+  <div class="actions"><a class="btn primary" href="{{ url_for('admin.create_account') }}">+ Add account</a></div>
 </div>
+<div class="card">
+  {% if accounts %}
+  <table>
+    <thead><tr><th>User</th><th>Role</th><th>Created</th><th>Last updated</th><th>Status</th><th aria-label="Actions"></th></tr></thead>
+    <tbody>
+      {% for account in accounts %}
+      {% set is_self = account.id == session.get('user_id') %}
+      <tr>
+        <td>
+          <b{% if not account.is_active %} style="color:var(--dim)"{% endif %}>{{ account.username }}
+            {%- if account.username == session.get('username') %} <span class="tag" style="margin-left:6px">You</span>{% endif %}
+            {%- if not account.is_active %} <span class="tag" style="margin-left:6px">Disabled</span>{% endif %}</b>
+        </td>
+        <td{% if not account.is_active %} class="muted"{% endif %}>{{ 'Administrator' if account.role == 'admin' else 'User' }}</td>
+        <td class="mono muted" style="font-size:12px">{{ account.created_at }}</td>
+        <td class="mono muted" style="font-size:12px">{{ account.updated_at }}</td>
+        <td>{% if account.is_active %}<span class="dot green">Active</span>{% else %}<span class="dot grey">Disabled</span>{% endif %}</td>
+        <td class="right">
+          <div class="row" style="justify-content:flex-end;flex-wrap:wrap;gap:8px">
+            <a class="btn sm" href="{{ url_for('admin.edit_account', account_id=account.id) }}" aria-label="Edit role of {{ account.username }}">Edit</a>
+            <a class="btn sm" href="{{ url_for('admin.change_password', account_id=account.id) }}" aria-label="Change password of {{ account.username }}">Password</a>
+            {% if not is_self %}
+            <form method="post" action="{{ url_for('admin.set_account_active', account_id=account.id) }}"{% if account.is_active %} data-confirm="Disable {{ account.username }}? They are signed out immediately and cannot sign in until the account is enabled again."{% endif %}>
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <input type="hidden" name="active" value="{{ 0 if account.is_active else 1 }}">
+              <button type="submit" class="btn sm" aria-label="{{ 'Disable' if account.is_active else 'Enable' }} {{ account.username }}">{{ 'Disable' if account.is_active else 'Enable' }}</button>
+            </form>
+            <form method="post" action="{{ url_for('admin.delete_account', account_id=account.id) }}" data-confirm="Delete the account {{ account.username }}? This cannot be undone.">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button type="submit" class="btn sm danger" aria-label="Delete {{ account.username }}">Delete</button>
+            </form>
+            {% endif %}
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty">No accounts yet.</div>
+  {% endif %}
+</div>
+<div class="muted" style="font-size:13px">Disabling an account or changing its password signs that person out immediately. A disabled account keeps its graphs and shares.</div>
 {% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='js/app.js') }}"></script>{% endblock %}

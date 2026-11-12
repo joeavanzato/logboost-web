@@ -46,6 +46,44 @@ class TestThreatIntelPage:
         response = admin_client.get('/admin/threat-intel')
         assert response.status_code == 200
 
+    def test_page_lists_feeds_without_inline_script(self, admin_client, test_db, mock_feed_config):
+        """Rows are server-rendered and escaped; behaviour lives in static/js/admin-feeds.js."""
+        import re
+        payload = 'x" onmouseover="alert(1)<img src=x onerror=alert(1)>'
+        mock_feed_config.write_text(json.dumps({'feeds': [
+            {'name': payload, 'url': 'https://example.com/' + payload, 'type': [payload, 'malware']},
+            {'name': 'Plain', 'url': 'https://example.com/feed.txt', 'type': ['malware']},
+        ]}))
+
+        page = admin_client.get('/admin/threat-intel').data.decode()
+
+        assert '2 sources · 2 tags' in page
+        assert 'data-url="https://example.com/feed.txt"' in page    # the full URL is what gets edited
+        assert '<small data-feed-url title="https://example.com/feed.txt">example.com/feed.txt</small>' in page
+        assert re.search(r'data-tag="malware"[^>]*>malware <small>2</small>', page)
+        assert '/admin/tasks/update_ti/run' in page                 # "Update now"
+        assert 'js/admin-feeds.js' in page
+        # the payload is there, but never as live markup or a live attribute
+        assert 'alert(1)' in page
+        assert '<img src=x' not in page and 'onmouseover="alert(1)' not in page
+        from html.parser import HTMLParser
+        seen = {'tags': set(), 'handlers': []}
+
+        class Collector(HTMLParser):
+            def handle_starttag(self, tag, attrs):
+                seen['tags'].add(tag)
+                seen['handlers'] += [name for name, _ in attrs if name.startswith('on')]
+
+        Collector().feed(page)
+        assert seen['handlers'] == [] and 'img' not in seen['tags']
+        assert not re.search(r'<script(?![^>]*\bsrc=)', page) and '<style' not in page
+
+    def test_page_script_builds_no_markup_from_strings(self):
+        from pathlib import Path
+        script = (Path(__file__).parent.parent / 'static' / 'js' / 'admin-feeds.js').read_text(encoding='utf-8')
+        for sink in ('innerHTML', 'outerHTML', 'insertAdjacentHTML', 'document.write', "setAttribute('on"):
+            assert sink not in script, sink
+
 
 class TestGetFeedsApi:
     """Tests for GET /admin/api/threat-intel/feeds endpoint."""
@@ -151,9 +189,11 @@ class TestSetupPage:
     """Tests for setup page."""
     
     def test_setup_page_loads(self, admin_client, test_db):
-        """Test that setup page loads for admin."""
+        """The old setup URL leads to the Data sources page, which holds the binary card."""
         response = admin_client.get('/admin/setup')
-        assert response.status_code == 200
+        assert response.status_code == 302 and response.headers['Location'].endswith('/admin/sources')
+        page = admin_client.get('/admin/sources')
+        assert page.status_code == 200 and b'check-update-btn' in page.data
 
 
 class TestTasksPage:
