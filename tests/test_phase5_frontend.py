@@ -151,7 +151,8 @@ class TestVendoredScripts:
         # pinned in app.py: a host that maps .js to text/plain would trip nosniff
         assert response.headers['Content-Type'].startswith('text/javascript')
         csp = response.headers['Content-Security-Policy']
-        assert "script-src 'self' 'unsafe-inline';" in csp
+        assert "script-src 'self';" in csp  # no inline script, no external hosts
+        assert 'googleapis' not in csp and 'gstatic' not in csp
         assert 'unpkg' not in csp and 'cdnjs' not in csp
         response.close()
 

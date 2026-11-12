@@ -20,7 +20,12 @@
     var opener = event.target.closest('[data-dialog-open]');
     if (opener) {
       var dialog = document.getElementById(opener.dataset.dialogOpen);
-      if (dialog && dialog.showModal) dialog.showModal();
+      if (dialog && dialog.showModal) {
+        dialog.showModal();
+        // Start in the first field rather than on the close button, so Enter submits
+        var field = dialog.querySelector('input:not([type="hidden"]):not([type="checkbox"]):not([type="file"]), select, textarea');
+        if (field) field.focus();
+      }
       return;
     }
     var closer = event.target.closest('[data-dialog-close]');

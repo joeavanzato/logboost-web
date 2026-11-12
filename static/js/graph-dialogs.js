@@ -10,6 +10,13 @@ function openGraphDialog(id) {
     if (!dialog) return;
     if (!dialog.open) dialog.showModal();
     dialog.classList.add('active');
+    // showModal() focuses the first focusable element, which is the close button: Enter would
+    // then dismiss the dialog. Start in the first field instead.
+    const field = dialog.querySelector('input:not([type="hidden"]):not([type="checkbox"]):not([type="file"]), select, textarea');
+    if (field) {
+        field.focus();
+        if (field.select) field.select();
+    }
 }
 
 function closeGraphDialog(id) {

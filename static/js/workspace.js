@@ -96,3 +96,14 @@ function showToast(message, type = 'info', duration = 4000) {
     return toast;
 }
 window.showToast = showToast;
+
+// ---- unsaved graph ----
+// The graph lives only in this page. Leaving for another page (Shares, any admin screen, sign
+// out) would silently discard unsaved work, so the browser asks first.
+window.addEventListener('beforeunload', function (event) {
+    const graph = window.graphManager;
+    if (graph && graph.isModified && graph.nodes && graph.nodes.length > 0) {
+        event.preventDefault();
+        event.returnValue = '';
+    }
+});

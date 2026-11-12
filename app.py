@@ -138,13 +138,15 @@ def handle_csrf_error(e):
 
 _CSP_POLICY = (
     "default-src 'self'; "
-    # 'unsafe-inline' is required for the existing inline <script>/<style>/onclick blocks.
-    # Scripts: htmx, d3 and psl are vendored under static/vendor, so no external hosts.
-    # 'unsafe-inline' remains until the inline JavaScript moves to static files.
-    "script-src 'self' 'unsafe-inline'; "
-    # Google Fonts loads CSS from fonts.googleapis.com.
-    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
-    "font-src 'self' https://fonts.gstatic.com; "
+    # Scripts come only from static files: no inline <script>, no inline event handlers, no eval.
+    # htmx, d3 and psl are vendored under static/vendor. An injected <script> or onclick= does
+    # not run, which backs up the output escaping.
+    "script-src 'self'; "
+    # Stylesheets are local. 'unsafe-inline' stays for style="" attributes in the templates and
+    # the <style> element htmx adds for its request indicator.
+    "style-src 'self' 'unsafe-inline'; "
+    # Fonts are served from static/vendor/fonts.
+    "font-src 'self'; "
     # data: + blob: needed for inline SVG icons embedded as background-image and PNG export blobs.
     "img-src 'self' data: blob:; "
     "connect-src 'self'; "

@@ -93,7 +93,7 @@ A backup script ships with the container at `/app/scripts/backup.sh`. Schedule i
 - **Reverse DNS (PTR)** - Resolve IP addresses to hostnames
 - **Forward DNS Resolution** - A, AAAA, CNAME, MX, NS, TXT, SOA record types
 - **Bulk Concurrent Resolution** - Configurable concurrency for large datasets
-- **Configurable DNS Servers** - Use any resolver; cache TTL configurable per Admin Settings
+- **Configurable DNS Servers** - Use any resolver; cache TTL configurable under Admin → Settings
 
 ### WHOIS Lookups (No API Key Required)
 
@@ -118,18 +118,21 @@ A backup script ships with the container at `/app/scripts/backup.sh`. Schedule i
 - **HackerTarget** - Shared nameserver discovery (free limited tier or paid)
 - **Chaos (ProjectDiscovery)** - Subdomain enumeration from bug bounty program datasets (free API key)
 
-### Admin Dashboard
+### Admin Area
 
-- **Scheduled Tasks** - Auto-update GeoIP databases and threat intel feeds on configurable intervals
-- **User Management** - Multi-user support with audit logging
-- **API Key Management** - Configure all integration credentials in one place
-- **Task Logs** - Full execution history with error tracking
+- **Overview** - Setup checklist for a new install, system status and recent task runs
+- **Tasks** - Auto-update GeoIP databases, threat intel feeds and backups on configurable intervals, with a run log
+- **Threat feeds** - Per-feed entries, last fetch and health (healthy, failing, stale)
+- **Data sources** - All integration keys, the GeoIP database files and LogBoost binary updates in one place
+- **Accounts and Audit log** - Multi-user support; setting changes record the previous and new value (secrets are never recorded)
 
 ### User Experience
 
 - **Drag and Drop Upload** - Easy file upload interface
-- **Paginated Results** - Handle large datasets in-browser
+- **Paginated Results** - Handle large datasets in-browser, with a column picker, per-column filters and a row details drawer
+- **Past Runs** - Each user's enrichment results are kept (7 days by default) and can be reopened; only that user can see them
 - **CSV Export** - Download enriched results
+- **Self-contained** - Fonts and scripts are served by the app; nothing loads from a CDN, so air-gapped installs work
 - **Shareable Links** - Share results with expiring links (configurable TTL)
 - **Dark Theme** - Security-focused aesthetic
 
@@ -172,11 +175,11 @@ The [60-Second Quickstart](#60-second-quickstart) above gets you running. This s
 
 ### MaxMind GeoIP Setup
 
-On first launch you'll see a setup screen prompting you to configure MaxMind databases. You need all three: `GeoLite2-ASN.mmdb`, `GeoLite2-Country.mmdb`, `GeoLite2-City.mmdb`.
+After creating the admin account you land on **Admin → Overview**, whose checklist walks through the remaining setup. Enrichment needs all three MaxMind databases: `GeoLite2-ASN.mmdb`, `GeoLite2-Country.mmdb`, `GeoLite2-City.mmdb`.
 
-**Option A — Upload existing files:** drag and drop them on the setup page.
+**Option A — Upload existing files:** **Admin → Data sources → Upload .mmdb files**.
 
-**Option B — Auto-download:** create a free MaxMind account, generate an API key, paste it in **Admin → Settings → MaxMind API Key**, then click **Update Geolocation** on the dashboard. Schedule recurring updates from **Admin → Scheduled Tasks**.
+**Option B — Auto-download:** create a free MaxMind account, generate a license key, save it under **Admin → Data sources → MaxMind license key**, then run **Update geolocation** from **Admin → Tasks**. Turn on its schedule there for recurring updates.
 
 ---
 
@@ -431,8 +434,8 @@ The bundled `feed_config.json` includes common threat intel sources. View and ma
 
 ### Updating Feeds
 
-- **Manual:** Dashboard -> Update Threat Intel
-- **Automatic:** Configure scheduled task interval in Admin Settings
+- **Manual:** Admin → Threat feeds → Update now (or Admin → Tasks → Run now)
+- **Automatic:** turn on the "Update threat intel" schedule under Admin → Tasks
 
 ---
 
