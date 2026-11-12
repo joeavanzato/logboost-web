@@ -78,14 +78,14 @@ class TestDNSCache:
         import admin
         
         # Set with 1 second TTL
-        admin.set_cached_dns('ttl-test.com', 'A', ['1.2.3.4'], 1)
+        admin.set_cached_dns('ttl-test.com', 'A', ['1.2.3.4'], 2)
         
         # Should be available immediately
         cached = admin.get_cached_dns('ttl-test.com', 'A')
         assert cached is not None
         
         # Wait for expiration (2 seconds to be safe)
-        time.sleep(2)
+        time.sleep(2.5)
         
         # Expired entries return None (checked in SQL)
         cached = admin.get_cached_dns('ttl-test.com', 'A')
@@ -96,14 +96,14 @@ class TestDNSCache:
         import admin
         
         # Set cache with 1 second TTL
-        admin.set_cached_dns('expired.com', 'A', ['1.2.3.4'], 1)
+        admin.set_cached_dns('expired.com', 'A', ['1.2.3.4'], 2)
         
         # Verify it's in the cache
         cached = admin.get_cached_dns('expired.com', 'A')
         assert cached is not None
         
         # Wait for expiration
-        time.sleep(1.5)
+        time.sleep(2.5)
         
         # Clear expired entries
         admin.clear_expired_dns_cache()
@@ -161,12 +161,12 @@ class TestWHOISCache:
         """Test WHOIS cache entries expire after TTL."""
         import admin
         
-        admin.set_cached_whois('ttl-test.com', sample_whois_results, 1)
+        admin.set_cached_whois('ttl-test.com', sample_whois_results, 2)
         
         cached = admin.get_cached_whois('ttl-test.com')
         assert cached is not None
         
-        time.sleep(2)
+        time.sleep(2.5)
         
         cached = admin.get_cached_whois('ttl-test.com')
         assert cached is None
@@ -298,12 +298,12 @@ class TestViewDNSCache:
         """Test ViewDNS cache entries expire after TTL."""
         import admin
         
-        admin.set_cached_viewdns('expired.com', 'reverse_mx', ['test.com'], 1, 1)
+        admin.set_cached_viewdns('expired.com', 'reverse_mx', ['test.com'], 1, 2)
         
         cached = admin.get_cached_viewdns('expired.com', 'reverse_mx')
         assert cached is not None
         
-        time.sleep(1.5)
+        time.sleep(2.5)
         
         cached = admin.get_cached_viewdns('expired.com', 'reverse_mx')
         assert cached is None
@@ -346,12 +346,12 @@ class TestHackerTargetCache:
         """Test HackerTarget cache entries expire after TTL."""
         import admin
         
-        admin.set_cached_hackertarget('expired.com', 'shared_ns', sample_hackertarget_shared_ns_results, 4, 1)
+        admin.set_cached_hackertarget('expired.com', 'shared_ns', sample_hackertarget_shared_ns_results, 4, 2)
         
         cached = admin.get_cached_hackertarget('expired.com', 'shared_ns')
         assert cached is not None
         
-        time.sleep(2)
+        time.sleep(2.5)
         
         cached = admin.get_cached_hackertarget('expired.com', 'shared_ns')
         assert cached is None

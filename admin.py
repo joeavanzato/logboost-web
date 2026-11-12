@@ -2375,7 +2375,7 @@ def clear_expired_dns_cache():
     """Remove expired DNS cache entries."""
     with db() as conn:
         cursor = conn.cursor()
-        cursor.execute('DELETE FROM dns_cache WHERE expires_at < CURRENT_TIMESTAMP')
+        cursor.execute('DELETE FROM dns_cache WHERE expires_at <= CURRENT_TIMESTAMP')
         conn.commit()
 
 
@@ -2450,7 +2450,7 @@ def clear_expired_whois_cache():
     """Remove expired WHOIS cache entries."""
     with db() as conn:
         cursor = conn.cursor()
-        cursor.execute('DELETE FROM whois_cache WHERE expires_at < CURRENT_TIMESTAMP')
+        cursor.execute('DELETE FROM whois_cache WHERE expires_at <= CURRENT_TIMESTAMP')
         conn.commit()
 
 
@@ -2512,7 +2512,7 @@ def clear_expired_shodan_cache():
     """Remove expired Shodan cache entries."""
     with db() as conn:
         cursor = conn.cursor()
-        cursor.execute('DELETE FROM shodan_cache WHERE expires_at < CURRENT_TIMESTAMP')
+        cursor.execute('DELETE FROM shodan_cache WHERE expires_at <= CURRENT_TIMESTAMP')
         conn.commit()
 
 
@@ -2554,7 +2554,7 @@ def clear_expired_shodan_pivot_cache():
     """Remove expired Shodan pivot cache entries."""
     with db() as conn:
         cursor = conn.cursor()
-        cursor.execute('DELETE FROM shodan_pivot_cache WHERE expires_at < CURRENT_TIMESTAMP')
+        cursor.execute('DELETE FROM shodan_pivot_cache WHERE expires_at <= CURRENT_TIMESTAMP')
         conn.commit()
 
 
@@ -2655,7 +2655,7 @@ def clear_expired_circl_pdns_cache():
     """Remove expired CIRCL PDNS cache entries."""
     with db() as conn:
         cursor = conn.cursor()
-        cursor.execute('DELETE FROM circl_pdns_cache WHERE expires_at < CURRENT_TIMESTAMP')
+        cursor.execute('DELETE FROM circl_pdns_cache WHERE expires_at <= CURRENT_TIMESTAMP')
         conn.commit()
 
 
@@ -2726,7 +2726,7 @@ def clear_expired_hackertarget_cache():
     """Remove expired HackerTarget cache entries."""
     with db() as conn:
         cursor = conn.cursor()
-        cursor.execute('DELETE FROM hackertarget_cache WHERE expires_at < CURRENT_TIMESTAMP')
+        cursor.execute('DELETE FROM hackertarget_cache WHERE expires_at <= CURRENT_TIMESTAMP')
         conn.commit()
 
 
@@ -2809,7 +2809,7 @@ def clear_expired_viewdns_cache():
     """Remove expired ViewDNS cache entries."""
     with db() as conn:
         cursor = conn.cursor()
-        cursor.execute('DELETE FROM viewdns_cache WHERE expires_at < CURRENT_TIMESTAMP')
+        cursor.execute('DELETE FROM viewdns_cache WHERE expires_at <= CURRENT_TIMESTAMP')
         conn.commit()
 
 
@@ -2885,7 +2885,7 @@ def clear_expired_chaos_cache():
     """Remove expired Chaos cache entries."""
     with db() as conn:
         cursor = conn.cursor()
-        cursor.execute('DELETE FROM chaos_cache WHERE expires_at < CURRENT_TIMESTAMP')
+        cursor.execute('DELETE FROM chaos_cache WHERE expires_at <= CURRENT_TIMESTAMP')
         conn.commit()
 
 
@@ -3027,7 +3027,7 @@ def clear_expired_shared_results():
     """Remove expired shared results."""
     with db() as conn:
         cursor = conn.cursor()
-        cursor.execute('DELETE FROM shared_results WHERE expires_at < CURRENT_TIMESTAMP')
+        cursor.execute('DELETE FROM shared_results WHERE expires_at <= CURRENT_TIMESTAMP')
         deleted = cursor.rowcount
         conn.commit()
         return deleted

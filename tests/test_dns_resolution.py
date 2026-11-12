@@ -580,13 +580,13 @@ class TestDNSCachingBehavior:
         import admin
         
         # Set cache with 1 second TTL
-        admin.set_cached_dns('expired.example.com', 'A', ['1.2.3.4'], 1)
+        admin.set_cached_dns('expired.example.com', 'A', ['1.2.3.4'], 2)
         
         # Verify it's there
         assert admin.get_cached_dns('expired.example.com', 'A') is not None
         
         # Wait for expiration
-        time.sleep(1.5)
+        time.sleep(2.5)
         
         # Should now return None
         cached = admin.get_cached_dns('expired.example.com', 'A')
@@ -618,10 +618,10 @@ class TestDNSCachingBehavior:
         import admin
         
         # Set cache with 1 second TTL
-        admin.set_cached_dns('toexpire.example.com', 'A', ['1.2.3.4'], 1)
+        admin.set_cached_dns('toexpire.example.com', 'A', ['1.2.3.4'], 2)
         
         # Wait for expiration (SQLite CURRENT_TIMESTAMP has 1-second resolution)
-        time.sleep(2)
+        time.sleep(2.5)
         
         # Clear expired
         admin.clear_expired_dns_cache()
