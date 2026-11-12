@@ -7,6 +7,8 @@ import requests
 
 from admin import get_chaos_settings, get_cached_chaos, set_cached_chaos, log_audit
 from auth import login_required
+from http_utils import json_body, str_field, internal_error, upstream_message
+from urllib.parse import quote
 
 
 chaos_bp = Blueprint('chaos', __name__, url_prefix='/api/chaos')
@@ -26,11 +28,11 @@ def api_chaos_settings():
 @login_required
 def api_chaos_subdomains():
     """Fetch subdomains for a domain using Chaos (ProjectDiscovery) API."""
-    data = request.get_json()
+    data = json_body()
     if not data:
         return jsonify({'error': 'No JSON data provided'}), 400
     
-    domain = data.get('domain', '').strip().lower()
+    domain = str_field(data, 'domain').lower()
     if not domain:
         return jsonify({'error': 'Domain is required'}), 400
     
@@ -56,7 +58,7 @@ def api_chaos_subdomains():
     
     try:
         # Call Chaos API
-        url = f"https://dns.projectdiscovery.io/dns/{domain}/subdomains"
+        url = f"https://dns.projectdiscovery.io/dns/{quote(domain, safe='')}/subdomains"
         headers = {
             'Authorization': settings['api_key'],
             'Connection': 'close'
@@ -98,11 +100,8 @@ def api_chaos_subdomains():
                 'subdomain_count': 0,
                 'from_cache': False
             })
-        current_app.logger.warning("[Chaos] HTTP Error: %s", str(e))
         return jsonify({'error': f'Chaos API error: {e.response.status_code}'}), 500
     except requests.exceptions.RequestException as e:
-        current_app.logger.warning("[Chaos] Request error: %s", str(e))
-        return jsonify({'error': f'Chaos API request failed: {str(e)}'}), 500
+        return jsonify({'error': upstream_message('Chaos', e)}), 500
     except Exception as e:
-        current_app.logger.error("[Chaos] Exception: %s", str(e), exc_info=True)
-        return jsonify({'error': str(e)}), 500
+        return internal_error(e)

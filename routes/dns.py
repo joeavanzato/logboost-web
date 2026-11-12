@@ -3,188 +3,128 @@ DNS resolution routes and utilities.
 """
 
 from flask import Blueprint, request, jsonify
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 
 import dns.resolver
 import dns.exception
+from dns.reversename import from_address
 
 from admin import (
     get_dns_settings, get_cached_dns, set_cached_dns,
     get_concurrency_settings, log_audit
 )
 from auth import login_required
+from http_utils import json_body, str_list
 
 
 dns_bp = Blueprint('dns', __name__, url_prefix='/api/dns')
 
+RECORD_TYPES = ['A', 'AAAA', 'CNAME', 'MX', 'NS', 'TXT', 'SOA']
+MAX_DNS_THREADS = 50  # per request, shared across all domains and record types
+
+
+def _record_value(rtype, rdata):
+    if rtype in ('A', 'AAAA'):
+        return str(rdata)
+    if rtype == 'CNAME':
+        return str(rdata.target).rstrip('.')
+    if rtype == 'MX':
+        return str(rdata.exchange).rstrip('.')
+    if rtype in ('NS', 'PTR'):
+        return str(rdata.target).rstrip('.')
+    if rtype == 'TXT':
+        return b''.join(rdata.strings).decode('utf-8', errors='replace')
+    if rtype == 'SOA':
+        return str(rdata.mname).rstrip('.')  # primary nameserver
+    return str(rdata)
+
+
+def _lookup(query, rtype, settings, use_cache=True):
+    """One cached lookup. Returns a list of records, or {'error': ...}.
+
+    Only real answers are cached (records, NXDOMAIN, NoAnswer). Timeouts and
+    resolver failures are not, so a brief outage does not stick for the whole TTL.
+    """
+    if use_cache:
+        cached = get_cached_dns(query, rtype)
+        if cached is not None:
+            return cached
+
+    resolver = dns.resolver.Resolver()
+    resolver.nameservers = [s.strip() for s in settings['servers'].split(',') if s.strip()]
+    resolver.timeout = settings['timeout']
+    resolver.lifetime = settings['timeout']
+
+    try:
+        name = from_address(query) if rtype == 'PTR' else query
+        records = [_record_value(rtype, rdata) for rdata in resolver.resolve(name, rtype)]
+    except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer):
+        records = []
+    except dns.exception.Timeout:
+        return {'error': 'timeout'}
+    except Exception:
+        return {'error': 'lookup failed'}
+
+    set_cached_dns(query, rtype, records, settings['cache_ttl'])
+    return records
+
 
 def resolve_dns(query, record_types=None, use_cache=True):
-    """Resolve DNS for a query with caching."""
-    if record_types is None:
-        record_types = ['A', 'AAAA', 'CNAME', 'MX', 'NS', 'TXT', 'SOA']
-    
+    """Resolve all record types for one name, concurrently. Returns {rtype: records | {'error': ...}}."""
+    record_types = record_types or RECORD_TYPES
     settings = get_dns_settings()
-    servers = [s.strip() for s in settings['servers'].split(',') if s.strip()]
-    timeout = settings['timeout']
-    cache_ttl = settings['cache_ttl']
-    
-    results = {}
-    
-    for rtype in record_types:
-        # Check cache first
-        if use_cache:
-            cached = get_cached_dns(query, rtype)
-            if cached is not None:
-                results[rtype] = cached
-                continue
-        
-        # Resolve
-        resolver = dns.resolver.Resolver()
-        resolver.nameservers = servers
-        resolver.timeout = timeout
-        resolver.lifetime = timeout
-        
-        try:
-            answers = resolver.resolve(query, rtype)
-            records = []
-            for rdata in answers:
-                if rtype in ('A', 'AAAA'):
-                    records.append(str(rdata))
-                elif rtype == 'CNAME':
-                    records.append(str(rdata.target).rstrip('.'))
-                elif rtype == 'MX':
-                    records.append(str(rdata.exchange).rstrip('.'))
-                elif rtype == 'NS':
-                    records.append(str(rdata.target).rstrip('.'))
-                elif rtype == 'TXT':
-                    # Join TXT record parts and decode
-                    txt_data = b''.join(rdata.strings).decode('utf-8', errors='replace')
-                    records.append(txt_data)
-                elif rtype == 'SOA':
-                    # Extract primary nameserver from SOA
-                    records.append(str(rdata.mname).rstrip('.'))
-            results[rtype] = records
-            
-            # Cache the result
-            set_cached_dns(query, rtype, records, cache_ttl)
-            
-        except dns.resolver.NXDOMAIN:
-            results[rtype] = []
-            set_cached_dns(query, rtype, [], cache_ttl)
-        except dns.resolver.NoAnswer:
-            results[rtype] = []
-            set_cached_dns(query, rtype, [], cache_ttl)
-        except dns.exception.Timeout:
-            results[rtype] = {'error': 'timeout'}
-        except Exception as e:
-            results[rtype] = {'error': str(e)}
-    
-    return results
+    with ThreadPoolExecutor(max_workers=len(record_types)) as pool:
+        results = pool.map(lambda rtype: _lookup(query, rtype, settings, use_cache), record_types)
+        return dict(zip(record_types, results))
 
 
 def reverse_dns(ip):
-    """Perform reverse DNS lookup."""
-    settings = get_dns_settings()
-    servers = [s.strip() for s in settings['servers'].split(',') if s.strip()]
-    timeout = settings['timeout']
-    cache_ttl = settings['cache_ttl']
-    
-    # Check cache
-    cached = get_cached_dns(ip, 'PTR')
-    if cached is not None:
-        return cached
-    
-    resolver = dns.resolver.Resolver()
-    resolver.nameservers = servers
-    resolver.timeout = timeout
-    resolver.lifetime = timeout
-    
+    """Reverse (PTR) lookup. Returns a list of hostnames; empty on any failure."""
+    result = _lookup(ip, 'PTR', get_dns_settings())
+    return result if isinstance(result, list) else []
+
+
+def _resolve_one(query, query_type):
     try:
-        from dns.reversename import from_address
-        rev_name = from_address(ip)
-        answers = resolver.resolve(rev_name, 'PTR')
-        results = [str(rdata.target).rstrip('.') for rdata in answers]
-        set_cached_dns(ip, 'PTR', results, cache_ttl)
-        return results
+        return {'PTR': reverse_dns(query)} if query_type == 'ip' else resolve_dns(query)
     except Exception:
-        set_cached_dns(ip, 'PTR', [], cache_ttl)
-        return []
+        return {'error': 'lookup failed'}
+
+
+def _resolve_many(queries, query_type):
+    """Resolve several names at once without exceeding MAX_DNS_THREADS in total."""
+    per_query = 1 if query_type == 'ip' else len(RECORD_TYPES)  # resolve_dns fans out per record type
+    workers = max(1, min(MAX_DNS_THREADS // per_query, get_concurrency_settings()['dns_concurrency']))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        return dict(zip(queries, pool.map(lambda q: _resolve_one(q, query_type), queries)))
+
+
+def _handle_resolve(audit_action):
+    data = json_body()
+    if not data:
+        return jsonify({'error': 'No JSON data provided'}), 400
+
+    queries = str_list(data.get('queries'))
+    query_type = data.get('type', 'domain')  # 'domain' or 'ip'
+
+    max_domains = get_dns_settings()['max_domains']
+    if len(queries) > max_domains:
+        return jsonify({'error': f'Maximum {max_domains} queries allowed'}), 400
+
+    results = _resolve_many(queries, query_type)
+    log_audit(audit_action, 'dns', None, {'query_count': len(queries), 'type': query_type})
+    return jsonify({'results': results})
 
 
 @dns_bp.route('/resolve', methods=['POST'])
 @login_required
 def api_dns_resolve():
     """Resolve DNS for domains or IPs."""
-    data = request.get_json()
-    if not data:
-        return jsonify({'error': 'No JSON data provided'}), 400
-    
-    queries = data.get('queries', [])
-    query_type = data.get('type', 'domain')  # 'domain' or 'ip'
-    
-    settings = get_dns_settings()
-    max_domains = settings['max_domains']
-    
-    if len(queries) > max_domains:
-        return jsonify({'error': f'Maximum {max_domains} queries allowed'}), 400
-    
-    results = {}
-    
-    for query in queries:
-        query = query.strip()
-        if not query:
-            continue
-        
-        if query_type == 'ip':
-            results[query] = {'PTR': reverse_dns(query)}
-        else:
-            results[query] = resolve_dns(query)
-    
-    log_audit('dns_query', 'dns', None, {'query_count': len(queries), 'type': query_type})
-    return jsonify({'results': results})
+    return _handle_resolve('dns_query')
 
 
 @dns_bp.route('/resolve-bulk', methods=['POST'])
 @login_required
 def api_dns_resolve_bulk():
-    """Resolve DNS for multiple domains concurrently."""
-    data = request.get_json()
-    if not data:
-        return jsonify({'error': 'No JSON data provided'}), 400
-    
-    queries = data.get('queries', [])
-    query_type = data.get('type', 'domain')  # 'domain' or 'ip'
-    
-    settings = get_dns_settings()
-    max_domains = settings['max_domains']
-    
-    if len(queries) > max_domains:
-        return jsonify({'error': f'Maximum {max_domains} queries allowed'}), 400
-    
-    concurrency_settings = get_concurrency_settings()
-    max_workers = concurrency_settings['dns_concurrency']
-    
-    results = {}
-    
-    def resolve_single(query):
-        query = query.strip()
-        if not query:
-            return query, None
-        if query_type == 'ip':
-            return query, {'PTR': reverse_dns(query)}
-        else:
-            return query, resolve_dns(query)
-    
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = {executor.submit(resolve_single, q): q for q in queries}
-        for future in as_completed(futures):
-            try:
-                query, result = future.result()
-                if query and result:
-                    results[query] = result
-            except Exception as e:
-                query = futures[future]
-                results[query] = {'error': str(e)}
-    
-    log_audit('dns_query_bulk', 'dns', None, {'query_count': len(queries), 'type': query_type})
-    return jsonify({'results': results})
+    """Resolve DNS for multiple domains. Same implementation as /resolve; kept for existing clients."""
+    return _handle_resolve('dns_query_bulk')

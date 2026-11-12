@@ -183,9 +183,8 @@ class TestHackerTargetSharedNsApi:
                             response = authenticated_client.post('/api/hackertarget/shared-ns',
                                                                  json={'value': 'ns1.example.com'})
                             assert response.status_code == 200
-                            # Check that API key was included in URL
-                            call_url = mock_get.call_args[0][0]
-                            assert 'apikey=test-key' in call_url
+                            # The key travels as a query parameter, not inside a hand-built URL
+                            assert mock_get.call_args.kwargs['params']['apikey'] == 'test-key'
     
     def test_hackertarget_shared_ns_logs_audit(self, authenticated_client, mock_hackertarget_response):
         """Test that queries are logged to audit."""

@@ -10,6 +10,7 @@ from admin import (
     get_concurrency_settings, log_audit
 )
 from auth import login_required
+from http_utils import json_body, str_field, str_list
 
 
 whois_bp = Blueprint('whois', __name__, url_prefix='/api/whois')
@@ -19,11 +20,11 @@ whois_bp = Blueprint('whois', __name__, url_prefix='/api/whois')
 @login_required
 def api_whois_resolve():
     """Resolve WHOIS for a domain with caching."""
-    data = request.get_json()
+    data = json_body()
     if not data:
         return jsonify({'error': 'No JSON data provided'}), 400
     
-    domain = data.get('domain', '').strip()
+    domain = str_field(data, 'domain')
     if not domain:
         return jsonify({'error': 'Domain is required'}), 400
     
@@ -169,11 +170,11 @@ def api_whois_resolve():
 @login_required
 def api_whois_resolve_bulk():
     """Resolve WHOIS for multiple domains concurrently with caching."""
-    data = request.get_json()
+    data = json_body()
     if not data:
         return jsonify({'error': 'No JSON data provided'}), 400
     
-    domains = data.get('domains', [])
+    domains = str_list(data.get('domains'))
     if not domains:
         return jsonify({'error': 'Domains list is required'}), 400
     

@@ -4,43 +4,16 @@ Security module for SSRF protection and URL validation.
 
 import ipaddress
 import socket
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urljoin
 import requests
 
 
-# Private/reserved IPv4 ranges that should be blocked
-BLOCKED_IP_RANGES = [
-    ipaddress.ip_network('0.0.0.0/8'),        # "This" network
-    ipaddress.ip_network('10.0.0.0/8'),       # Private-Use
-    ipaddress.ip_network('100.64.0.0/10'),    # Shared Address Space (CGN)
-    ipaddress.ip_network('127.0.0.0/8'),      # Loopback
-    ipaddress.ip_network('169.254.0.0/16'),   # Link-Local (AWS metadata endpoint)
-    ipaddress.ip_network('172.16.0.0/12'),    # Private-Use
-    ipaddress.ip_network('192.0.0.0/24'),     # IETF Protocol Assignments
-    ipaddress.ip_network('192.0.2.0/24'),     # Documentation (TEST-NET-1)
-    ipaddress.ip_network('192.88.99.0/24'),   # 6to4 Relay Anycast
-    ipaddress.ip_network('192.168.0.0/16'),   # Private-Use
-    ipaddress.ip_network('198.18.0.0/15'),    # Benchmarking
-    ipaddress.ip_network('198.51.100.0/24'),  # Documentation (TEST-NET-2)
-    ipaddress.ip_network('203.0.113.0/24'),   # Documentation (TEST-NET-3)
-    ipaddress.ip_network('224.0.0.0/4'),      # Multicast
-    ipaddress.ip_network('240.0.0.0/4'),      # Reserved for Future Use
-    ipaddress.ip_network('255.255.255.255/32'),  # Limited Broadcast
-]
-
-# Private/reserved IPv6 ranges that should be blocked
-BLOCKED_IPV6_RANGES = [
-    ipaddress.ip_network('::1/128'),           # Loopback
-    ipaddress.ip_network('::/128'),            # Unspecified
-    ipaddress.ip_network('fc00::/7'),          # Unique Local (RFC 4193) — covers fc00::/8 and fd00::/8
-    ipaddress.ip_network('fe80::/10'),         # Link-Local
-    ipaddress.ip_network('ff00::/8'),          # Multicast
-    ipaddress.ip_network('2001:db8::/32'),     # Documentation (TEST-NET)
-    ipaddress.ip_network('100::/64'),          # Discard (RFC 6666)
-    ipaddress.ip_network('64:ff9b::/96'),      # IPv4/IPv6 Translation (RFC 6052)
-    ipaddress.ip_network('64:ff9b:1::/48'),    # IPv4/IPv6 Translation (RFC 8215)
-    ipaddress.ip_network('2001::/23'),         # IETF Protocol Assignments (covers Teredo 2001::/32 etc.)
-    ipaddress.ip_network('2002::/16'),         # 6to4 — encodes IPv4 address in prefix; many encode private IPs
+# Globally-routable IPv6 prefixes that embed an IPv4 address, which could be a private one.
+_IPV6_EMBEDS_IPV4 = [
+    ipaddress.ip_network('64:ff9b::/96'),    # NAT64 (RFC 6052)
+    ipaddress.ip_network('64:ff9b:1::/48'),  # NAT64 local use (RFC 8215)
+    ipaddress.ip_network('2002::/16'),       # 6to4
+    ipaddress.ip_network('::/96'),           # deprecated IPv4-compatible (::127.0.0.1)
 ]
 
 # Default max URL fetch size (10MB), configurable via admin
@@ -49,20 +22,19 @@ MAX_REDIRECTS = 3
 
 
 def is_ip_blocked(ip_str):
-    """Check if an IP address (IPv4 or IPv6) is in a blocked range."""
+    """True unless the address is a globally routable unicast address."""
     try:
         ip = ipaddress.ip_address(ip_str)
-        if ip.version == 6:
-            for network in BLOCKED_IPV6_RANGES:
-                if ip in network:
-                    return True
-        else:
-            for network in BLOCKED_IP_RANGES:
-                if ip in network:
-                    return True
-        return False
     except ValueError:
         return True  # Invalid IP, block it
+    if ip.version == 6:
+        if ip.ipv4_mapped:  # ::ffff:127.0.0.1 reaches 127.0.0.1
+            ip = ip.ipv4_mapped
+        elif any(ip in net for net in _IPV6_EMBEDS_IPV4):
+            return True
+    # ipaddress tracks the IANA special-purpose registries, so this covers loopback,
+    # private, link-local (cloud metadata), CGN, documentation and reserved ranges.
+    return not ip.is_global or ip.is_multicast
 
 
 def validate_url_for_ssrf(url):
@@ -175,12 +147,7 @@ def safe_fetch_url(url, max_size=None):
             if not redirect_url:
                 raise ValueError("Redirect without Location header")
             
-            # Handle relative redirects
-            if not redirect_url.startswith(('http://', 'https://')):
-                parsed = urlparse(current_url)
-                redirect_url = f"{parsed.scheme}://{parsed.netloc}{redirect_url}"
-            
-            current_url = redirect_url
+            current_url = urljoin(current_url, redirect_url)  # handles relative Location values
             continue
         
         # Check response status
@@ -192,11 +159,12 @@ def safe_fetch_url(url, max_size=None):
             raise ValueError(f"Response too large: {int(content_length)} bytes (max {max_size})")
         
         # Stream and read with size limit
-        content = b''
+        content = bytearray()
         for chunk in response.iter_content(chunk_size=8192):
             content += chunk
             if len(content) > max_size:
                 raise ValueError(f"Response exceeded maximum size of {max_size} bytes")
+        content = bytes(content)
         
         content_type = response.headers.get('Content-Type', '').lower()
         return content, content_type

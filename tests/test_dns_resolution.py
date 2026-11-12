@@ -410,7 +410,7 @@ class TestDNSErrorHandling:
             
             assert isinstance(results['A'], dict)
             assert 'error' in results['A']
-            assert 'Connection refused' in results['A']['error']
+            assert results['A']['error'] == 'lookup failed'  # raw exception text is not returned
     
     def test_reverse_dns_invalid_ip_returns_empty(self, test_db, mock_dns_settings):
         """Test reverse DNS with invalid IP returns empty list."""
@@ -706,8 +706,8 @@ class TestDNSCachingBehavior:
         cached = admin.get_cached_dns('192.168.1.1', 'PTR')
         assert cached == ['server.example.com']
     
-    def test_reverse_dns_caches_empty_on_failure(self, test_db, mock_dns_settings):
-        """Test that failed reverse DNS caches empty result."""
+    def test_reverse_dns_does_not_cache_failures(self, test_db, mock_dns_settings):
+        """A failed reverse lookup (timeout, resolver error) must NOT be cached as 'no PTR'."""
         from routes import dns as dns_module
         import admin
         import dns.resolver
@@ -722,9 +722,8 @@ class TestDNSCachingBehavior:
                     mock_from_addr.return_value = '1.2.3.10.in-addr.arpa.'
                     dns_module.reverse_dns('10.3.2.1')
         
-        # Empty result should be cached
         cached = admin.get_cached_dns('10.3.2.1', 'PTR')
-        assert cached == []
+        assert cached is None
     
     def test_dns_cache_case_insensitive(self, test_db):
         """Test that DNS cache queries are case-insensitive."""

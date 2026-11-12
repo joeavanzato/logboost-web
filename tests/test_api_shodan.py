@@ -881,7 +881,7 @@ class TestShodanResolveEdgeCases:
         
         assert response.status_code == 500
         data = json.loads(response.data)
-        assert 'Unexpected error' in data['error']
+        assert 'Internal error (ref ' in data['error']
     
     def test_shodan_resolve_domain_general_exception(self, authenticated_client, mock_shodan_api):
         """Test handling of non-APIError exceptions in domain lookup."""
@@ -899,7 +899,7 @@ class TestShodanResolveEdgeCases:
         
         assert response.status_code == 500
         data = json.loads(response.data)
-        assert 'Connection timeout' in data['error']
+        assert 'Internal error (ref ' in data['error']
     
     def test_shodan_resolve_domain_reraises_other_api_errors(self, authenticated_client, mock_shodan_api):
         """Test that domain lookup re-raises non-'No information available' errors."""
@@ -1004,7 +1004,7 @@ class TestShodanPivotEdgeCases:
         
         assert response.status_code == 500
         data = json.loads(response.data)
-        assert 'Network error' in data['error']
+        assert 'Internal error (ref ' in data['error']
     
     def test_shodan_pivot_no_matches(self, authenticated_client, mock_shodan_api):
         """Test handling of empty results."""
@@ -1073,7 +1073,7 @@ class TestShodanPivotJarmEdgeCases:
         
         assert response.status_code == 500
         data = json.loads(response.data)
-        assert 'Socket timeout' in data['error']
+        assert 'Internal error (ref ' in data['error']
     
     def test_shodan_pivot_jarm_no_matches(self, authenticated_client, valid_jarm, mock_shodan_api):
         """Test handling of empty results."""

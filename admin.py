@@ -22,6 +22,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from flask import Blueprint, render_template, request, redirect, url_for, session, flash, jsonify, g, has_request_context
 from auth import login_required, admin_required
+from http_utils import internal_error
 
 # Get logger
 logger = logging.getLogger(__name__)
@@ -1163,7 +1164,7 @@ def upload_mmdb():
                 (maxmind_path / fname).unlink()
             except OSError:
                 pass
-        return jsonify({'error': f'Upload failed: {str(e)}'}), 500
+        return internal_error(e, 'Upload failed')
 
 
 @admin_bp.route('/settings/shodan', methods=['POST'])
@@ -3253,7 +3254,7 @@ def check_logboost_update():
             'checked_at': checked_at
         })
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return internal_error(e, 'LogBoost update request failed')
 
 
 @admin_bp.route('/api/setup/install-update', methods=['POST'])
@@ -3295,7 +3296,7 @@ def install_logboost_update():
 
         return jsonify({'success': True, 'path': dest_path, 'version': latest_tag})
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return internal_error(e, 'LogBoost update request failed')
 
 
 # ============================================
@@ -3524,14 +3525,14 @@ def test_feed():
         return int((time.monotonic() - started) * 1000)
 
     try:
-        resp = requests.head(url, headers=headers, timeout=timeout, allow_redirects=True)
+        resp = requests.head(url, headers=headers, timeout=timeout, allow_redirects=False)
         method = 'HEAD'
 
         if resp.status_code in (405, 501):
             range_headers = dict(headers)
             range_headers['Range'] = 'bytes=0-1023'
             resp = requests.get(url, headers=range_headers, timeout=timeout,
-                                allow_redirects=True, stream=True)
+                                allow_redirects=False, stream=True)
             try:
                 next(resp.iter_content(2048), b'')
             finally:
@@ -3549,7 +3550,9 @@ def test_feed():
             'content_type': resp.headers.get('Content-Type'),
             'elapsed_ms': _elapsed(),
             'method': method,
+            # Redirects are reported, not followed: the target has not been through the SSRF check.
             'error': None if ok else f'HTTP {resp.status_code}',
+            'redirect': resp.headers.get('Location') if resp.is_redirect else None,
         }), 200
     except requests.exceptions.Timeout:
         return jsonify({'ok': False, 'error': f'Timeout after {timeout}s',

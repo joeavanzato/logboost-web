@@ -27,14 +27,15 @@ class TestHealthCheckPathBug:
         assert data['status'] in ('ok', 'degraded')  # degraded = binary not installed
         assert 'logboost_available' in data
     
-    def test_health_check_returns_path_info(self, client, test_db):
-        """Test that health check returns path information."""
-        response = client.get('/health')
-        data = response.get_json()
-        
-        assert 'logboost_path' in data
-        assert 'maxmind_dir' in data
-        assert 'threat_db_dir' in data
+    def test_health_check_paths_only_for_admin(self, client, admin_client):
+        """Filesystem paths are returned to a logged-in admin, not to anonymous callers."""
+        anonymous = client.get('/health').get_json()
+        assert 'logboost_path' not in anonymous and 'maxmind_dir' not in anonymous
+
+        as_admin = admin_client.get('/health').get_json()
+        assert 'logboost_path' in as_admin
+        assert 'maxmind_dir' in as_admin
+        assert 'threat_db_dir' in as_admin
     
     def test_health_check_with_absolute_path_exists(self, client, test_db, tmp_path):
         """Test health check correctly detects existing absolute path binary."""

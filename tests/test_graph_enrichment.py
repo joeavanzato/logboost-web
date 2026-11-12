@@ -524,7 +524,6 @@ class TestGraphGeoApi:
         assert response.status_code == 200
         data = response.get_json()
         assert data['geo_data'] == {}
-        assert data['debug']['reason'] == 'no_ips_provided'
     
     def test_graph_geo_no_session_data(self, authenticated_client, test_db):
         """Test returns empty when no session output file."""
@@ -533,7 +532,6 @@ class TestGraphGeoApi:
         assert response.status_code == 200
         data = response.get_json()
         assert data['geo_data'] == {}
-        assert 'no_output_file' in data['debug']['reason']
     
     def test_graph_geo_returns_geo_data(self, authenticated_client, test_db, tmp_path):
         """Test successful geo data retrieval."""
@@ -592,9 +590,7 @@ class TestGraphGeoApi:
         
         assert response.status_code == 200
         data = response.get_json()
-        assert 'debug' in data
-        assert 'columns' in data['debug']
-        assert 'sample_ips_from_file' in data['debug']
+        assert 'debug' not in data  # internal file details are no longer returned
     
     def test_graph_geo_handles_missing_ip_column(self, authenticated_client, test_db, tmp_path):
         """Test handling when IP column is missing."""
@@ -613,7 +609,6 @@ class TestGraphGeoApi:
         assert response.status_code == 200
         data = response.get_json()
         assert data['geo_data'] == {}
-        assert data['debug']['error'] == 'no_ip_column_found'
     
     def test_graph_geo_handles_multiple_ips(self, authenticated_client, test_db, tmp_path):
         """Test retrieval of multiple IPs at once."""
@@ -637,109 +632,3 @@ class TestGraphGeoApi:
         assert '8.8.8.8' in data['geo_data']
         assert '1.1.1.1' in data['geo_data']
         assert '9.9.9.9' not in data['geo_data']  # Not requested
-
-
-class TestGraphDebugColumnsApi:
-    """Tests for /api/graph/debug-columns endpoint."""
-    
-    def test_debug_columns_requires_auth(self, client, test_db):
-        """Test that endpoint requires authentication."""
-        response = client.get('/api/graph/debug-columns')
-        assert response.status_code == 302
-    
-    def test_debug_columns_no_session_data(self, authenticated_client, test_db):
-        """Test returns error when no session output file."""
-        response = authenticated_client.get('/api/graph/debug-columns')
-        assert response.status_code == 200
-        data = response.get_json()
-        assert 'error' in data
-        assert 'No enrichment data' in data['error']
-    
-    def test_debug_columns_returns_column_info(self, authenticated_client, test_db, tmp_path):
-        """Test successful column info retrieval."""
-        csv_file = tmp_path / 'enriched.csv'
-        with open(csv_file, 'w', newline='') as f:
-            writer = csv.writer(f)
-            writer.writerow(['ip', 'lb_ASN', 'lb_ASN_Number', 'lb_Country', 'lb_City', 'other_col'])
-            writer.writerow(['8.8.8.8', 'Google', '15169', 'US', 'MV', 'data'])
-        
-        with authenticated_client.session_transaction() as sess:
-            sess['current_output'] = str(csv_file)
-        
-        response = authenticated_client.get('/api/graph/debug-columns')
-        
-        assert response.status_code == 200
-        data = response.get_json()
-        assert 'all_columns' in data
-        assert 'lb_columns' in data
-        assert 'detected' in data
-        assert 'sample_data' in data
-        assert 'lb_ASN' in data['lb_columns']
-        assert data['detected']['ip_col'] == 'ip'
-    
-    def test_debug_columns_detects_lb_columns(self, authenticated_client, test_db, tmp_path):
-        """Test that lb_ prefixed columns are identified."""
-        csv_file = tmp_path / 'enriched.csv'
-        with open(csv_file, 'w', newline='') as f:
-            writer = csv.writer(f)
-            writer.writerow(['ip', 'lb_ASN', 'lb_Country', 'lb_City', 'lb_TLD', 'custom_col'])
-            writer.writerow(['8.8.8.8', 'Google', 'US', 'MV', 'com', 'data'])
-        
-        with authenticated_client.session_transaction() as sess:
-            sess['current_output'] = str(csv_file)
-        
-        response = authenticated_client.get('/api/graph/debug-columns')
-        
-        assert response.status_code == 200
-        data = response.get_json()
-        assert len(data['lb_columns']) == 4
-        assert 'lb_ASN' in data['lb_columns']
-        assert 'custom_col' not in data['lb_columns']
-    
-    def test_debug_columns_returns_sample_data(self, authenticated_client, test_db, tmp_path):
-        """Test that sample data from first row is included."""
-        csv_file = tmp_path / 'enriched.csv'
-        with open(csv_file, 'w', newline='') as f:
-            writer = csv.writer(f)
-            writer.writerow(['ip', 'lb_ASN', 'lb_Country'])
-            writer.writerow(['8.8.8.8', 'Google', 'US'])
-            writer.writerow(['1.1.1.1', 'Cloudflare', 'AU'])  # Should not be in sample
-        
-        with authenticated_client.session_transaction() as sess:
-            sess['current_output'] = str(csv_file)
-        
-        response = authenticated_client.get('/api/graph/debug-columns')
-        
-        assert response.status_code == 200
-        data = response.get_json()
-        assert data['sample_data']['ip'] == '8.8.8.8'
-        assert data['sample_data']['country'] == 'US'
-    
-    def test_debug_columns_handles_file_error(self, authenticated_client, test_db):
-        """Test handling when file cannot be read."""
-        with authenticated_client.session_transaction() as sess:
-            sess['current_output'] = '/nonexistent/file.csv'
-        
-        response = authenticated_client.get('/api/graph/debug-columns')
-        
-        assert response.status_code == 200
-        data = response.get_json()
-        assert 'error' in data
-    
-    def test_debug_columns_detects_various_ip_column_names(self, authenticated_client, test_db, tmp_path):
-        """Test detection of various IP column name formats."""
-        for col_name in ['ip', 'IP', 'ip_address', 'ipaddress', 'src_ip', 'dst_ip']:
-            csv_file = tmp_path / f'enriched_{col_name}.csv'
-            with open(csv_file, 'w', newline='') as f:
-                writer = csv.writer(f)
-                writer.writerow([col_name, 'lb_Country'])
-                writer.writerow(['8.8.8.8', 'US'])
-            
-            with authenticated_client.session_transaction() as sess:
-                sess['current_output'] = str(csv_file)
-            
-            response = authenticated_client.get('/api/graph/debug-columns')
-            
-            assert response.status_code == 200
-            data = response.get_json()
-            assert data['detected']['ip_col'] == col_name, f"Failed to detect {col_name}"

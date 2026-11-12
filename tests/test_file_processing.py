@@ -358,7 +358,7 @@ class TestRunLogboost:
             success, stdout, stderr = run_logboost(['logboost'])
             
             assert success == False
-            assert 'Unexpected error' in stderr
+            assert stderr == 'LogBoost could not be started'
 
 
 class TestSessionManagement:

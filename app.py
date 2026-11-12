@@ -20,7 +20,7 @@ from pathlib import Path
 from datetime import datetime
 from functools import wraps
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from urllib.parse import urlparse
+from urllib.parse import urlparse, quote
 from flask import (
     Flask, render_template, request, jsonify, send_file,
     session, redirect, url_for, flash, Response
@@ -44,11 +44,14 @@ except ImportError:
 # Import security module
 from security import (
     is_ip_blocked, validate_url_for_ssrf, safe_fetch_url,
-    BLOCKED_IP_RANGES, DEFAULT_MAX_URL_FETCH_SIZE, MAX_REDIRECTS
+    DEFAULT_MAX_URL_FETCH_SIZE, MAX_REDIRECTS
 )
 
 # Import auth module
-from auth import login_required
+from auth import login_required, current_user
+from http_utils import (
+    json_body, str_field, str_list, is_admin, internal_error, upstream_message, upstream_detail, UpstreamError
+)
 
 # SECRET_KEY startup validation - fail fast on weak/missing keys
 _raw_key = os.environ.get('SECRET_KEY', '')
@@ -376,13 +379,6 @@ def request_entity_too_large(error):
         error=f'File too large. Maximum upload size is {MAX_UPLOAD_SIZE_MB}MB.'), 413
 
 
-# IP regex pattern
-IP_PATTERN = re.compile(
-    r'\b(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}'
-    r'(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\b'
-)
-
-
 # ============================================
 # Authentication
 # ============================================
@@ -521,8 +517,9 @@ def run_logboost(cmd: list[str]) -> tuple[bool, str, str]:
         return False, '', 'LogBoost execution timed out after 5 minutes'
     except FileNotFoundError:
         return False, '', f'LogBoost binary not found at: {get_effective_logboost_path()}'
-    except Exception as e:
-        return False, '', str(e)
+    except Exception:
+        app.logger.exception('LogBoost could not be started')
+        return False, '', 'LogBoost could not be started'
 
 
 def read_csv_paginated(
@@ -557,9 +554,10 @@ def read_csv_paginated(
                 if idx >= start_idx:
                     rows.append(row)
             
-    except Exception as e:
+    except Exception:
+        app.logger.exception('Could not read results file')
         return {
-            'error': str(e),
+            'error': 'Could not read results file',
             'headers': [],
             'rows': [],
             'total_rows': 0,
@@ -591,9 +589,10 @@ def read_csv_all(filepath: Path) -> dict:
             headers = next(reader, [])
             rows = list(reader)
             
-    except Exception as e:
+    except Exception:
+        app.logger.exception('Could not read results file')
         return {
-            'error': str(e),
+            'error': 'Could not read results file',
             'headers': [],
             'rows': [],
             'total_rows': 0
@@ -671,8 +670,11 @@ def enrich_text():
     if not text.strip():
         return render_template('partials/error.html', error='No text provided')
     
-    # Extract IPs
-    ips = extract_ips(text)
+    # Extract IPs (subprocess; raises ValueError when too large or too slow)
+    try:
+        ips = extract_ips(text)
+    except ValueError as e:
+        return render_template('partials/error.html', error=str(e))
     if not ips:
         return render_template('partials/error.html', error='No IP addresses found in the provided text')
     
@@ -715,7 +717,8 @@ def enrich_text():
     
     if not success:
         error_msg = stderr or 'LogBoost execution failed'
-        return render_template('partials/error.html', error=error_msg, command=' '.join(cmd))
+        return render_template('partials/error.html', error=error_msg,
+                               command=' '.join(cmd) if is_admin() else None)
     
     # Find output file
     output_files = list(session_output.glob('*.csv'))
@@ -729,7 +732,7 @@ def enrich_text():
     data = read_csv_all(output_file)
     data['ip_count'] = len(ips)
     data['filename'] = output_file.name
-    data['page_size'] = int(request.form.get('page_size', 50))
+    data['page_size'] = request.form.get('page_size', 50, type=int)
     
     # Add large file warning if threshold exceeded
     large_file_threshold = get_large_file_warning_threshold()
@@ -790,7 +793,7 @@ def enrich_file():
         'whois': request.form.get('whois') == 'on',
         'idb': request.form.get('idb') == 'on',
         'useti': request.form.get('useti') == 'on',
-        'dbdir': request.form.get('dbdir') or MAXMIND_DIR,
+        'dbdir': MAXMIND_DIR,
     }
     
     # Column options
@@ -833,7 +836,8 @@ def enrich_file():
     
     if not success:
         error_msg = stderr or 'LogBoost execution failed'
-        return render_template('partials/error.html', error=error_msg, command=' '.join(cmd))
+        return render_template('partials/error.html', error=error_msg,
+                               command=' '.join(cmd) if is_admin() else None)
     
     # Find output file
     output_files = list(session_output.glob('**/*.csv'))
@@ -847,7 +851,7 @@ def enrich_file():
     data = read_csv_all(output_file)
     data['filename'] = output_file.name
     data['original_filename'] = filename
-    data['page_size'] = int(request.form.get('page_size', 50))
+    data['page_size'] = request.form.get('page_size', 50, type=int)
     
     # Add large file warning if threshold exceeded
     large_file_threshold = get_large_file_warning_threshold()
@@ -874,8 +878,8 @@ def results_page():
     except ValueError:
         return render_template('partials/error.html', error='Invalid results path'), 400
 
-    page = int(request.args.get('page', 1))
-    page_size = int(request.args.get('page_size', 50))
+    page = max(1, request.args.get('page', 1, type=int))
+    page_size = max(1, min(1000, request.args.get('page_size', 50, type=int)))
 
     data = read_csv_paginated(output_path, page=page, page_size=page_size)
     data['filename'] = output_path.name
@@ -960,17 +964,19 @@ def health():
     if is_healthy and not logboost_available:
         status_text = 'degraded'
 
-    return jsonify({
+    body = {
         'status': status_text,
         'db_accessible': db_accessible,
         'logboost_available': logboost_available,
-        'logboost_path': get_effective_logboost_path(),
-        'maxmind_dir': MAXMIND_DIR,
         'maxmind_available': maxmind_available,
-        'threat_db_dir': THREAT_DB_DIR,
         'uploads_writable': uploads_writable,
         'output_writable': output_writable,
-    }), status_code
+    }
+    user = current_user()
+    if user and user['role'] == ROLE_ADMIN:  # filesystem layout is not for anonymous callers
+        body.update(logboost_path=get_effective_logboost_path(), maxmind_dir=MAXMIND_DIR,
+                    threat_db_dir=THREAT_DB_DIR)
+    return jsonify(body), status_code
 
 
 @app.route('/stats')
@@ -1315,8 +1321,9 @@ def compute_statistics(filepath: Path) -> dict:
             if whois_col:
                 stats['whois_summary']['ips_with_whois'] = stats['total_rows'] - whois_col['empty_count']
     
-    except Exception as e:
-        stats['error'] = str(e)
+    except Exception:
+        app.logger.exception('Statistics computation failed')
+        stats['error'] = 'Could not compute statistics'
     
     return stats
 
@@ -1361,307 +1368,37 @@ from admin import (
 
 
 # ========== IOC Extraction ==========
+# Implementation lives in ioc.py. Request handlers go through extract_iocs_from_text
+# below, which runs it in a subprocess with a size cap and a timeout.
 
-# Domain regex pattern - matches valid domain names
-DOMAIN_PATTERN = re.compile(
-    r'\b(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}\b'
+import ioc
+from ioc import (
+    IP_PATTERN, DOMAIN_PATTERN, IOCEXTRACT_AVAILABLE, TLDEXTRACT_AVAILABLE,
+    looks_like_filename, is_valid_domain, is_valid_public_ip, refang_domain,
+    extract_defanged_domains_direct, extract_domain_from_url,
 )
 
-# Defanged domain pattern - matches common defanging styles
-# Handles: [.] [dot] (.) (dot) {.} {dot} and variations
-DEFANGED_DOMAIN_PATTERN = re.compile(
-    r'\b([a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)'  # First label
-    r'(?:\s*[\[\(\{]\s*(?:\.|\s*dot\s*)\s*[\]\)\}]\s*'     # Defanged separator
-    r'([a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?))+',  # Subsequent labels
-    re.IGNORECASE
-)
-
-# Pattern to find and refang defanged domains directly
-DEFANG_SEPARATORS = re.compile(
-    r'\[\s*\.\s*\]|\(\s*\.\s*\)|\{\s*\.\s*\}|'  # [.] (.) {.}
-    r'\[\s*dot\s*\]|\(\s*dot\s*\)|\{\s*dot\s*\}|'  # [dot] (dot) {dot}
-    r'\s+dot\s+',  # space dot space
-    re.IGNORECASE
-)
-
-# Common false positive domains to exclude
-IOC_DOMAIN_EXCLUSIONS = {
-    'example.com', 'example.org', 'example.net',
-    'localhost.localdomain', 'schema.org', 'w3.org',
-    'googleapis.com', 'gstatic.com', 'google.com',
-    'microsoft.com', 'windows.net', 'azure.com',
-    'cloudflare.com', 'amazonaws.com', 'github.com',
-    'jquery.com', 'bootstrapcdn.com', 'cdnjs.cloudflare.com',
-    'fonts.googleapis.com', 'fonts.gstatic.com',
-}
-
-# File extensions that indicate a URL, not a domain IOC
-URL_FILE_EXTENSIONS = {'.js', '.css', '.png', '.jpg', '.jpeg', '.gif', '.svg', '.woff', '.woff2', '.ttf', '.eot'}
-
-# File extensions that are also valid TLDs - these need context-based filtering
-# These are valid country codes but commonly used as file extensions
-FILE_EXTENSION_TLDS = {
-    '.md',   # Moldova - but commonly Markdown files
-    '.py',   # Paraguay - but commonly Python files  
-    '.sh',   # Saint Helena - but commonly shell scripts
-    '.pl',   # Poland - but commonly Perl files
-    '.rs',   # Serbia - but commonly Rust files
-    '.go',   # (not a TLD but common file extension)
-    '.cc',   # Cocos Islands - but commonly C++ files
-    '.ai',   # Anguilla - but commonly Adobe Illustrator files
-    '.ps',   # Palestine - but commonly PostScript files
-    '.pm',   # Saint Pierre - but commonly Perl modules
-    '.so',   # Somalia - but commonly shared object files
-    '.do',   # Dominican Republic - but commonly config files
-    '.mo',   # Macau - but commonly gettext files
-    '.nu',   # Niue - but commonly config files
-    '.to',   # Tonga - but commonly config files  
-    '.is',   # Iceland - but commonly config files
-    '.as',   # American Samoa - but commonly ActionScript
-    '.gg',   # Guernsey - but commonly game files
-    '.fm',   # Micronesia - but commonly audio files
-    '.am',   # Armenia - but commonly Makefile
-    '.re',   # Réunion - but commonly config files
-    '.la',   # Laos - but commonly libtool files
-    '.in',   # India - but commonly Makefile.in files
-}
-
-
-def looks_like_filename(text):
-    """Check if text looks like a filename rather than a domain."""
-    if not text or '.' not in text:
-        return False
-    
-    text_lower = text.lower()
-    
-    # Check for file extension TLDs
-    for ext in FILE_EXTENSION_TLDS:
-        if text_lower.endswith(ext):
-            # Get the "name" part before the extension
-            name = text_lower[:-len(ext)]
-            
-            # If name has no dots (single label), it's likely a file
-            # e.g., "README.md" vs "sub.domain.md"
-            if '.' not in name:
-                # For ambiguous TLDs, single-label "domains" are almost always files
-                # Real domains in these TLDs usually have subdomains or are well-known
-                # e.g., "bit.ly" is real, but "script.py" is a file
-                
-                # Check for obvious filename patterns first
-                original_name = text[:-len(ext)]
-                if (original_name.isupper() or 
-                    '_' in original_name or
-                    '-' in original_name or
-                    original_name.lower() in ('readme', 'license', 'changelog', 'makefile', 
-                                               'dockerfile', 'vagrantfile', 'gemfile',
-                                               'rakefile', 'procfile', 'setup', 'config',
-                                               'index', 'main', 'app', 'test', 'spec',
-                                               'skill', 'todo', 'notes', 'script',
-                                               'build', 'run', 'start', 'init', 'install')):
-                    return True
-                
-                # For single-label + ambiguous TLD, be conservative and treat as file
-                # unless it's a very short name (2-3 chars) which might be a real domain
-                # like "t.co" or "bit.ly" patterns
-                if len(name) > 3:
-                    return True
-    
-    return False
-
-# Initialize tldextract with caching
-try:
-    import tldextract
-    # Create extractor that uses PSL for validation
-    TLD_EXTRACTOR = tldextract.TLDExtract(suffix_list_urls=None)  # Use bundled PSL
-    TLDEXTRACT_AVAILABLE = True
-except ImportError:
-    TLDEXTRACT_AVAILABLE = False
-    TLD_EXTRACTOR = None
-
-# Initialize iocextract for defanged IOC handling
-try:
-    import iocextract
-    IOCEXTRACT_AVAILABLE = True
-except ImportError:
-    IOCEXTRACT_AVAILABLE = False
-
-
-def is_valid_domain(domain):
-    """Validate domain has a valid TLD using PSL via tldextract."""
-    if not TLDEXTRACT_AVAILABLE or not TLD_EXTRACTOR:
-        # Fallback: basic validation
-        return '.' in domain and len(domain) >= 4
-    
-    try:
-        extracted = TLD_EXTRACTOR(domain)
-        # A valid domain must have both a suffix (TLD) and a domain part
-        # suffix is the public suffix (e.g., 'com', 'co.uk')
-        # domain is the registered domain name (e.g., 'google' in 'google.com')
-        return bool(extracted.suffix and extracted.domain)
-    except Exception:
-        return False
-
-
-def is_valid_public_ip(ip_str):
-    """
-    Validate that an IP address is a legitimate public (globally routable) IP.
-    
-    Filters out:
-    - Private IPs (10.x.x.x, 172.16-31.x.x, 192.168.x.x)
-    - Loopback (127.x.x.x)
-    - Link-local (169.254.x.x)
-    - Multicast (224.x.x.x - 239.x.x.x)
-    - Reserved/Documentation (0.x.x.x, 192.0.2.x, 198.51.100.x, 203.0.113.x)
-    - Broadcast (255.255.255.255)
-    - Carrier-grade NAT (100.64.x.x - 100.127.x.x)
-    """
-    try:
-        ip = ipaddress.ip_address(ip_str)
-        
-        # Check if it's a global (public) IP
-        # is_global returns True for addresses that are allocated for public networks
-        if not ip.is_global:
-            return False
-        
-        # Filter out multicast addresses (224.0.0.0 - 239.255.255.255)
-        # is_global doesn't catch these
-        if ip.is_multicast:
-            return False
-        
-        # Additional check: filter out some edge cases is_global might miss
-        # These are technically "global" but not useful as IOCs
-        
-        # Filter out 0.0.0.0/8 (current network)
-        if ip_str.startswith('0.'):
-            return False
-        
-        return True
-        
-    except (ValueError, TypeError):
-        # Invalid IP address format
-        return False
-
-
-def refang_domain(text):
-    """Refang a defanged domain string."""
-    return DEFANG_SEPARATORS.sub('.', text).lower().strip()
-
-
-def extract_defanged_domains_direct(text):
-    """Extract defanged domains using direct regex (fallback for iocextract)."""
-    domains = set()
-    
-    # Pattern to find sequences that look like defanged domains
-    # e.g., "evil[.]com", "bad[.]domain[.]org"
-    defang_pattern = re.compile(
-        r'\b([a-zA-Z0-9][a-zA-Z0-9-]*'  # Start with alphanumeric
-        r'(?:\s*[\[\(\{]\s*(?:\.|\s*dot\s*)\s*[\]\)\}]\s*'  # Defanged dot
-        r'[a-zA-Z0-9][a-zA-Z0-9-]*)+)',  # More labels
-        re.IGNORECASE
-    )
-    
-    for match in defang_pattern.finditer(text):
-        defanged = match.group(1)
-        # Refang it
-        domain = refang_domain(defanged)
-        if domain and '.' in domain:
-            domains.add(domain)
-    
-    return domains
-
-
-def extract_domain_from_url(url):
-    """Extract domain from a URL string."""
-    # Remove protocol
-    domain = url
-    if '://' in domain:
-        domain = domain.split('://', 1)[1]
-    # Remove path
-    if '/' in domain:
-        domain = domain.split('/', 1)[0]
-    # Remove port
-    if ':' in domain:
-        domain = domain.split(':', 1)[0]
-    # Remove auth
-    if '@' in domain:
-        domain = domain.split('@', 1)[1]
-    return domain.lower()
+MAX_IOC_TEXT_BYTES = 5 * 1024 * 1024  # larger inputs are rejected before any regex runs
+IOC_EXTRACT_TIMEOUT = 30              # seconds
 
 
 def extract_iocs_from_text(text):
-    """Extract IPs and domains from text, with deduplication, PSL validation, and defang support."""
-    ips = set()
-    domains = set()
-    
-    # First, try to extract defanged IOCs using iocextract
-    if IOCEXTRACT_AVAILABLE:
-        # Extract and refang IPs (handles formats like 192[.]168[.]1[.]1)
-        for ip in iocextract.extract_ipv4s(text, refang=True):
-            ips.add(ip)
-        
-        # Extract and refang URLs, then get domains from them
-        # This handles formats like hxxp://evil[.]com/path
-        for url in iocextract.extract_urls(text, refang=True):
-            domain = extract_domain_from_url(url)
-            if domain and '.' in domain:
-                # Skip if it's an IP
-                if not IP_PATTERN.match(domain):
-                    domains.add(domain)
-    
-    # Also extract defanged domains directly using our regex (as fallback)
-    # This catches cases iocextract might miss
-    defanged_domains = extract_defanged_domains_direct(text)
-    domains.update(defanged_domains)
-    
-    # Also use standard regex extraction for non-defanged IOCs
-    # (iocextract might miss some edge cases)
-    
-    # Extract IPs
-    for match in IP_PATTERN.finditer(text):
-        ips.add(match.group())
-    
-    # Extract domains
-    for match in DOMAIN_PATTERN.finditer(text):
-        domain = match.group().lower()
-        
-        # Skip if it looks like a file path or has common file extensions
-        if any(domain.endswith(ext) for ext in URL_FILE_EXTENSIONS):
-            continue
-        
-        # Skip if it's actually an IP (the domain pattern can match some IP-like strings)
-        if IP_PATTERN.match(domain):
-            continue
-        
-        domains.add(domain)
-    
-    # Validate and filter IPs - only keep public, globally routable addresses
-    valid_ips = set()
-    for ip in ips:
-        if is_valid_public_ip(ip):
-            valid_ips.add(ip)
-    
-    # Validate and filter domains
-    valid_domains = set()
-    for domain in domains:
-        # Skip common false positives
-        if domain in IOC_DOMAIN_EXCLUSIONS:
-            continue
-        
-        # Skip very short domains (likely false positives)
-        if len(domain) < 4 or '.' not in domain:
-            continue
-        
-        # Skip if it looks like a filename (e.g., README.md, script.py)
-        if looks_like_filename(domain):
-            continue
-        
-        # Validate domain has a valid TLD using PSL
-        if not is_valid_domain(domain):
-            continue
-        
-        valid_domains.add(domain)
-    
-    return list(valid_ips), list(valid_domains)
+    """Extract (ips, domains) from text in a subprocess. Raises ValueError if too large or too slow."""
+    payload = text.encode('utf-8', errors='replace')
+    if len(payload) > MAX_IOC_TEXT_BYTES:
+        raise ValueError(
+            f'Text is too large for IOC extraction ({len(payload) // (1024 * 1024)} MB; '
+            f'limit {MAX_IOC_TEXT_BYTES // (1024 * 1024)} MB).')
+    try:
+        result = subprocess.run([sys.executable, ioc.__file__], input=payload,
+                                capture_output=True, timeout=IOC_EXTRACT_TIMEOUT, check=True)
+    except subprocess.TimeoutExpired:
+        raise ValueError(f'IOC extraction timed out after {IOC_EXTRACT_TIMEOUT} seconds.')
+    except subprocess.CalledProcessError as e:
+        app.logger.error('IOC extraction failed: %s', e.stderr.decode(errors='replace')[-500:])
+        raise ValueError('IOC extraction failed.')
+    found = json.loads(result.stdout)
+    return found['ips'], found['domains']
 
 
 def fetch_url_content(url):
@@ -1717,16 +1454,16 @@ def api_ioc_extract():
     
     # Check for URL in JSON body
     if request.is_json:
-        data = request.get_json()
-        url = data.get('url', '').strip()
-        text = data.get('text', '').strip()
+        data = json_body() or {}
+        url = str_field(data, 'url')
+        text = str_field(data, 'text')
         
         if url:
             try:
                 text_content = fetch_url_content(url)
                 source = 'url'
             except requests.exceptions.RequestException as e:
-                return jsonify({'error': f'Failed to fetch URL: {str(e)}'}), 400
+                return jsonify({'error': f'Failed to fetch URL ({upstream_detail(e)})'}), 400
             except ValueError as e:
                 return jsonify({'error': str(e)}), 400
         elif text:
@@ -1752,7 +1489,7 @@ def api_ioc_extract():
                     text_content = file_bytes.decode('utf-8', errors='replace')
                     source = 'text_upload'
                 except Exception as e:
-                    return jsonify({'error': f'Failed to read file: {str(e)}'}), 400
+                    return jsonify({'error': 'Failed to read file'}), 400
     
     # Check for form data text
     elif request.form.get('text'):
@@ -1762,8 +1499,11 @@ def api_ioc_extract():
     if not text_content:
         return jsonify({'error': 'No content provided. Send URL, text, or upload a file.'}), 400
     
-    # Extract IOCs
-    ips, domains = extract_iocs_from_text(text_content)
+    # Extract IOCs (subprocess; raises ValueError when too large or too slow)
+    try:
+        ips, domains = extract_iocs_from_text(text_content)
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
     
     log_audit('ioc_extract', 'ioc', None, {
         'source': source,
@@ -1785,11 +1525,11 @@ def api_ioc_extract():
 @login_required
 def api_graph_related():
     """Find related IPs/domains from current dataset."""
-    data = request.get_json()
+    data = json_body()
     if not data:
         return jsonify({'error': 'No JSON data provided'}), 400
     
-    value = data.get('value', '').strip()
+    value = str_field(data, 'value')
     value_type = data.get('type', 'ip')  # 'ip' or 'domain'
     
     related = {
@@ -1955,7 +1695,7 @@ def api_graph_related():
                             break
     
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return internal_error(e)
     
     return jsonify(related)
 
@@ -1964,7 +1704,7 @@ def api_graph_related():
 @login_required
 def api_graph_enrich():
     """Enrich IPs on-demand using LogBoost for the graph feature."""
-    data = request.get_json()
+    data = json_body()
     if not data:
         return jsonify({'error': 'No JSON data provided'}), 400
     
@@ -2004,7 +1744,7 @@ def api_graph_enrich():
     success, stdout, stderr = run_logboost(cmd)
     
     if not success:
-        return jsonify({'error': stderr or 'LogBoost execution failed', 'command': ' '.join(cmd)}), 500
+        return jsonify({'error': stderr or 'LogBoost execution failed'}), 500
     
     # Find output file
     output_files = list(session_output.glob('*.csv'))
@@ -2069,13 +1809,12 @@ def api_graph_enrich():
                         geo_data[row_ip] = geo_info
     
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return internal_error(e)
     
     return jsonify({
         'geo_data': geo_data,
         'enriched_count': len(geo_data),
-        'total_ips': len(ips),
-        'output_file': str(output_file)
+        'total_ips': len(ips)
     })
 
 
@@ -2083,7 +1822,7 @@ def api_graph_enrich():
 @login_required
 def api_graph_enrich_idb():
     """Enrich IPs with Shodan InternetDB data (ports and tags) via LogBoost."""
-    data = request.get_json()
+    data = json_body()
     if not data:
         return jsonify({'error': 'No JSON data provided'}), 400
     
@@ -2122,7 +1861,7 @@ def api_graph_enrich_idb():
     success, stdout, stderr = run_logboost(cmd)
     
     if not success:
-        return jsonify({'error': stderr or 'LogBoost execution failed', 'command': ' '.join(cmd)}), 500
+        return jsonify({'error': stderr or 'LogBoost execution failed'}), 500
     
     # Find output file
     output_files = list(session_output.glob('*.csv'))
@@ -2171,7 +1910,7 @@ def api_graph_enrich_idb():
                         idb_data[row_ip] = idb_info
     
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return internal_error(e)
     
     log_audit('logboost_idb_query', 'logboost', None, {'ip_count': len(ips), 'enriched_count': len(idb_data)})
     return jsonify({
@@ -2185,18 +1924,18 @@ def api_graph_enrich_idb():
 @login_required
 def api_graph_geo():
     """Get geo data (ASN, Country) for IPs from current dataset."""
-    data = request.get_json()
+    data = json_body()
     if not data:
         return jsonify({'error': 'No JSON data provided'}), 400
     
     ips = data.get('ips', [])
     if not ips:
-        return jsonify({'geo_data': {}, 'debug': {'reason': 'no_ips_provided'}})
+        return jsonify({'geo_data': {}})
     
     output_file = session.get('current_output')
     if not output_file or not Path(output_file).exists():
         # Return empty results if no enrichment data available
-        return jsonify({'geo_data': {}, 'debug': {'reason': 'no_output_file', 'output_file': output_file}})
+        return jsonify({'geo_data': {}})
     
     geo_data = {}
     debug_info = {
@@ -2246,7 +1985,7 @@ def api_graph_geo():
             
             if not ip_col:
                 debug_info['error'] = 'no_ip_column_found'
-                return jsonify({'geo_data': {}, 'debug': debug_info})
+                return jsonify({'geo_data': {}})
             
             # Sample some IPs from the file to see what's there
             sample_ips = []
@@ -2302,84 +2041,16 @@ def api_graph_geo():
             debug_info['geo_data_count'] = len(geo_data)
     
     except Exception as e:
-        return jsonify({'error': str(e), 'debug': debug_info}), 500
+        return internal_error(e)
     
-    return jsonify({'geo_data': geo_data, 'debug': debug_info})
-
-
-@app.route('/api/graph/debug-columns', methods=['GET'])
-@login_required
-def api_graph_debug_columns():
-    """Debug endpoint to show available columns in current output file."""
-    output_file = session.get('current_output')
-    if not output_file or not Path(output_file).exists():
-        return jsonify({'error': 'No enrichment data available', 'output_file': output_file})
-    
-    try:
-        with open(output_file, 'r', newline='', encoding='utf-8', errors='replace') as f:
-            reader = csv.DictReader(f)
-            headers = reader.fieldnames or []
-            
-            # Find all lb_ columns
-            lb_columns = [h for h in headers if h.startswith('lb_')]
-            
-            # Find specific geo columns - LogBoost standard column names
-            ip_col = next((h for h in headers if h.lower() in ('ip', 'ip_address', 'ipaddress', 'src_ip', 'dst_ip', 'lb_ip')), None)
-            
-            asn_col = next((h for h in headers if h in ('lb_ASN', 'lb_ASN_Number')), None)
-            if not asn_col:
-                asn_col = next((h for h in headers if 'asn' in h.lower() and h.startswith('lb_')), None)
-            
-            country_col = next((h for h in headers if h == 'lb_Country'), None)
-            if not country_col:
-                country_col = next((h for h in headers if 'country' in h.lower() and h.startswith('lb_') and 'whois' not in h.lower()), None)
-            
-            city_col = next((h for h in headers if h == 'lb_City'), None)
-            if not city_col:
-                city_col = next((h for h in headers if 'city' in h.lower() and h.startswith('lb_')), None)
-            
-            org_col = next((h for h in headers if h == 'lb_IPWhois_Organization'), None)
-            if not org_col:
-                org_col = next((h for h in headers if h in ('lb_Org', 'lb_ISP')), None)
-            
-            # Get sample data from first row
-            sample_data = {}
-            for row in reader:
-                if ip_col:
-                    sample_data['ip'] = row.get(ip_col, '')
-                if asn_col:
-                    sample_data['asn'] = row.get(asn_col, '')
-                if country_col:
-                    sample_data['country'] = row.get(country_col, '')
-                if city_col:
-                    sample_data['city'] = row.get(city_col, '')
-                if org_col:
-                    sample_data['org'] = row.get(org_col, '')
-                break
-            
-            return jsonify({
-                'output_file': output_file,
-                'total_columns': len(headers),
-                'all_columns': headers,
-                'lb_columns': lb_columns,
-                'detected': {
-                    'ip_col': ip_col,
-                    'asn_col': asn_col,
-                    'country_col': country_col,
-                    'city_col': city_col,
-                    'org_col': org_col
-                },
-                'sample_data': sample_data
-            })
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+    return jsonify({'geo_data': geo_data})
 
 
 @app.route('/api/graph/save', methods=['POST'])
 @login_required
 def api_graph_save():
     """Save a graph. Creates new graph if user doesn't own the existing one."""
-    data = request.get_json()
+    data = json_body()
     if not data:
         return jsonify({'error': 'No JSON data provided'}), 400
     
@@ -2481,7 +2152,7 @@ def api_results_share():
             headers = next(reader, [])
             results_data = list(reader)
     except Exception as e:
-        return jsonify({'error': f'Failed to read results: {str(e)}'}), 500
+        return internal_error(e, 'Failed to read results')
     
     if not results_data:
         return jsonify({'error': 'No data in results'}), 400
@@ -2633,11 +2304,11 @@ def api_shodan_resolve():
     if not SHODAN_AVAILABLE:
         return jsonify({'error': 'Shodan library not installed. Run: pip install shodan'}), 500
     
-    data = request.get_json()
+    data = json_body()
     if not data:
         return jsonify({'error': 'No JSON data provided'}), 400
     
-    value = data.get('value', '').strip()
+    value = str_field(data, 'value')
     value_type = data.get('type', 'ip')  # 'ip' or 'domain'
     
     if not value:
@@ -2708,6 +2379,9 @@ def api_shodan_resolve():
                 raise
         else:
             # Query Shodan for domain (hostname search)
+            if not re.fullmatch(r'[A-Za-z0-9._-]{1,253}', value):
+                # anything else could append extra Shodan search filters
+                return jsonify({'error': 'Invalid hostname'}), 400
             try:
                 results = api.search(f'hostname:{value}', limit=100)
                 
@@ -2787,9 +2461,9 @@ def api_shodan_resolve():
                 raise
         
     except shodan.APIError as e:
-        return jsonify({'error': f'Shodan API error: {str(e)}'}), 500
+        return jsonify({'error': f'Shodan API error: {e}'}), 500
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return internal_error(e)
     finally:
         # Log after all paths
         log_audit('shodan_query', 'shodan', None, {'value_type': value_type, 'count': 1})
@@ -2802,11 +2476,11 @@ def api_shodan_pivot_jarm():
     if not SHODAN_AVAILABLE:
         return jsonify({'error': 'Shodan library not installed. Run: pip install shodan'}), 500
     
-    data = request.get_json()
+    data = json_body()
     if not data:
         return jsonify({'error': 'No JSON data provided'}), 400
     
-    jarm = data.get('jarm', '').strip()
+    jarm = str_field(data, 'jarm')
     if not jarm:
         return jsonify({'error': 'JARM fingerprint is required'}), 400
     
@@ -2874,9 +2548,9 @@ def api_shodan_pivot_jarm():
         return jsonify(result)
         
     except shodan.APIError as e:
-        return jsonify({'error': f'Shodan API error: {str(e)}'}), 500
+        return jsonify({'error': f'Shodan API error: {e}'}), 500
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return internal_error(e)
 
 
 @app.route('/api/shodan/pivot', methods=['POST'])
@@ -2886,11 +2560,11 @@ def api_shodan_pivot():
     if not SHODAN_AVAILABLE:
         return jsonify({'error': 'Shodan library not installed. Run: pip install shodan'}), 500
     
-    data = request.get_json()
+    data = json_body()
     if not data:
         return jsonify({'error': 'No JSON data provided'}), 400
     
-    query = data.get('query', '').strip()
+    query = str_field(data, 'query')
     # Normalize whitespace
     query = ' '.join(query.split())
     if not query:
@@ -2960,11 +2634,9 @@ def api_shodan_pivot():
         return jsonify(result)
         
     except shodan.APIError as e:
-        app.logger.warning("[Shodan Pivot] API Error: %s", str(e))
-        return jsonify({'error': f'Shodan API error: {str(e)}'}), 500
+        return jsonify({'error': f'Shodan API error: {e}'}), 500
     except Exception as e:
-        app.logger.error("[Shodan Pivot] Exception: %s", str(e))
-        return jsonify({'error': str(e)}), 500
+        return internal_error(e)
 
 
 # ========== CIRCL Passive DNS ==========
@@ -2989,7 +2661,7 @@ class RateLimiter:
 
 def query_circl_pdns(query_value, settings):
     """Query CIRCL Passive DNS API for a single value."""
-    url = f"https://www.circl.lu/pdns/query/{query_value}"
+    url = f"https://www.circl.lu/pdns/query/{quote(query_value, safe='')}"
     
     headers = {}
     if settings.get('disable_active_query'):
@@ -3018,18 +2690,18 @@ def query_circl_pdns(query_value, settings):
         
         return results
     except requests.exceptions.RequestException as e:
-        raise Exception(f"CIRCL API request failed: {str(e)}")
+        raise UpstreamError(upstream_message('CIRCL', e))
 
 
 @app.route('/api/circl/pdns', methods=['POST'])
 @login_required
 def api_circl_pdns():
     """Query CIRCL Passive DNS for an IP or domain."""
-    data = request.get_json()
+    data = json_body()
     if not data:
         return jsonify({'error': 'No JSON data provided'}), 400
     
-    query_value = data.get('value', '').strip().lower()
+    query_value = str_field(data, 'value').lower()
     query_type = data.get('type', 'ip').lower()  # 'ip' or 'domain'
     
     if not query_value:
@@ -3075,24 +2747,30 @@ def api_circl_pdns():
             'from_cache': False
         })
         
-    except Exception as e:
-        app.logger.warning("[CIRCL PDNS] Error: %s", str(e))
+    except UpstreamError as e:
         return jsonify({'error': str(e)}), 500
+    except Exception as e:
+        return internal_error(e)
+
+
+MAX_CIRCL_BULK_QUERIES = 100
 
 
 @app.route('/api/circl/pdns/bulk', methods=['POST'])
 @login_required
 def api_circl_pdns_bulk():
     """Query CIRCL Passive DNS for multiple IPs/domains with rate limiting and concurrency control."""
-    data = request.get_json()
+    data = json_body()
     if not data:
         return jsonify({'error': 'No JSON data provided'}), 400
     
-    queries = data.get('queries', [])
-    query_type = data.get('type', 'ip').lower()
+    queries = str_list(data.get('queries'))
+    query_type = str_field(data, 'type', 'ip').lower()
     
     if not queries:
         return jsonify({'error': 'No queries provided'}), 400
+    if len(queries) > MAX_CIRCL_BULK_QUERIES:
+        return jsonify({'error': f'Maximum {MAX_CIRCL_BULK_QUERIES} queries allowed per request'}), 400
     
     if query_type not in ['ip', 'domain']:
         return jsonify({'error': 'Invalid query type. Use "ip" or "domain"'}), 400
@@ -3126,7 +2804,7 @@ def api_circl_pdns_bulk():
             set_cached_circl_pdns(query_value, query_type, pdns_results, len(pdns_results), settings['cache_ttl'])
             return query_value, pdns_results, None, False
         except Exception as e:
-            return query_value, None, str(e), False
+            return query_value, None, str(e) if isinstance(e, UpstreamError) else 'Lookup failed', False
     
     # Use ThreadPoolExecutor for concurrent requests
     max_workers = settings.get('concurrency', 5)
@@ -3196,11 +2874,11 @@ def api_circl_pdns_download(query_value):
 @login_required
 def api_hackertarget_shared_ns():
     """Query HackerTarget for domains sharing the same nameserver."""
-    data = request.get_json()
+    data = json_body()
     if not data:
         return jsonify({'error': 'No JSON data provided'}), 400
     
-    query_value = data.get('value', '').strip().lower()
+    query_value = str_field(data, 'value').lower()
     
     if not query_value:
         return jsonify({'error': 'Domain/nameserver value is required'}), 400
@@ -3224,11 +2902,11 @@ def api_hackertarget_shared_ns():
     
     try:
         # Build URL with or without API key
-        url = f"https://api.hackertarget.com/findshareddns/?q={query_value}"
+        params = {'q': query_value}
         if settings.get('api_key'):
-            url += f"&apikey={settings['api_key']}"
-        
-        response = requests.get(url, timeout=30)
+            params['apikey'] = settings['api_key']
+
+        response = requests.get('https://api.hackertarget.com/findshareddns/', params=params, timeout=30)
         response.raise_for_status()
         
         # Parse line-delimited results
@@ -3264,11 +2942,9 @@ def api_hackertarget_shared_ns():
         })
         
     except requests.exceptions.RequestException as e:
-        app.logger.warning("[HackerTarget] Error: %s", str(e))
-        return jsonify({'error': f'HackerTarget API request failed: {str(e)}'}), 500
+        return jsonify({'error': upstream_message('HackerTarget', e)}), 500
     except Exception as e:
-        app.logger.error("[HackerTarget] Exception: %s", str(e))
-        return jsonify({'error': str(e)}), 500
+        return internal_error(e)
 
 
 # ========== ViewDNS API ==========
@@ -3288,11 +2964,11 @@ def api_viewdns_settings():
 @login_required
 def api_viewdns_reverse_mx():
     """Query ViewDNS for domains using a specific mail server."""
-    data = request.get_json()
+    data = json_body()
     if not data:
         return jsonify({'error': 'No JSON data provided'}), 400
     
-    query_value = data.get('value', '').strip().lower()
+    query_value = str_field(data, 'value').lower()
     
     if not query_value:
         return jsonify({'error': 'Mail server value is required'}), 400
@@ -3319,8 +2995,8 @@ def api_viewdns_reverse_mx():
     app.logger.debug("[ViewDNS] Querying reverse MX for %s", query_value)
     
     try:
-        url = f"https://api.viewdns.info/reversemx/?mx={query_value}&apikey={settings['api_key']}&output=json"
-        response = requests.get(url, timeout=30)
+        response = requests.get('https://api.viewdns.info/reversemx/', timeout=30,
+                                params={'mx': query_value, 'apikey': settings['api_key'], 'output': 'json'})
         response.raise_for_status()
         
         data = response.json()
@@ -3353,22 +3029,20 @@ def api_viewdns_reverse_mx():
         })
         
     except requests.exceptions.RequestException as e:
-        app.logger.warning("[ViewDNS] Error: %s", str(e))
-        return jsonify({'error': f'ViewDNS API request failed: {str(e)}'}), 500
+        return jsonify({'error': upstream_message('ViewDNS', e)}), 500
     except Exception as e:
-        app.logger.error("[ViewDNS] Exception: %s", str(e))
-        return jsonify({'error': str(e)}), 500
+        return internal_error(e)
 
 
 @app.route('/api/viewdns/reverse-ns', methods=['POST'])
 @login_required
 def api_viewdns_reverse_ns():
     """Query ViewDNS for domains using a specific nameserver."""
-    data = request.get_json()
+    data = json_body()
     if not data:
         return jsonify({'error': 'No JSON data provided'}), 400
     
-    query_value = data.get('value', '').strip().lower()
+    query_value = str_field(data, 'value').lower()
     
     if not query_value:
         return jsonify({'error': 'Nameserver value is required'}), 400
@@ -3395,8 +3069,8 @@ def api_viewdns_reverse_ns():
     app.logger.debug("[ViewDNS] Querying reverse NS for %s", query_value)
     
     try:
-        url = f"https://api.viewdns.info/reversens/?ns={query_value}&apikey={settings['api_key']}&output=json"
-        response = requests.get(url, timeout=30)
+        response = requests.get('https://api.viewdns.info/reversens/', timeout=30,
+                                params={'ns': query_value, 'apikey': settings['api_key'], 'output': 'json'})
         response.raise_for_status()
         
         data = response.json()
@@ -3430,22 +3104,20 @@ def api_viewdns_reverse_ns():
         })
         
     except requests.exceptions.RequestException as e:
-        app.logger.warning("[ViewDNS] Error: %s", str(e))
-        return jsonify({'error': f'ViewDNS API request failed: {str(e)}'}), 500
+        return jsonify({'error': upstream_message('ViewDNS', e)}), 500
     except Exception as e:
-        app.logger.error("[ViewDNS] Exception: %s", str(e))
-        return jsonify({'error': str(e)}), 500
+        return internal_error(e)
 
 
 @app.route('/api/viewdns/reverse-whois', methods=['POST'])
 @login_required
 def api_viewdns_reverse_whois():
     """Query ViewDNS for domains matching WHOIS data."""
-    data = request.get_json()
+    data = json_body()
     if not data:
         return jsonify({'error': 'No JSON data provided'}), 400
     
-    query_value = data.get('value', '').strip()
+    query_value = str_field(data, 'value')
     
     if not query_value:
         return jsonify({'error': 'Search value is required'}), 400
@@ -3472,17 +3144,8 @@ def api_viewdns_reverse_whois():
     app.logger.debug("[ViewDNS] Querying reverse WHOIS for %s", query_value)
     
     try:
-        # URL encode the query value for special characters (including @, spaces, etc)
-        import urllib.parse
-        # Use quote with safe='' to encode everything including @ symbol
-        encoded_value = urllib.parse.quote(query_value, safe='')
-        url = f"https://api.viewdns.info/reversewhois/?q={encoded_value}&apikey={settings['api_key']}&output=json"
-        
-        # Log URL with redacted API key (NEVER log the actual key)
-        safe_url = url.replace(settings['api_key'], 'REDACTED')
-        app.logger.debug("[ViewDNS] Request URL: %s", safe_url)
-        
-        response = requests.get(url, timeout=30)
+        response = requests.get('https://api.viewdns.info/reversewhois/', timeout=30,
+                                params={'q': query_value, 'apikey': settings['api_key'], 'output': 'json'})
         response.raise_for_status()
         
         data = response.json()
@@ -3514,11 +3177,9 @@ def api_viewdns_reverse_whois():
         })
         
     except requests.exceptions.RequestException as e:
-        app.logger.warning("[ViewDNS] Error: %s", str(e))
-        return jsonify({'error': f'ViewDNS API request failed: {str(e)}'}), 500
+        return jsonify({'error': upstream_message('ViewDNS', e)}), 500
     except Exception as e:
-        app.logger.error("[ViewDNS] Exception: %s", str(e), exc_info=True)
-        return jsonify({'error': str(e)}), 500
+        return internal_error(e)
 
 
 def _open_threats_db_ro():
@@ -3544,7 +3205,7 @@ def intel_sources():
         rows = conn.execute('SELECT feed_id, feed_name FROM feeds ORDER BY feed_name').fetchall()
         return jsonify({'sources': [{'id': r['feed_id'], 'name': r['feed_name']} for r in rows]})
     except sqlite3.Error as e:
-        return jsonify({'error': str(e)}), 500
+        return internal_error(e)
     finally:
         conn.close()
 
@@ -3561,7 +3222,7 @@ def intel_tags():
         rows = conn.execute('SELECT category_id, category_value FROM categories ORDER BY category_value').fetchall()
         return jsonify({'tags': [{'id': r['category_id'], 'value': r['category_value']} for r in rows]})
     except sqlite3.Error as e:
-        return jsonify({'error': str(e)}), 500
+        return internal_error(e)
     finally:
         conn.close()
 
@@ -3621,7 +3282,7 @@ def intel_iocs():
         rows = conn.execute(sql, params_with_paging).fetchall()
     except sqlite3.Error as e:
         conn.close()
-        return jsonify({'error': str(e)}), 500
+        return internal_error(e)
 
     has_more = len(rows) > limit
     rows = rows[:limit]
