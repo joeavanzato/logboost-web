@@ -6,9 +6,39 @@ on:
       - master
     tags:
       - 'v*'
+  pull_request:
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt pip-audit
+
+      - name: Audit dependencies
+        run: pip-audit -r requirements.txt
+
+      - name: Run tests
+        run: python -m pytest -q
+
+  # The image is built and pushed only after the tests and the dependency audit pass,
+  # and never for pull requests.
   build:
+    needs: test
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
 
     permissions:

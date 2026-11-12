@@ -480,7 +480,7 @@ docker compose logs logboost-web
 |--------------|-------|----------|
 | `ERROR: /data is not writable` | Volume permissions | `docker volume rm logboost-db` and restart (data lost), or fix host permissions for bind mounts |
 | `ERROR: Database directory ... not writable` | DB path permission | Check that `LOGBOOST_DB_PATH` directory exists and is writable by UID 1000 |
-| `ERROR: SSL certificate and key do not match` | Custom cert mismatch | Verify cert/key pair with `openssl x509 -noout -modulus -in cert.pem` vs `openssl rsa -noout -modulus -in key.pem` |
+| `ERROR: SSL certificate and key do not match` | Custom cert mismatch | Compare the public keys: `openssl x509 -noout -pubkey -in cert.pem` vs `openssl pkey -pubout -in key.pem` (works for RSA and ECDSA). Also raised when either file is unreadable by UID 1000 |
 | `SECRET_KEY is required` | Missing env var | Set `SECRET_KEY` in `.env` file or docker-compose.yml |
 
 ### 2. Port Already in Use

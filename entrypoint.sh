@@ -126,11 +126,13 @@ if [ ! -f /data/ssl/cert.pem ]; then
     echo "  [OK] Generated self-signed certificate valid until $EXPIRY_DATE"
 else
     # Validate that mounted cert and key match
-    CERT_MOD=$(openssl x509 -noout -modulus -in /data/ssl/cert.pem 2>/dev/null | openssl md5)
-    KEY_MOD=$(openssl rsa -noout -modulus -in /data/ssl/key.pem 2>/dev/null | openssl md5)
+    # Compare public keys: works for RSA, ECDSA and Ed25519 alike. An unreadable or
+    # unparsable file yields an empty string, which is a failure rather than a match.
+    CERT_PUB=$(openssl x509 -noout -pubkey -in /data/ssl/cert.pem 2>/dev/null || true)
+    KEY_PUB=$(openssl pkey -pubout -in /data/ssl/key.pem 2>/dev/null || true)
 
-    if [ "$CERT_MOD" != "$KEY_MOD" ]; then
-        echo "ERROR: SSL certificate and key do not match"
+    if [ -z "$CERT_PUB" ] || [ "$CERT_PUB" != "$KEY_PUB" ]; then
+        echo "ERROR: SSL certificate and key do not match (or /data/ssl/cert.pem / key.pem cannot be read)"
         exit 1
     fi
 

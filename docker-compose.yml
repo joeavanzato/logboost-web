@@ -27,7 +27,8 @@ services:
       - logboost-backups:/data/backups      # Database backups
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-fk", "https://localhost:8443/health"]
+      # $$ defers expansion to the container's shell, which has SSL_PORT in its environment
+      test: ["CMD-SHELL", "curl -fk https://localhost:$${SSL_PORT:-8443}/health || exit 1"]
       interval: 30s
       timeout: 10s
       start_period: 30s

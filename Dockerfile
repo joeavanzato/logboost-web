@@ -54,8 +54,14 @@ RUN cp /tmp/logboost_binary /app/logboost \
 # Verify binary was installed correctly
 RUN test -f /app/logboost && test -x /app/logboost
 
-# Set ownership of app directory to non-root user
-RUN chown -R logboost:logboost /app
+# Source, templates, static files and the bundled binary stay root-owned and not writable by
+# the runtime user, so a compromised app cannot rewrite its own code. Only the /app directory
+# entry itself belongs to logboost: the entrypoint replaces feed_config.json / threats.db with
+# symlinks there and LogBoost writes its log and cache files into its working directory.
+# Bytecode is compiled now because the runtime user cannot write __pycache__.
+RUN chmod -R go-w /app \
+    && chown logboost:logboost /app \
+    && python -m compileall -q /app
 
 # Create directories for uploads and output (writable by logboost user)
 # These may be overridden by volume mounts in Phase 2
