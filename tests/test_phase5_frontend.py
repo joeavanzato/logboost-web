@@ -20,8 +20,15 @@ HANDLER_PAYLOAD = "&#39;);alert(1);//"
 QUOTE_PAYLOAD = "');alert(1);//"
 
 
+WORKSPACE_SCRIPTS = ('workspace.js', 'graph.js', 'intel-browser.js')  # moved out of index.html
+
+
 def _read(name):
-    return (TEMPLATES / name).read_text(encoding='utf-8')
+    content = (TEMPLATES / name).read_text(encoding='utf-8')
+    if name == 'index.html':
+        js = TEMPLATES.parent / 'static' / 'js'
+        content += ''.join((js / script).read_text(encoding='utf-8') for script in WORKSPACE_SCRIPTS)
+    return content
 
 
 def _stored(key):

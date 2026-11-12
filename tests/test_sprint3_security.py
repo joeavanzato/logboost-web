@@ -15,6 +15,14 @@ from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 
+
+def _workspace_source():
+    """templates/index.html plus the page scripts that used to be inline in it."""
+    root = Path(__file__).parent.parent
+    parts = [root / 'templates' / 'index.html']
+    parts += [root / 'static' / 'js' / name for name in ('workspace.js', 'graph.js', 'intel-browser.js')]
+    return '\n'.join(p.read_text(encoding='utf-8') for p in parts)
+
 class TestHealthCheckPathBug:
     """Tests for /health endpoint path handling (Issue #9)."""
     
@@ -141,39 +149,34 @@ class TestXSSProtection:
     
     def test_escape_html_function_exists(self):
         """Test that escapeHtml function is defined in index.html."""
-        template_path = Path(__file__).parent.parent / 'templates' / 'index.html'
-        content = template_path.read_text(encoding='utf-8')
+        content = _workspace_source()
         
         assert 'function escapeHtml' in content
     
     def test_idb_ports_escaped(self):
         """Test that InternetDB ports are escaped in rendering."""
-        template_path = Path(__file__).parent.parent / 'templates' / 'index.html'
-        content = template_path.read_text(encoding='utf-8')
+        content = _workspace_source()
         
         # Check that idb.ports uses escapeHtml
         assert 'idb.ports.map(p => this.escapeHtml(String(p)))' in content
     
     def test_idb_tags_escaped(self):
         """Test that InternetDB tags are escaped in rendering."""
-        template_path = Path(__file__).parent.parent / 'templates' / 'index.html'
-        content = template_path.read_text(encoding='utf-8')
+        content = _workspace_source()
         
         # Check that idb.tags uses escapeHtml
         assert 'idb.tags.map(t => this.escapeHtml(String(t)))' in content
     
     def test_shodan_ports_escaped(self):
         """Test that Shodan ports are escaped in rendering."""
-        template_path = Path(__file__).parent.parent / 'templates' / 'index.html'
-        content = template_path.read_text(encoding='utf-8')
+        content = _workspace_source()
         
         # Check that Shodan ports use escapeHtml
         assert 's.ports].sort((a,b) => a-b).map(p => this.escapeHtml(String(p)))' in content
     
     def test_shodan_service_port_escaped(self):
         """Test that Shodan service port/transport are escaped."""
-        template_path = Path(__file__).parent.parent / 'templates' / 'index.html'
-        content = template_path.read_text(encoding='utf-8')
+        content = _workspace_source()
         
         # Check that service port and transport use escapeHtml
         assert 'this.escapeHtml(String(svc.port))' in content
@@ -181,24 +184,21 @@ class TestXSSProtection:
     
     def test_node_type_labels_escaped(self):
         """Test that node type labels in filters are escaped."""
-        template_path = Path(__file__).parent.parent / 'templates' / 'index.html'
-        content = template_path.read_text(encoding='utf-8')
+        content = _workspace_source()
         
         # Check filter-item-label uses escapeHtml
         assert '<span class="filter-item-label">${this.escapeHtml(type)}</span>' in content
     
     def test_search_result_type_escaped(self):
         """Test that search result type is escaped."""
-        template_path = Path(__file__).parent.parent / 'templates' / 'index.html'
-        content = template_path.read_text(encoding='utf-8')
+        content = _workspace_source()
         
         # Check search result type uses escapeHtml
         assert 'class="search-result-type">${this.escapeHtml(n.type)}' in content
     
     def test_whois_fields_escaped(self):
         """Test that WHOIS fields are escaped in rendering."""
-        template_path = Path(__file__).parent.parent / 'templates' / 'index.html'
-        content = template_path.read_text(encoding='utf-8')
+        content = _workspace_source()
         
         # Check key WHOIS fields use escapeHtml
         assert 'this.escapeHtml(w.organization)' in content
@@ -208,8 +208,7 @@ class TestXSSProtection:
     
     def test_no_unescaped_third_party_data(self):
         """Test that common third-party data patterns are escaped."""
-        template_path = Path(__file__).parent.parent / 'templates' / 'index.html'
-        content = template_path.read_text(encoding='utf-8')
+        content = _workspace_source()
         
         # These patterns should NOT appear (unescaped third-party data)
         # Note: Some of these might be in comments or strings, so this is a heuristic
@@ -229,8 +228,7 @@ class TestEscapeHtmlImplementation:
     def test_escape_html_handles_special_chars(self):
         """Test escapeHtml handles HTML special characters."""
         # This is a JavaScript function, so we test by checking the implementation
-        template_path = Path(__file__).parent.parent / 'templates' / 'index.html'
-        content = template_path.read_text(encoding='utf-8')
+        content = _workspace_source()
         
         # The escapeHtml function should use textContent approach or replace approach
         # Both are valid XSS prevention methods
@@ -240,8 +238,7 @@ class TestEscapeHtmlImplementation:
     
     def test_multiple_escape_html_definitions(self):
         """Test that escapeHtml functions are defined where needed."""
-        template_path = Path(__file__).parent.parent / 'templates' / 'index.html'
-        content = template_path.read_text(encoding='utf-8')
+        content = _workspace_source()
         
         # Count escapeHtml function definitions
         count = content.count('function escapeHtml')
