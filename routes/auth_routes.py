@@ -3,7 +3,7 @@ Authentication routes - login and logout.
 """
 
 from flask import Blueprint, request, session, redirect, url_for, flash, render_template
-from admin import get_db, verify_password, ROLE_ADMIN, log_audit, needs_setup, hash_password
+from admin import db, verify_password, ROLE_ADMIN, log_audit, needs_setup, hash_password
 
 
 auth_routes_bp = Blueprint('auth_routes', __name__)
@@ -36,22 +36,20 @@ def setup():
             return render_template('setup_admin.html', username=username)
 
         # Create admin account
-        conn = get_db()
-        cursor = conn.cursor()
-        try:
-            password_hash = hash_password(password)
-            cursor.execute(
-                'INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)',
-                (username, password_hash, ROLE_ADMIN)
-            )
-            conn.commit()
-            log_audit('setup_complete', 'user', None, {'admin_username': username}, success=True)
-            flash('Admin account created. Please log in.', 'success')
-            return redirect(url_for('auth_routes.login'))
-        except Exception as e:
-            flash(f'Failed to create account: {str(e)}', 'error')
-        finally:
-            conn.close()
+        with db() as conn:
+            cursor = conn.cursor()
+            try:
+                password_hash = hash_password(password)
+                cursor.execute(
+                    'INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)',
+                    (username, password_hash, ROLE_ADMIN)
+                )
+                conn.commit()
+                log_audit('setup_complete', 'user', None, {'admin_username': username}, success=True)
+                flash('Admin account created. Please log in.', 'success')
+                return redirect(url_for('auth_routes.login'))
+            except Exception as e:
+                flash(f'Failed to create account: {str(e)}', 'error')
 
     return render_template('setup_admin.html')
 
@@ -73,29 +71,28 @@ def login():
         username = request.form.get('username', '').strip()
         password = request.form.get('password', '')
         
-        conn = get_db()
-        cursor = conn.cursor()
-        cursor.execute('SELECT * FROM users WHERE username = ?', (username,))
-        user = cursor.fetchone()
-        conn.close()
+        with db() as conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT * FROM users WHERE username = ?', (username,))
+            user = cursor.fetchone()
         
-        if user and verify_password(password, user['password_hash']):
-            session['logged_in'] = True
-            session['username'] = username
-            session['user_id'] = user['id']
-            session['user_role'] = user['role']
+            if user and verify_password(password, user['password_hash']):
+                session['logged_in'] = True
+                session['username'] = username
+                session['user_id'] = user['id']
+                session['user_role'] = user['role']
             
-            # Log successful login
-            log_audit('login', 'user', str(user['id']), {'role': user['role']}, success=True)
+                # Log successful login
+                log_audit('login', 'user', str(user['id']), {'role': user['role']}, success=True)
             
-            # Redirect admins to admin panel, users to main app
-            if user['role'] == ROLE_ADMIN:
-                return redirect(url_for('admin.dashboard'))
-            return redirect(url_for('index'))
-        else:
-            # Log failed login attempt
-            log_audit('login_failed', 'user', None, {'attempted_username': username}, success=False, user_id=None, username=username)
-            flash('Invalid username or password', 'error')
+                # Redirect admins to admin panel, users to main app
+                if user['role'] == ROLE_ADMIN:
+                    return redirect(url_for('admin.dashboard'))
+                return redirect(url_for('index'))
+            else:
+                # Log failed login attempt
+                log_audit('login_failed', 'user', None, {'attempted_username': username}, success=False, user_id=None, username=username)
+                flash('Invalid username or password', 'error')
     
     return render_template('login.html')
 

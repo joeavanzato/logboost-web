@@ -103,7 +103,7 @@ logging.basicConfig(
 app.logger.setLevel(getattr(logging, LOG_LEVEL, logging.WARNING))
 
 # Import admin functions (but initialize after CSRF setup)
-from admin import init_admin, start_runtime, get_db, verify_password, ROLE_ADMIN, log_audit, get_effective_logboost_path
+from admin import init_admin, start_runtime, get_db, db as admin_db, verify_password, ROLE_ADMIN, log_audit, get_effective_logboost_path
 
 # ============================================
 # CSRF Configuration
@@ -929,17 +929,12 @@ def health():
         logboost_available = shutil.which(effective_binary) is not None
 
     # Check database accessibility — use try/finally to prevent connection leak
-    db_accessible = False
-    db = None
     try:
-        db = get_db()
-        db.execute("SELECT 1")
+        with admin_db() as conn:
+            conn.execute("SELECT 1")
         db_accessible = True
     except Exception:
         db_accessible = False
-    finally:
-        if db is not None:
-            db.close()
 
     # Check MaxMind databases present
     maxmind_path = Path(MAXMIND_DIR)
@@ -2623,12 +2618,8 @@ def api_get_concurrency_settings():
 
 def get_shodan_api_key():
     """Get Shodan API key from admin settings."""
-    from admin import get_db
-    db = get_db()
-    cursor = db.cursor()
-    cursor.execute("SELECT value FROM settings WHERE key = 'shodan_api_key'")
-    row = cursor.fetchone()
-    return row[0] if row else None
+    from admin import get_setting
+    return get_setting('shodan_api_key')
 
 
 @app.route('/api/shodan/resolve', methods=['POST'])
