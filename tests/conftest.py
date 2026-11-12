@@ -18,6 +18,27 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # and will sys.exit(1) if SECRET_KEY is absent or weak.
 os.environ.setdefault('SECRET_KEY', 'test-secret-key-for-pytest-minimum-32-chars')
 
+# Point every data path at a throwaway directory BEFORE the app is imported, so tests
+# can never read or write the real admin DB, threats.db, uploads or output.
+_TEST_DATA_DIR = tempfile.mkdtemp(prefix='logboost-tests-')
+os.environ['LOGBOOST_DB_PATH'] = os.path.join(_TEST_DATA_DIR, 'default.db')
+os.environ['THREAT_DB_DIR'] = _TEST_DATA_DIR
+os.environ['LOGBOOST_UPLOAD_DIR'] = os.path.join(_TEST_DATA_DIR, 'uploads')
+os.environ['LOGBOOST_OUTPUT_DIR'] = os.path.join(_TEST_DATA_DIR, 'output')
+
+
+@pytest.fixture(scope='session', autouse=True)
+def _throwaway_runtime():
+    """Schema + data dirs in the throwaway location; no scheduler or warm-up thread."""
+    import admin
+    import app as app_module
+    admin.init_db()
+    app_module.UPLOAD_FOLDER.mkdir(exist_ok=True)
+    app_module.OUTPUT_FOLDER.mkdir(exist_ok=True)
+    yield
+    import shutil
+    shutil.rmtree(_TEST_DATA_DIR, ignore_errors=True)
+
 
 @pytest.fixture(scope='function')
 def test_db(tmp_path, monkeypatch):

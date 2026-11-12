@@ -1,5 +1,5 @@
 # gunicorn.conf.py — All Gunicorn settings for LogBoost Web
-# Loaded via: gunicorn --config gunicorn.conf.py app:app
+# Loaded via: gunicorn --config gunicorn.conf.py "app:create_app()"
 
 import os
 import logging

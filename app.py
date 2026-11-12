@@ -105,7 +105,7 @@ logging.basicConfig(
 app.logger.setLevel(getattr(logging, LOG_LEVEL, logging.WARNING))
 
 # Import admin functions (but initialize after CSRF setup)
-from admin import init_admin, get_db, verify_password, ROLE_ADMIN, log_audit, get_effective_logboost_path
+from admin import init_admin, start_runtime, get_db, verify_password, ROLE_ADMIN, log_audit, get_effective_logboost_path
 
 # ============================================
 # CSRF Configuration
@@ -162,8 +162,8 @@ from routes import register_blueprints
 register_blueprints(app)
 
 # Configuration
-UPLOAD_FOLDER = Path(__file__).parent / 'uploads'
-OUTPUT_FOLDER = Path(__file__).parent / 'output'
+UPLOAD_FOLDER = Path(os.environ.get('LOGBOOST_UPLOAD_DIR') or Path(__file__).parent / 'uploads')
+OUTPUT_FOLDER = Path(os.environ.get('LOGBOOST_OUTPUT_DIR') or Path(__file__).parent / 'output')
 LOGBOOST_BINARY = os.environ.get('LOGBOOST_PATH', 'LogBoost')
 MAXMIND_DIR = os.environ.get('MAXMIND_DIR', '.')
 
@@ -326,11 +326,23 @@ def _warm_intel_caches():
         app.logger.warning('Intel: stats prime failed: %s', e)
 
 
-threading.Thread(target=_warm_intel_caches, daemon=True, name='intel-warmup').start()
+_runtime_started = False
 
 
-UPLOAD_FOLDER.mkdir(exist_ok=True)
-OUTPUT_FOLDER.mkdir(exist_ok=True)
+def create_app():
+    """Run startup side effects and return the app. Importing this module has none.
+
+    ponytail: routes stay module-level on one global app; move them to blueprints
+    if more than one app instance per process is ever needed.
+    """
+    global _runtime_started
+    if not _runtime_started:
+        _runtime_started = True
+        UPLOAD_FOLDER.mkdir(exist_ok=True)
+        OUTPUT_FOLDER.mkdir(exist_ok=True)
+        start_runtime()  # DB schema, binary override, scheduler
+        threading.Thread(target=_warm_intel_caches, daemon=True, name='intel-warmup').start()
+    return app
 
 # File extensions that LogBoost can auto-detect
 ALLOWED_EXTENSIONS = {
@@ -3689,4 +3701,4 @@ def intel_export():
 
 if __name__ == '__main__':
     debug_mode = os.environ.get('FLASK_DEBUG', 'false').lower() in ('true', '1', 'yes')
-    app.run(debug=debug_mode, host='0.0.0.0', port=5001)
+    create_app().run(debug=debug_mode, host='0.0.0.0', port=5001)

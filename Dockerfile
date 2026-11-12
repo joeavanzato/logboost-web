@@ -113,4 +113,4 @@ EXPOSE 8443
 ENTRYPOINT ["/entrypoint.sh"]
 
 # Run gunicorn with config file (NEVER python app.py — that uses Flask dev server with debug=True)
-CMD ["gunicorn", "--config", "gunicorn.conf.py", "app:app"]
+CMD ["gunicorn", "--config", "gunicorn.conf.py", "app:create_app()"]

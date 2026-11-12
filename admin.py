@@ -3569,7 +3569,12 @@ def init_admin(app, csrf=None):
         app: Flask application
         csrf: CSRFProtect instance (optional, kept for backwards compatibility)
     """
-    # Initialize database
+    # Register blueprint (pure; safe at import time)
+    app.register_blueprint(admin_bp)
+
+
+def start_runtime():
+    """Startup side effects: DB schema, binary override, scheduler. Called from app.create_app()."""
     init_db()
 
     # Resolve LogBoost binary override from settings (after DB is ready)
@@ -3581,9 +3586,6 @@ def init_admin(app, csrf=None):
             logger.info(f"LogBoost binary override active: {override_path}")
     except Exception:
         pass  # DB not ready or setting absent -- use env var default
-
-    # Register blueprint
-    app.register_blueprint(admin_bp)
 
     # Start scheduler
     scheduler.start()
