@@ -112,6 +112,7 @@ class TestPasswordHashing:
             assert admin.verify_password(password, hashed) == True
 
 
+@pytest.mark.usefixtures('admin_exists')
 class TestLoginFlow:
     """Tests for login functionality."""
     
@@ -474,6 +475,7 @@ class TestAccountCreation:
         assert user['role'] == 'admin'
 
 
+@pytest.mark.usefixtures('admin_exists')
 class TestSessionManagement:
     """Tests for session management."""
     
@@ -583,6 +585,7 @@ class TestPasswordEdgeCases:
         assert admin.verify_password('password', hashed) == False
 
 
+@pytest.mark.usefixtures('admin_exists')
 class TestLoginAuditLogging:
     """Tests for audit logging during authentication."""
     

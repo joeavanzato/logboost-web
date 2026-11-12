@@ -82,6 +82,17 @@ def app(test_db, monkeypatch):
 
 
 @pytest.fixture
+def admin_exists(test_db):
+    """An admin account exists, so /login does not redirect to first-run /setup."""
+    import admin
+    conn = admin.get_db()
+    conn.execute('INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)',
+                 ('setupadmin', admin.hash_password('setupadminpass'), 'admin'))
+    conn.commit()
+    conn.close()
+
+
+@pytest.fixture
 def client(app):
     """Create test client."""
     return app.test_client()

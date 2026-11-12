@@ -2007,10 +2007,6 @@ def execute_task(task_type: str):
         else:
             workdir = os.environ.get('LOGBOOST_WORKDIR', '.')
 
-        # Log command for debugging
-        cmd_str = ' '.join(cmd)
-        print(f"[DEBUG] Task {task_type}: {cmd_str} (cwd={workdir})", flush=True)
-
         # Execute command
         result = subprocess.run(
             cmd,

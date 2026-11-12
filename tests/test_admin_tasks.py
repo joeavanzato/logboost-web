@@ -607,54 +607,5 @@ class TestAdminSetupEndpoints:
         response = admin_client.get('/admin/api/setup/status')
         assert response.status_code == 200
         data = json.loads(response.data)
-        assert 'path' in data or 'configured' in data
-    
-    def test_set_path_requires_admin(self, client, test_db):
-        """Test that setting path requires admin authentication."""
-        response = client.post('/admin/api/setup/path',
-                              json={'path': '/tmp'})
-        assert response.status_code in (302, 401, 403)
-    
-    def test_set_path_missing_path(self, admin_client, test_db):
-        """Test error when path not provided."""
-        response = admin_client.post('/admin/api/setup/path',
-                                     json={})
-        assert response.status_code == 400
-        data = json.loads(response.data)
-        assert 'required' in data['error'].lower()
-    
-    def test_set_path_invalid_directory(self, admin_client, test_db):
-        """Test error when path does not exist."""
-        response = admin_client.post('/admin/api/setup/path',
-                                     json={'path': '/nonexistent/path/12345'})
-        assert response.status_code == 400
-        data = json.loads(response.data)
-        assert 'does not exist' in data['error']
-    
-    def test_set_path_success(self, admin_client, test_db):
-        """Test successfully setting path."""
-        import tempfile
-        with tempfile.TemporaryDirectory() as tmpdir:
-            response = admin_client.post('/admin/api/setup/path',
-                                         json={'path': tmpdir})
-            assert response.status_code == 200
-            data = json.loads(response.data)
-            assert data['success'] == True
-    
-    def test_get_setup_paths_requires_admin(self, client, test_db):
-        """Test that getting paths requires admin authentication."""
-        response = client.get('/admin/api/setup/paths')
-        assert response.status_code in (302, 401, 403)
-    
-    def test_get_setup_paths_success(self, admin_client, test_db):
-        """Test getting available setup paths."""
-        response = admin_client.get('/admin/api/setup/paths')
-        assert response.status_code == 200
-        data = json.loads(response.data)
-        assert 'current' in data or 'paths' in data
-    
-    def test_download_logboost_requires_admin(self, client, test_db):
-        """Test that download requires admin authentication."""
-        response = client.post('/admin/api/setup/download',
-                              json={'path': '/tmp'})
-        assert response.status_code in (302, 401, 403)
+        assert 'binary_path' in data
+

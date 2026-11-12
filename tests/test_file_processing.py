@@ -133,11 +133,12 @@ class TestBuildLogboostCommand:
     
     def test_basic_command(self):
         """Test building basic command with required options."""
-        from app import build_logboost_command, LOGBOOST_BINARY
+        from app import build_logboost_command
+        from admin import get_effective_logboost_path
         
         cmd = build_logboost_command('/input', '/output', {})
         
-        assert LOGBOOST_BINARY in cmd
+        assert cmd[0] == get_effective_logboost_path()
         assert '-logdir' in cmd
         assert '/input' in cmd
         assert '-outputdir' in cmd

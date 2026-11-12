@@ -219,7 +219,7 @@ class TestLoggingConfiguration:
         from pathlib import Path
         
         app_path = Path(__file__).parent.parent / 'app.py'
-        content = app_path.read_text()
+        content = app_path.read_text(encoding='utf-8')
         
         # Find print statements (but not in strings or comments)
         # This is a simplified check
@@ -237,7 +237,7 @@ class TestLoggingConfiguration:
         from pathlib import Path
         
         admin_path = Path(__file__).parent.parent / 'admin.py'
-        content = admin_path.read_text()
+        content = admin_path.read_text(encoding='utf-8')
         
         lines = content.split('\n')
         print_lines = []

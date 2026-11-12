@@ -409,9 +409,10 @@ class TestResultsPageEndpoint:
         assert response.status_code == 200
         assert b'error' in response.data.lower() or b'No results' in response.data
     
-    def test_results_page_success(self, authenticated_client, tmp_path):
+    def test_results_page_success(self, authenticated_client):
         """Test successful results page retrieval."""
-        csv_file = tmp_path / 'results.csv'
+        import app as app_module
+        csv_file = app_module.OUTPUT_FOLDER / 'results.csv'
         with open(csv_file, 'w', newline='') as f:
             writer = csv.writer(f)
             writer.writerow(['IP', 'Country'])
@@ -424,9 +425,10 @@ class TestResultsPageEndpoint:
         response = authenticated_client.get('/results/page?page=1&page_size=10')
         assert response.status_code == 200
     
-    def test_results_page_pagination(self, authenticated_client, tmp_path):
+    def test_results_page_pagination(self, authenticated_client):
         """Test results page with specific pagination."""
-        csv_file = tmp_path / 'results.csv'
+        import app as app_module
+        csv_file = app_module.OUTPUT_FOLDER / 'results.csv'
         with open(csv_file, 'w', newline='') as f:
             writer = csv.writer(f)
             writer.writerow(['IP'])

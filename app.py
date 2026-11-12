@@ -61,13 +61,11 @@ _KNOWN_WEAK_KEYS = {
     'flask-secret-key',
 }
 if not _raw_key or _raw_key.lower() in {k.lower() for k in _KNOWN_WEAK_KEYS} or len(_raw_key) < 32:
-    print(
+    sys.exit(
         "FATAL: SECRET_KEY is unset, matches a known weak default, or is shorter than "
         "32 characters. The application cannot start.\n"
-        "Generate a key: python -c \"import secrets; print(secrets.token_hex(32))\"",
-        file=sys.stderr,
+        "Generate a key: python -c \"import secrets; print(secrets.token_hex(32))\""
     )
-    sys.exit(1)
 
 app = Flask(__name__)
 app.secret_key = _raw_key
@@ -499,7 +497,6 @@ def run_logboost(cmd: list[str]) -> tuple[bool, str, str]:
     # Log exact command line for debugging
     cmd_str = ' '.join(cmd)
     app.logger.info(f"LogBoost command: {cmd_str}")
-    print(f"[DEBUG] LogBoost command: {cmd_str}", flush=True)
 
     try:
         result = subprocess.run(
