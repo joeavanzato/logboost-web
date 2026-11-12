@@ -52,6 +52,7 @@ async function loadSharedResults(shareId) {
             // A server-rendered fragment with no scripts; its data island is read by results.js
             container.innerHTML = html;
             if (window.LBResults) window.LBResults.init();
+            if (window.enrichSyncCollapse) window.enrichSyncCollapse();
         }
 
         switchTab('adhoc', false);
@@ -560,4 +561,79 @@ async function loadSharedResults(shareId) {
         document.addEventListener('scroll', hideMenu, true);
         document.addEventListener('keydown', (e) => { if (e.key === 'Escape') hideMenu(); });
     }
+})();
+
+// ================= Enrich: collapse the input once results are showing =================
+// With results on screen the form (text box, sources) shrinks to a one-line bar so the results
+// start at the top of the page. "Edit input" brings the form back as it was; "New enrichment"
+// brings it back empty. An error instead of results re-opens the form so it can be corrected.
+(function () {
+    'use strict';
+    const PANEL_IDS = ['adhoc-panel', 'upload-panel'];
+
+    function hasResults() {
+        return Boolean(document.querySelector('#results-container #results-wrapper'));
+    }
+
+    function summary(panelId) {
+        if (panelId === 'adhoc-panel') {
+            const text = (document.getElementById('adhoc-text') || {}).value || '';
+            const firstLine = text.trim().split('\n')[0] || '';
+            if (!firstLine) return 'Pasted text';
+            return 'Pasted text: ' + (firstLine.length > 90 ? firstLine.slice(0, 90) + '…' : firstLine);
+        }
+        const input = document.getElementById('file-input');
+        const file = input && input.files && input.files[0];
+        return file ? 'File: ' + file.name : 'File upload';
+    }
+
+    function setCollapsed(collapsed) {
+        PANEL_IDS.forEach(function (id) {
+            const panel = document.getElementById(id);
+            if (!panel) return;
+            panel.classList.toggle('enrich-collapsed', collapsed);
+            const label = panel.querySelector('.enrich-bar-summary');
+            if (collapsed && label) label.textContent = summary(id);
+        });
+    }
+
+    function sync() {
+        const results = hasResults();
+        document.body.classList.toggle('has-results', results);
+        setCollapsed(results);
+    }
+    window.enrichSyncCollapse = sync;
+
+    document.addEventListener('htmx:afterSwap', function (event) {
+        const target = event.detail && event.detail.target;
+        if (target && target.id === 'results-container') sync();
+    });
+
+    function focusInput() {
+        const visible = document.querySelector('.tab-panel.active');
+        const field = visible && visible.querySelector('textarea[name="text"], #drop-zone');
+        if (field) field.focus();
+    }
+
+    document.addEventListener('click', function (event) {
+        if (event.target.closest('[data-enrich-collapse]')) {
+            setCollapsed(true);
+        } else if (event.target.closest('[data-enrich-expand]')) {
+            setCollapsed(false);
+            focusInput();
+        } else if (event.target.closest('[data-enrich-new]')) {
+            const textarea = document.getElementById('adhoc-text');
+            if (textarea) {
+                textarea.value = '';
+                textarea.dispatchEvent(new Event('input', { bubbles: true }));
+            }
+            const fileInput = document.getElementById('file-input');
+            if (fileInput) {
+                fileInput.value = '';
+                fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+            setCollapsed(false);
+            focusInput();
+        }
+    });
 })();

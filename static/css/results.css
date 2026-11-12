@@ -121,3 +121,13 @@ body.drawer-open .results-wrapper.fullscreen { right: 440px; }
 dialog.stats-dialog { width: min(720px, calc(100vw - 32px)); max-height: 80vh; }
 dialog.stats-dialog[open] { display: flex; flex-direction: column; }
 .stats-dialog-body { overflow-y: auto; }
+
+/* ---------- Enrich input collapsed to a bar while results are showing ---------- */
+.enrich-bar { display: none; align-items: center; gap: 10px; padding: 9px 12px 9px 18px; }
+.enrich-bar-summary { font: 13px var(--mono); color: var(--text-3); }
+.enrich-collapsed > .enrich-bar { display: flex; }
+.enrich-collapsed > .head, .enrich-collapsed > form { display: none; }
+.enrich-hide { display: none; }
+body.has-results .tab-panel:not(#runs-panel) .enrich-hide { display: inline-flex; }
+/* Past runs keeps its list visible; there is nothing to hide there */
+#runs-panel .enrich-hide { display: none; }

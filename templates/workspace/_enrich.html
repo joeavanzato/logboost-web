@@ -8,12 +8,25 @@
     <div class="sub">Paste logs or any text, or upload a file. IP addresses are found automatically.</div>
   </div>
   <div class="actions">
+    {#- Shown only while results are on screen (body.has-results) -#}
+    <button type="button" class="btn enrich-hide" data-enrich-collapse>Hide input</button>
     <div class="seg" role="group" aria-label="Input">
       <a href="#adhoc" data-tab="adhoc">Paste</a>
       <a href="#upload" data-tab="upload">Upload file</a>
       <a href="#runs" data-tab="runs">Past runs</a>
     </div>
   </div>
+</div>
+{% endmacro %}
+
+{# What the input form shrinks to once results are showing, so they start at the top of the page. #}
+{% macro enrich_bar() %}
+<div class="card enrich-bar" role="group" aria-label="Enrichment input">
+  <span class="eyebrow">Input</span>
+  <span class="enrich-bar-summary grow ell"></span>
+  <a class="btn sm" href="#runs">Past runs</a>
+  <button type="button" class="btn sm" data-enrich-expand>Edit input</button>
+  <button type="button" class="btn sm primary" data-enrich-new>New enrichment</button>
 </div>
 {% endmacro %}
 
@@ -82,6 +95,7 @@
 
 <div id="adhoc-panel" class="tab-panel active">
   {{ enrich_head() }}
+  {{ enrich_bar() }}
   <form hx-post="/enrich/text"
         hx-target="#results-container"
         hx-indicator="#loading-indicator"
@@ -101,6 +115,7 @@
 
 <div id="upload-panel" class="tab-panel">
   {{ enrich_head() }}
+  {{ enrich_bar() }}
   <form hx-post="/enrich/file"
         hx-target="#results-container"
         hx-indicator="#loading-indicator"
